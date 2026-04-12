@@ -141,6 +141,27 @@ impl CodeGraph {
             .collect()
     }
 
+    /// Returns all edges as `(source_id, target_id, edge)` triples.
+    ///
+    /// Order is not guaranteed. This is the public equivalent of iterating
+    /// [`petgraph`] edge references directly.
+    pub fn edges(&self) -> Vec<(&str, &str, &Edge)> {
+        use petgraph::visit::EdgeRef;
+        self.graph
+            .edge_references()
+            .map(|e| {
+                let src = self.graph[e.source()].id.as_str();
+                let tgt = self.graph[e.target()].id.as_str();
+                (src, tgt, e.weight())
+            })
+            .collect()
+    }
+
+    /// Returns all nodes as references.
+    pub fn nodes(&self) -> Vec<&Node> {
+        self.graph.node_weights().collect()
+    }
+
     // -----------------------------------------------------------------------
     // Crate-internal accessors
     // -----------------------------------------------------------------------

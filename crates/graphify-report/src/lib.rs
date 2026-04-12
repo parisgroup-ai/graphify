@@ -1,1 +1,22 @@
-// Stub — implementation pending.
+pub mod csv;
+pub mod json;
+pub mod markdown;
+
+// Re-export the main write functions for convenience.
+pub use csv::{write_edges_csv, write_nodes_csv};
+pub use json::{write_analysis_json, write_graph_json};
+pub use markdown::write_report;
+
+// ---------------------------------------------------------------------------
+// Shared types
+// ---------------------------------------------------------------------------
+
+/// A community of nodes grouped by the community-detection algorithm.
+#[derive(Debug, Clone)]
+pub struct Community {
+    pub id: usize,
+    pub members: Vec<String>,
+}
+
+/// A cycle represented as an ordered list of node IDs.
+pub type Cycle = Vec<String>;
