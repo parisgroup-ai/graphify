@@ -22,6 +22,12 @@ graphify extract --config graphify.toml    # sources → graph.json per project
 graphify analyze --config graphify.toml    # metrics → analysis.json + CSV
 graphify report  --config graphify.toml    # all outputs including markdown
 
+# Query the graph
+graphify query "app.services.*" --config graphify.toml
+graphify path app.main app.services.llm --config graphify.toml
+graphify explain app.services.llm --config graphify.toml
+graphify shell --config graphify.toml
+
 # Build from source
 cargo build --release -p graphify-cli
 # Binary at target/release/graphify
@@ -98,6 +104,7 @@ For each [[project]]:
 | `crates/graphify-core/src/metrics.rs` | Betweenness, PageRank, unified scoring |
 | `crates/graphify-core/src/community.rs` | Louvain + Label Propagation |
 | `crates/graphify-core/src/cycles.rs` | Tarjan SCC + simple cycles |
+| `crates/graphify-core/src/query.rs` | QueryEngine — search, path, explain, stats |
 | `crates/graphify-extract/src/python.rs` | Python extractor (imports, defs, calls) |
 | `crates/graphify-extract/src/typescript.rs` | TypeScript extractor (imports, exports, require, calls) |
 | `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative w/ `is_package`, TS path aliases) |
@@ -127,7 +134,7 @@ For each [[project]]:
 - TS workspace aliases (`@repo/*` → `../../packages/*`) preserve the original import string as node ID when target path traverses outside the project
 - Louvain Phase 2 merges singleton communities: connected singletons → best neighbor, isolated singletons → grouped together
 - Walker warns via `eprintln!` when a project discovers ≤1 file (misconfigured `local_prefix`)
-- Tests: 150 unit + integration tests (`cargo test --workspace`)
+- Tests: 181 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 

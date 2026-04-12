@@ -28,7 +28,7 @@ updated: 2026-04-12
 | FEAT-003 | **open** | low      | 16h    | New language support (Go, Rust)                      |
 | FEAT-004 | **open** | normal   | 4h     | CI quality gates                                     |
 | FEAT-005 | **open** | high     | 16h    | Incremental builds with SHA256 cache                 |
-| FEAT-006 | **open** | high     | 16h    | Graph query interface (query, path, explain)         |
+| FEAT-006 | **done** | high     | 16h    | Graph query interface (query, path, explain)         |
 | FEAT-007 | **open** | normal   | 16h    | MCP server for graph queries                         |
 | FEAT-008 | **open** | normal   | 8h     | Edge confidence scoring                              |
 | FEAT-009 | **open** | low      | 12h    | Additional export formats (Neo4j, GraphML, Obsidian) |
