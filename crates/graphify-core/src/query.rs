@@ -209,6 +209,22 @@ impl QueryEngine {
 
         results
     }
+
+    /// Returns up to 3 node IDs that contain `input` as a case-insensitive
+    /// substring, sorted alphabetically.
+    pub fn suggest(&self, input: &str) -> Vec<String> {
+        let lower = input.to_lowercase();
+        let mut matches: Vec<String> = self
+            .graph
+            .node_ids()
+            .into_iter()
+            .filter(|id| id.to_lowercase().contains(&lower))
+            .map(|id| id.to_string())
+            .collect();
+        matches.sort();
+        matches.truncate(3);
+        matches
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -303,5 +319,31 @@ mod tests {
         let engine = build_engine();
         let results = engine.search("*", &SearchFilters::default());
         assert_eq!(results.len(), 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 3: suggest
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn suggest_substring_match() {
+        let engine = build_engine();
+        let suggestions = engine.suggest("service");
+        assert_eq!(suggestions, vec!["app.services.llm"]);
+    }
+
+    #[test]
+    fn suggest_no_match() {
+        let engine = build_engine();
+        let suggestions = engine.suggest("zzzzz");
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn suggest_caps_at_three() {
+        let engine = build_engine();
+        // "app" matches app.main, app.utils, app.services.llm (3+ nodes)
+        let suggestions = engine.suggest("app");
+        assert!(suggestions.len() <= 3, "suggest should return at most 3 results, got {}", suggestions.len());
     }
 }
