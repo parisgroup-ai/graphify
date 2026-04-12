@@ -2,21 +2,29 @@
 
 ## Last Session Summary
 
-Completed all 5 open bugs. BUG-001 (Python relative import misresolution causing false-positive cycles) was the main code fix — added `is_package` parameter to the resolver so `__init__.py` modules resolve relative imports within their own package instead of walking up one level too far. BUG-003 (cross-project summary stub) was expanded with full aggregate metrics, per-project stats, top-10 hotspots, and cross-project coupling data. BUG-002, BUG-004, BUG-005 were confirmed already fixed from prior sessions and marked done.
-
-Also set up TaskNotes with proper metadata (tags, time estimates, sprint links, design doc) and created a design doc for BUG-001.
+Brainstormed, designed, planned, and fully implemented FEAT-001: Interactive HTML Graph Visualization. The feature adds a self-contained HTML report format to Graphify that renders dependency graphs as interactive force-directed visualizations with D3.js v7. Includes SVG/Canvas auto-switch, sidebar with filters/communities/cycles/search/force controls, marching ants cycle animation, community collapse/expand, PNG export. Merged to main via feature branch.
 
 ## Current State
 
 - Branch: `main`
-- Last commit: `1d93b0d` (uncommitted changes pending from this session)
-- Pending changes: 4 code files + TaskNotes + CLAUDE.md + design doc + session brief
-- Tests: 130/130 passing (`cargo test --workspace`)
-- Known issues: none
+- Last commit: `f54f206` — `feat: interactive HTML graph visualization (FEAT-001)` (merge commit)
+- Tests: 137 passing
+- Version: 0.1.1
+- No pending unstaged changes (only `.obsidian/workspace.json` editor state)
 
 ## Open Items
 
-None. Sprint backlog is clear.
+### Open Bugs (from sprint board)
+- BUG-006: Walker excludes miss .test.ts/.spec.ts files (high, 1h)
+- BUG-007: TS workspace alias resolution mangles node IDs (critical, 3h)
+- BUG-008: Louvain community detection degenerates on sparse graphs (normal, 2h)
+- BUG-009: Walker silently produces empty graph for missing src/ (normal, 1h)
+- BUG-010: Summary JSON includes full edge list (9.6MB bloat) (low, 1h)
+
+### Backlog Features
+- FEAT-002: Architectural drift detection (normal, 8h)
+- FEAT-003: New language support — Go, Rust (low, 16h)
+- FEAT-004: CI quality gates (normal, 4h)
 
 ## Decisions Made (don't re-debate)
 
@@ -24,13 +32,15 @@ None. Sprint backlog is clear.
 - **petgraph over custom graph** — mature, Tarjan/SCC built-in
 - **Louvain over Leiden** — no mature Rust Leiden crate; Louvain sufficient for code graphs
 - **`is_package` via boolean parameter** (not file path) — clean, testable, matches Python's own import model
-- **`ProjectData` struct** for summary pipeline — carries metrics+cycles through to `write_summary` without recomputation
-- **`DiscoveredFile.is_package`** set during file discovery — knowledge flows from walker through pipeline to resolver
 - **tree-sitter per call** — Parser is not Send, so create fresh parser per extract_file call
+- **D3.js v7 vendored** (not CDN) for full offline self-containment
+- **Force-directed layout** (not hierarchical) — simpler, proven for dependency graphs
+- **SVG/Canvas auto-switch at 300 nodes** — SVG for crisp interaction, Canvas for performance
+- **`var` for GRAPHIFY_DATA** — `const` at global scope doesn't create window property
+- **Safe DOM construction** — createElement/textContent only, no innerHTML
 
 ## Suggested Next Steps
 
-1. **Commit and push** — all session work is uncommitted
-2. **Tag v0.1.0** — all known issues resolved, 130 tests pass, ready for release
-3. **Validate against real codebase** — run `graphify run` on a real multi-project repo (e.g., ToStudy monorepo) to verify BUG-001 fix eliminates false cycles
-4. **Feature work** — possible next features: visualization output (HTML/SVG), Go language support, incremental analysis (only re-extract changed files)
+1. **BUG-007** (critical) — TS workspace alias resolution mangles node IDs. Highest priority open bug.
+2. **BUG-006** (high) — Walker should also exclude `.test.ts`/`.spec.ts` files.
+3. **Version bump to 0.2.0** — FEAT-001 is a significant new capability, warrants a minor version bump.

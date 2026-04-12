@@ -23,7 +23,7 @@ updated: 2026-04-12
 
 | ID       | Status   | Priority | Est    | Title                                                |
 | -------- | -------- | -------- | ------ | ---------------------------------------------------- |
-| FEAT-001 | **open** | high     | 16h    | Interactive HTML graph visualization                 |
+| FEAT-001 | **done** | high     | 16h    | Interactive HTML graph visualization                 |
 | FEAT-002 | **open** | normal   | 8h     | Architectural drift detection                        |
 | FEAT-003 | **open** | low      | 16h    | New language support (Go, Rust)                      |
 | FEAT-004 | **open** | normal   | 4h     | CI quality gates                                     |
@@ -35,3 +35,4 @@ updated: 2026-04-12
 - [[BUG-004-placeholder-nodes-always-tagged-python]] - Already implemented: `set_default_language` in pipeline (confirmed 2026-04-12)
 - [[BUG-003-cross-project-summary-is-stub]] - Implemented full summary: per-project stats, aggregates, top hotspots, cross-deps (2026-04-12)
 - [[BUG-005-csv-nodes-missing-columns]] - Already implemented: CSV includes kind, file_path, language (confirmed 2026-04-12)
+- [[FEAT-001-interactive-html-visualization]] - Implemented: self-contained HTML with D3.js force graph, SVG/Canvas auto-switch, full explorer (2026-04-12)

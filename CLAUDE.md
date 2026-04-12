@@ -27,7 +27,7 @@ cargo build --release -p graphify-cli
 # Binary at target/release/graphify
 
 # Tests
-cargo test --workspace                     # all 130 tests
+cargo test --workspace                     # all 137 tests
 cargo test -p graphify-extract             # single crate
 ```
 
@@ -40,7 +40,7 @@ Multi-project analysis via `graphify.toml`:
 output = "./report"
 weights = [0.4, 0.2, 0.2, 0.2]  # betweenness, pagerank, in_degree, in_cycle
 exclude = ["__pycache__", "node_modules", ".git", "dist", "tests", "__tests__", ".next"]
-format = ["json", "csv", "md"]
+format = ["json", "csv", "md", "html"]
 
 [[project]]
 name = "ana-service"
@@ -57,7 +57,7 @@ Cargo workspace with 4 crates:
 |---|---|---|
 | `graphify-core` | Graph model, metrics, community detection, cycles | petgraph, serde, rand |
 | `graphify-extract` | tree-sitter AST parsing, file discovery, module resolution | tree-sitter, tree-sitter-python, tree-sitter-typescript, rayon |
-| `graphify-report` | JSON, CSV, Markdown output generation | serde_json, csv |
+| `graphify-report` | JSON, CSV, Markdown, HTML output generation | serde_json, csv |
 | `graphify-cli` | CLI (clap), config parsing, pipeline orchestration | clap, toml, rayon |
 
 ### Data flow
@@ -85,7 +85,8 @@ For each [[project]]:
         ├── graph.json (node_link_data format)
         ├── analysis.json (metrics + communities + cycles)
         ├── graph_nodes.csv / graph_edges.csv
-        └── architecture_report.md
+        ├── architecture_report.md
+        └── architecture_graph.html
 ```
 
 ### Key modules
@@ -101,6 +102,7 @@ For each [[project]]:
 | `crates/graphify-extract/src/typescript.rs` | TypeScript extractor (imports, exports, require, calls) |
 | `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative w/ `is_package`, TS path aliases) |
 | `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion + `is_package` detection |
+| `crates/graphify-report/src/html.rs` | Interactive HTML visualization (D3.js force graph, self-contained) |
 | `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline |
 
 ### Graph representation
@@ -121,7 +123,7 @@ For each [[project]]:
 - Output: one subdirectory per project under the configured output path
 - Graph serialization compatible with NetworkX `node_link_data` JSON format
 - Cross-project summary (`graphify-summary.json`) only generated when 2+ projects configured
-- Tests: 130 unit + integration tests (`cargo test --workspace`)
+- Tests: 137 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
