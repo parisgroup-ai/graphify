@@ -4,111 +4,138 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Graphify
 
-Graphify is a Python CLI tool for architectural analysis of codebases. It extracts dependencies from Python source code using tree-sitter AST parsing, builds knowledge graphs with NetworkX, and generates reports identifying architectural hotspots, circular dependencies, and community clusters. Currently targets Python codebases (primary target: ana-service from the ToStudy monorepo).
+Graphify is a Rust CLI tool for architectural analysis of codebases. It extracts dependencies from Python and TypeScript source code using tree-sitter AST parsing, builds knowledge graphs with petgraph, and generates structured reports identifying architectural hotspots, circular dependencies, and community clusters.
+
+Distributed as a standalone binary (no runtime dependencies). Targets macOS + Linux.
 
 ## Running Graphify
 
 ```bash
+# Generate config
+graphify init
+
 # Full pipeline: extract → analyze → report
-python graphify.py run --repo <path-to-python-app> --output ./report
+graphify run --config graphify.toml
 
 # Individual stages
-python graphify.py extract --repo ./app --output ./report    # imports → graph.json
-python graphify.py analyze --repo ./app --output ./report    # metrics → analysis.json
-python graphify.py report  --repo ./app --output ./report    # markdown + PNG
+graphify extract --config graphify.toml    # sources → graph.json per project
+graphify analyze --config graphify.toml    # metrics → analysis.json + CSV
+graphify report  --config graphify.toml    # all outputs including markdown
 
-# Symbol-level pipeline (imports + definitions + calls → CSV + quality report)
-python pipeline.py --target-dir <path> --output-dir ./output
-
-# Standalone analysis with community detection narrative
-python analyze.py --target-dir <path>                        # full pipeline (symbols + calls)
-python analyze.py --target-dir <path> --use-imports          # imports only
-
-# Risk scoring
-python risk_report.py --target-dir <path>
-
-# Single-file AST test
-python extractor.py <file.py>
+# Build from source
+cargo build --release -p graphify-cli
+# Binary at target/release/graphify
 ```
 
-## Dependencies
+## Configuration
 
-No requirements.txt or pyproject.toml — install manually:
+Multi-project analysis via `graphify.toml`:
 
-```bash
-# Core (required)
-pip install networkx tree-sitter tree-sitter-python matplotlib
+```toml
+[settings]
+output = "./report"
+weights = [0.4, 0.2, 0.2, 0.2]  # betweenness, pagerank, in_degree, in_cycle
+exclude = ["__pycache__", "node_modules", ".git", "dist", "tests", "__tests__", ".next"]
+format = ["json", "csv", "md"]
 
-# Community detection (Leiden preferred, Louvain fallback)
-pip install igraph leidenalg python-louvain
+[[project]]
+name = "ana-service"
+repo = "./apps/ana-service"
+lang = ["python"]
+local_prefix = "app."
 ```
-
-Tree-sitter requires a C/C++ toolchain. On macOS: `xcode-select --install`.
 
 ## Architecture
 
-There are **two parallel extraction pipelines**:
+Cargo workspace with 4 crates:
 
-1. **Imports-only** (`graphify_extract.py`): Parses `import` / `from...import` statements via tree-sitter. Used by the unified CLI `graphify.py`. Produces module-level graph with `IMPORTS` edges.
-
-2. **Full symbols** (`extractor.py` + `pipeline.py`): Extracts function/class definitions AND call sites. Produces a finer-grained graph with `defines` and `calls` edges, plus weight tracking for repeated calls. Used by `analyze.py` (default) and `risk_report.py`.
+| Crate | Role | Key deps |
+|---|---|---|
+| `graphify-core` | Graph model, metrics, community detection, cycles | petgraph, serde, rand |
+| `graphify-extract` | tree-sitter AST parsing, file discovery, module resolution | tree-sitter, tree-sitter-python, tree-sitter-typescript, rayon |
+| `graphify-report` | JSON, CSV, Markdown output generation | serde_json, csv |
+| `graphify-cli` | CLI (clap), config parsing, pipeline orchestration | clap, toml, rayon |
 
 ### Data flow
 
 ```
-Source files (.py)
-    ↓ tree-sitter AST parsing
-Extraction (graphify_extract.py OR extractor.py)
-    ↓ NetworkX DiGraph
-Analysis (graphify.py:cmd_analyze OR analyze.py)
-    ├── Centrality metrics (betweenness, PageRank, in/out degree)
-    ├── Community detection (Leiden → Louvain fallback)
-    ├── Cycle detection (strongly connected components)
-    └── Hotspot scoring
+graphify.toml (project definitions)
     ↓
-Report generation
-    ├── architecture_report.md (markdown with tables)
-    ├── analysis.json (structured metrics)
-    ├── graph_communities.png (matplotlib visualization)
-    └── CSV exports (graph_nodes.csv, graph_edges.csv)
+For each [[project]]:
+    Walker: discover files (.py, .ts, .tsx)
+        ↓ parallel via rayon
+    Extractors: tree-sitter AST → nodes + edges
+        ↓
+    Resolver: normalize module refs (Python relative, TS path aliases)
+        ↓
+    CodeGraph (petgraph DiGraph)
+        ↓
+    Analysis:
+        ├── Betweenness centrality (Brandes, sampled k=min(200,n))
+        ├── PageRank (iterative, damping=0.85)
+        ├── Community detection (Louvain + Label Propagation fallback)
+        ├── Cycle detection (Tarjan SCC + DFS simple cycles, cap 500)
+        └── Unified scoring (configurable weights)
+        ↓
+    Report generation:
+        ├── graph.json (node_link_data format)
+        ├── analysis.json (metrics + communities + cycles)
+        ├── graph_nodes.csv / graph_edges.csv
+        └── architecture_report.md
 ```
 
 ### Key modules
 
 | File | Role |
 |---|---|
-| `graphify.py` | Unified CLI with subcommands (extract, analyze, report, run) |
-| `graphify_extract.py` | Import extraction via tree-sitter, graph construction, JSON export |
-| `extractor.py` | Low-level AST extraction: `extract_symbols()` and `extract_calls()` |
-| `pipeline.py` | Full symbol pipeline: definitions + calls → graph + CSV + quality report |
-| `analyze.py` | Standalone analysis: metrics, Leiden/Louvain communities, narrative |
-| `risk_report.py` | Risk scoring: `0.4*betweenness + 0.4*in_degree + 0.2*in_cycle` |
-| `build_graph.py` | Example/reference: hardcoded ana-service imports with node metadata |
+| `crates/graphify-core/src/types.rs` | Node, Edge, Language, NodeKind, EdgeKind |
+| `crates/graphify-core/src/graph.rs` | CodeGraph — petgraph wrapper with dedup + weight increment |
+| `crates/graphify-core/src/metrics.rs` | Betweenness, PageRank, unified scoring |
+| `crates/graphify-core/src/community.rs` | Louvain + Label Propagation |
+| `crates/graphify-core/src/cycles.rs` | Tarjan SCC + simple cycles |
+| `crates/graphify-extract/src/python.rs` | Python extractor (imports, defs, calls) |
+| `crates/graphify-extract/src/typescript.rs` | TypeScript extractor (imports, exports, require, calls) |
+| `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative, TS path aliases) |
+| `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion |
+| `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline |
 
 ### Graph representation
 
-- **Nodes**: modules, functions, classes — with attributes: `file_path`, `kind`, `line`, `is_local`
-- **Edge types**: `IMPORTS` (module→module), `defines` (module→symbol), `calls` (module→symbol)
-- **Local filtering**: `is_local(node)` checks for `app.` prefix to separate project code from stdlib/external
-- **Module naming**: file paths normalized to dot notation (`app/services/llm.py` → `app.services.llm`), `__init__.py` collapsed to package name
-
-### Analysis algorithms
-
-- **Hotspot scoring**: normalized composite of betweenness + PageRank + in-degree (equal weights, /3)
-- **Risk scoring** (risk_report.py): weighted `0.4*betweenness + 0.4*in_degree + 0.2*in_cycle`
-- **Community detection**: Leiden via igraph (ModularityVertexPartition), Louvain fallback, flat fallback
-- **Cycle detection**: `nx.strongly_connected_components` (SCCs > 1 node) in graphify.py; `nx.simple_cycles` (capped at 500) in risk_report.py
-- **Betweenness**: sampled with `k=min(200, n)` for performance on large graphs
+- **Nodes**: modules, functions, classes — with attributes: `id`, `kind`, `file_path`, `language`, `line`, `is_local`
+- **Edge types**: `Imports` (module→module), `Defines` (module→symbol), `Calls` (module→symbol)
+- **Weight tracking**: repeated calls increment `Edge.weight` instead of creating duplicate edges
+- **Module naming**: file paths normalized to dot notation (`app/services/llm.py` → `app.services.llm`), `__init__.py`/`index.ts` collapsed to parent
 
 ## Conventions
 
-- All CLI scripts use `argparse` (not click, despite scope.md mentioning it)
-- Logging via stdlib `logging` at INFO level
-- matplotlib uses `Agg` backend (no GUI required)
-- Excluded directories during file discovery: `__pycache__`, `node_modules`, `.git`, `dist`, `.next`, `tests`, `__tests__`
-- Output defaults: `report/` for graphify.py, `output/` for pipeline.py
-- Graph serialization uses `networkx.readwrite.json_graph.node_link_data`
+- CLI uses `clap` with derive macros
+- Config via `graphify.toml` (TOML format, serde Deserialize)
+- Extraction parallelized with `rayon::par_iter`
+- Each `extract_file` call creates a fresh tree-sitter Parser (Parser is not Send)
+- Excluded directories: `__pycache__`, `node_modules`, `.git`, `dist`, `tests`, `__tests__`, `.next`, `build`, `.venv`, `venv`
+- Output: one subdirectory per project under the configured output path
+- Graph serialization compatible with NetworkX `node_link_data` JSON format
+- Tests: 122 unit + integration tests (`cargo test --workspace`)
+
+## Build & Release
+
+- CI: GitHub Actions on tag push (`v*`), builds 4 targets (macOS Intel/ARM, Linux x86/ARM)
+- Install: `curl -fsSL .../install.sh | sh`
+- Static binaries for Linux (MUSL), universal binaries for macOS
+- Release binary ~3.5MB
+
+## Known Issues (open)
+
+- TS re-export (`export { foo } from './bar'`) missing Defines edge for exported symbol
+- Cross-project summary (`graphify-summary.json`) is a stub — only writes project names
+- Placeholder nodes for unresolved imports always tagged `Language::Python`
+- CSV nodes file missing `kind`, `file_path`, `language` columns
 
 ## Learning context
 
 This repo doubles as a ToStudy course workspace ("Graphify: Mapeamento Arquitetural de Codebases com IA e Knowledge Graphs"). The `.cursor/rules/` and `.claude/commands/` contain tutor personas for the course, not Graphify development instructions.
+
+## Design docs
+
+- **Spec**: `docs/superpowers/specs/2026-04-12-graphify-rust-rewrite-design.md`
+- **Plan**: `docs/superpowers/plans/2026-04-12-graphify-rust-rewrite.md`
