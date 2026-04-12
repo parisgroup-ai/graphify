@@ -125,10 +125,22 @@ For each [[project]]:
 
 ## Build & Release
 
-- Rust 2021 edition, workspace version `0.1.0`
+- Rust 2021 edition (check current version in root `Cargo.toml`)
 - CI: GitHub Actions on tag push (`v*`), builds 4 targets (macOS Intel/ARM, Linux x86/ARM)
 - Static binaries for Linux (MUSL), universal binaries for macOS
 - Release binary ~3.5MB
+
+### Version bump
+
+All crates use `version.workspace = true` — bump only `[workspace.package].version` in root `Cargo.toml`:
+```bash
+# Edit Cargo.toml, then:
+cargo build --release -p graphify-cli  # rebuilds with new version
+git add Cargo.toml Cargo.lock
+git commit -m "fix: bump version to X.Y.Z"
+git tag vX.Y.Z
+git push origin main --tags            # triggers CI release
+```
 
 ## Learning context
 
@@ -139,3 +151,9 @@ This repo doubles as a ToStudy course workspace ("Graphify: Mapeamento Arquitetu
 - **Spec**: `docs/superpowers/specs/2026-04-12-graphify-rust-rewrite-design.md`
 - **Plan**: `docs/superpowers/plans/2026-04-12-graphify-rust-rewrite.md`
 - **BUG-001 design**: `docs/plans/2026-04-12-bug-001-python-relative-import-design.md`
+
+## Task tracking
+
+- Sprint board: `docs/TaskNotes/Tasks/sprint.md`
+- Task files: `docs/TaskNotes/Tasks/BUG-*.md` (TaskNotes format with YAML frontmatter)
+- Always cross-reference task status against actual codebase — tasks may be stale
