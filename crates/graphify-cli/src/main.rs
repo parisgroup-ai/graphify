@@ -242,7 +242,11 @@ fn main() {
             }
         }
 
-        Commands::Analyze { config, output, weights } => {
+        Commands::Analyze {
+            config,
+            output,
+            weights,
+        } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
@@ -253,7 +257,13 @@ fn main() {
                 let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
-                write_analysis_json(&metrics, &communities, &cycles_for_report, graph.edge_count(), &proj_out.join("analysis.json"));
+                write_analysis_json(
+                    &metrics,
+                    &communities,
+                    &cycles_for_report,
+                    graph.edge_count(),
+                    &proj_out.join("analysis.json"),
+                );
                 write_nodes_csv(&metrics, &graph, &proj_out.join("graph_nodes.csv"));
                 write_edges_csv(&graph, &proj_out.join("graph_edges.csv"));
                 println!(
@@ -266,7 +276,12 @@ fn main() {
             }
         }
 
-        Commands::Report { config, output, weights, format } => {
+        Commands::Report {
+            config,
+            output,
+            weights,
+            format,
+        } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
@@ -344,7 +359,14 @@ fn main() {
             }
         }
 
-        Commands::Query { pattern, config, kind, sort, project, json } => {
+        Commands::Query {
+            pattern,
+            config,
+            kind,
+            sort,
+            project,
+            json,
+        } => {
             let cfg = load_config(&config);
             let projects = filter_projects(&cfg, project.as_deref());
             let multi_project = cfg.project.len() > 1;
@@ -399,7 +421,12 @@ fn main() {
                             if multi_project {
                                 println!(
                                     "  [{}] {} ({:?}) score={:.3} community={} cycle={}",
-                                    proj_name, r.node_id, r.kind, r.score, r.community_id, r.in_cycle
+                                    proj_name,
+                                    r.node_id,
+                                    r.kind,
+                                    r.score,
+                                    r.community_id,
+                                    r.in_cycle
                                 );
                             } else {
                                 println!(
@@ -413,7 +440,12 @@ fn main() {
             }
         }
 
-        Commands::Explain { node_id, config, project, json } => {
+        Commands::Explain {
+            node_id,
+            config,
+            project,
+            json,
+        } => {
             let cfg = load_config(&config);
             let projects = filter_projects(&cfg, project.as_deref());
             let multi_project = cfg.project.len() > 1;
@@ -457,7 +489,16 @@ fn main() {
             }
         }
 
-        Commands::Path { source, target, config, all, max_depth, max_paths, project, json } => {
+        Commands::Path {
+            source,
+            target,
+            config,
+            all,
+            max_depth,
+            max_paths,
+            project,
+            json,
+        } => {
             let cfg = load_config(&config);
             let projects = filter_projects(&cfg, project.as_deref());
             let multi_project = cfg.project.len() > 1;
@@ -481,9 +522,20 @@ fn main() {
                             println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
                         } else {
                             if multi_project {
-                                println!("[{}] {} path(s) from '{}' to '{}':", proj.name, paths.len(), source, target);
+                                println!(
+                                    "[{}] {} path(s) from '{}' to '{}':",
+                                    proj.name,
+                                    paths.len(),
+                                    source,
+                                    target
+                                );
                             } else {
-                                println!("{} path(s) from '{}' to '{}':", paths.len(), source, target);
+                                println!(
+                                    "{} path(s) from '{}' to '{}':",
+                                    paths.len(),
+                                    source,
+                                    target
+                                );
                             }
                             for (i, path) in paths.iter().enumerate() {
                                 print!("  {}. ", i + 1);
@@ -492,26 +544,24 @@ fn main() {
                         }
                         break;
                     }
-                } else {
-                    if let Some(path) = engine.shortest_path(&source, &target) {
-                        found = true;
-                        if json {
-                            let json_output = serde_json::json!({
-                                "source": source,
-                                "target": target,
-                                "project": if multi_project { Some(&proj.name) } else { None },
-                                "hops": path.len().saturating_sub(1),
-                                "path": path,
-                            });
-                            println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
-                        } else {
-                            if multi_project {
-                                print!("[{}] ", proj.name);
-                            }
-                            print_path(&path);
+                } else if let Some(path) = engine.shortest_path(&source, &target) {
+                    found = true;
+                    if json {
+                        let json_output = serde_json::json!({
+                            "source": source,
+                            "target": target,
+                            "project": if multi_project { Some(&proj.name) } else { None },
+                            "hops": path.len().saturating_sub(1),
+                            "path": path,
+                        });
+                        println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+                    } else {
+                        if multi_project {
+                            print!("[{}] ", proj.name);
                         }
-                        break;
+                        print_path(&path);
                     }
+                    break;
                 }
             }
 
@@ -591,10 +641,7 @@ fn resolve_output(cfg: &Config, override_path: Option<&Path>) -> PathBuf {
 fn resolve_weights(cfg: &Config, override_str: Option<&str>) -> ScoringWeights {
     // CLI --weights flag takes priority, then config [settings] weights.
     let vec: Option<Vec<f64>> = if let Some(s) = override_str {
-        let parsed: Vec<f64> = s
-            .split(',')
-            .filter_map(|v| v.trim().parse().ok())
-            .collect();
+        let parsed: Vec<f64> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
         if parsed.len() == 4 {
             Some(parsed)
         } else {
@@ -834,7 +881,11 @@ fn parse_node_kind(s: &str) -> Option<graphify_core::types::NodeKind> {
     }
 }
 
-fn print_explain_report(report: &graphify_core::query::ExplainReport, project_name: &str, multi_project: bool) {
+fn print_explain_report(
+    report: &graphify_core::query::ExplainReport,
+    project_name: &str,
+    multi_project: bool,
+) {
     println!();
     println!("═══ {} ═══", report.node_id);
     if multi_project {
@@ -845,7 +896,10 @@ fn print_explain_report(report: &graphify_core::query::ExplainReport, project_na
     println!("  Language:    {:?}", report.language);
     println!("  Community:   {}", report.community_id);
     if report.in_cycle {
-        println!("  In cycle:    yes (with: {})", report.cycle_peers.join(", "));
+        println!(
+            "  In cycle:    yes (with: {})",
+            report.cycle_peers.join(", ")
+        );
     } else {
         println!("  In cycle:    no");
     }
@@ -859,7 +913,10 @@ fn print_explain_report(report: &graphify_core::query::ExplainReport, project_na
     println!("  Out-degree:    {}", report.metrics.out_degree);
 
     println!();
-    println!("  ── Dependencies ({}) ──", report.direct_dependencies.len());
+    println!(
+        "  ── Dependencies ({}) ──",
+        report.direct_dependencies.len()
+    );
     for dep in &report.direct_dependencies {
         println!("  → {}", dep);
     }
@@ -871,12 +928,18 @@ fn print_explain_report(report: &graphify_core::query::ExplainReport, project_na
         println!("  ← {}", dep);
     }
     if report.direct_dependents.len() > max_show {
-        println!("  ... and {} more", report.direct_dependents.len() - max_show);
+        println!(
+            "  ... and {} more",
+            report.direct_dependents.len() - max_show
+        );
     }
 
     println!();
     println!("  ── Impact ──");
-    println!("  Transitive dependents: {} modules", report.transitive_dependent_count);
+    println!(
+        "  Transitive dependents: {} modules",
+        report.transitive_dependent_count
+    );
     println!();
 }
 
@@ -913,7 +976,10 @@ fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
     }
 
     println!();
-    println!("Graphify interactive shell ({} project(s) loaded)", engines.len());
+    println!(
+        "Graphify interactive shell ({} project(s) loaded)",
+        engines.len()
+    );
     println!("Type 'help' for available commands, 'exit' to quit.");
     println!();
 
@@ -957,8 +1023,12 @@ fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
                     let s = engine.stats();
                     println!(
                         "[{}] {} nodes, {} edges, {} local, {} communities, {} cycles",
-                        name, s.node_count, s.edge_count, s.local_node_count,
-                        s.community_count, s.cycle_count
+                        name,
+                        s.node_count,
+                        s.edge_count,
+                        s.local_node_count,
+                        s.community_count,
+                        s.cycle_count
                     );
                 }
             }
@@ -980,10 +1050,7 @@ fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
                                         name, r.node_id, r.kind, r.score
                                     );
                                 } else {
-                                    println!(
-                                        "  {} ({:?}) score={:.3}",
-                                        r.node_id, r.kind, r.score
-                                    );
+                                    println!("  {} ({:?}) score={:.3}", r.node_id, r.kind, r.score);
                                 }
                             }
                         }
@@ -1044,7 +1111,10 @@ fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
             }
 
             _ => {
-                println!("Unknown command '{}'. Type 'help' for available commands.", cmd);
+                println!(
+                    "Unknown command '{}'. Type 'help' for available commands.",
+                    cmd
+                );
             }
         }
 
@@ -1060,7 +1130,7 @@ fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
 // ---------------------------------------------------------------------------
 
 fn assign_community_ids(
-    metrics: &mut Vec<graphify_core::metrics::NodeMetrics>,
+    metrics: &mut [graphify_core::metrics::NodeMetrics],
     communities: &[graphify_core::community::Community],
 ) {
     // Build a reverse map: node_id → community_id.
@@ -1094,7 +1164,13 @@ fn write_all_outputs(
         match fmt.as_str() {
             "json" => {
                 write_graph_json(graph, &out_dir.join("graph.json"));
-                write_analysis_json(metrics, communities, cycles, graph.edge_count(), &out_dir.join("analysis.json"));
+                write_analysis_json(
+                    metrics,
+                    communities,
+                    cycles,
+                    graph.edge_count(),
+                    &out_dir.join("analysis.json"),
+                );
             }
             "csv" => {
                 write_nodes_csv(metrics, graph, &out_dir.join("graph_nodes.csv"));
@@ -1151,12 +1227,20 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
             let edge_count = p.graph.edge_count();
             let cycle_count = p.cycles.len();
             // Include the top hotspot (highest-scoring node) per project.
-            let top_hotspot = p.metrics.iter()
-                .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|m| serde_json::json!({
-                    "id": m.id,
-                    "score": (m.score * 1000.0).round() / 1000.0,
-                }));
+            let top_hotspot = p
+                .metrics
+                .iter()
+                .max_by(|a, b| {
+                    a.score
+                        .partial_cmp(&b.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|m| {
+                    serde_json::json!({
+                        "id": m.id,
+                        "score": (m.score * 1000.0).round() / 1000.0,
+                    })
+                });
             serde_json::json!({
                 "name": p.name,
                 "nodes": node_count,
@@ -1177,7 +1261,11 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
         .iter()
         .flat_map(|p| p.metrics.iter().map(move |m| (p.name.as_str(), m)))
         .collect();
-    all_hotspots.sort_by(|a, b| b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal));
+    all_hotspots.sort_by(|a, b| {
+        b.1.score
+            .partial_cmp(&a.1.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     all_hotspots.truncate(10);
     let top_hotspots: Vec<serde_json::Value> = all_hotspots
         .iter()
@@ -1268,7 +1356,11 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
 
     let total_cross_edges: usize = cross_dependencies
         .iter()
-        .filter_map(|d| d.get("edge_count").and_then(|e| e.as_u64()).map(|n| n as usize))
+        .filter_map(|d| {
+            d.get("edge_count")
+                .and_then(|e| e.as_u64())
+                .map(|n| n as usize)
+        })
         .sum();
 
     // --- Shared modules ------------------------------------------------------

@@ -213,12 +213,10 @@ fn resolve_python_relative(raw: &str, from_module: &str, is_package: bool) -> St
     // Append the suffix (if any).
     if suffix.is_empty() {
         parts.join(".")
+    } else if parts.is_empty() {
+        suffix.to_owned()
     } else {
-        if parts.is_empty() {
-            suffix.to_owned()
-        } else {
-            format!("{}.{}", parts.join("."), suffix)
-        }
+        format!("{}.{}", parts.join("."), suffix)
     }
 }
 
@@ -241,18 +239,17 @@ fn resolve_python_relative(raw: &str, from_module: &str, is_package: bool) -> St
 /// preserved as the node identifier rather than producing a mangled dot-notation
 /// name.
 fn apply_ts_alias(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String> {
-    let alias_prefix = alias_pat.strip_suffix("/*").or_else(|| alias_pat.strip_suffix('*'));
-    let target_prefix = target_pat.strip_suffix("/*").or_else(|| target_pat.strip_suffix('*'));
+    let alias_prefix = alias_pat
+        .strip_suffix("/*")
+        .or_else(|| alias_pat.strip_suffix('*'));
+    let target_prefix = target_pat
+        .strip_suffix("/*")
+        .or_else(|| target_pat.strip_suffix('*'));
 
     let resolved_path = match (alias_prefix, target_prefix) {
         (Some(ap), Some(tp)) => {
             // Wildcard alias: raw must start with ap.
-            if raw.starts_with(ap) {
-                let rest = &raw[ap.len()..];
-                Some(format!("{}{}", tp, rest))
-            } else {
-                None
-            }
+            raw.strip_prefix(ap).map(|rest| format!("{}{}", tp, rest))
         }
         _ => {
             // Exact alias.
@@ -605,8 +602,7 @@ mod tests {
     fn resolve_ts_alias_with_dot_slash_prefix() {
         // Alias target with `./` prefix should be stripped before dot conversion.
         let mut r = make_resolver();
-        r.ts_aliases
-            .push(("@/*".to_owned(), "./src/*".to_owned()));
+        r.ts_aliases.push(("@/*".to_owned(), "./src/*".to_owned()));
         r.register_module("src.lib.api");
         let (id, is_local) = r.resolve("@/lib/api", "src.index", false);
         assert_eq!(id, "src.lib.api");
@@ -661,7 +657,8 @@ mod tests {
         r.load_tsconfig(&tsconfig_path);
 
         assert!(
-            r.ts_aliases.contains(&("@/*".to_owned(), "src/*".to_owned())),
+            r.ts_aliases
+                .contains(&("@/*".to_owned(), "src/*".to_owned())),
             "expected @/* → src/* alias, got: {:?}",
             r.ts_aliases
         );

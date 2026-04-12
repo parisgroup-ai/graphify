@@ -187,9 +187,7 @@ fn merge_singletons(community: &mut [usize], adj: &[HashMap<usize, f64>], n: usi
     }
 
     // (b) Remaining singletons (isolated) → group into one shared community.
-    let singletons: Vec<usize> = (0..n)
-        .filter(|&u| sizes[&community[u]] == 1)
-        .collect();
+    let singletons: Vec<usize> = (0..n).filter(|&u| sizes[&community[u]] == 1).collect();
 
     if singletons.len() > 1 {
         // Use the label of the first singleton as the shared label.
@@ -225,7 +223,10 @@ fn build_communities(
         .enumerate()
         .map(|(new_id, mut members)| {
             members.sort();
-            Community { id: new_id, members }
+            Community {
+                id: new_id,
+                members,
+            }
         })
         .collect();
 
@@ -404,7 +405,10 @@ mod tests {
         let mut ids: Vec<usize> = communities.iter().map(|c| c.id).collect();
         ids.sort_unstable();
         let expected: Vec<usize> = (0..ids.len()).collect();
-        assert_eq!(ids, expected, "community IDs must be sequential starting from 0");
+        assert_eq!(
+            ids, expected,
+            "community IDs must be sequential starting from 0"
+        );
     }
 
     #[test]
@@ -473,11 +477,18 @@ mod tests {
         );
 
         // Verify d is in the same community as a
-        let d_comm = communities.iter().find(|c| c.members.contains(&"d".to_string()));
-        let a_comm = communities.iter().find(|c| c.members.contains(&"a".to_string()));
+        let d_comm = communities
+            .iter()
+            .find(|c| c.members.contains(&"d".to_string()));
+        let a_comm = communities
+            .iter()
+            .find(|c| c.members.contains(&"a".to_string()));
         assert!(d_comm.is_some() && a_comm.is_some());
-        assert_eq!(d_comm.unwrap().id, a_comm.unwrap().id,
-            "d should be in the same community as a");
+        assert_eq!(
+            d_comm.unwrap().id,
+            a_comm.unwrap().id,
+            "d should be in the same community as a"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -488,7 +499,10 @@ mod tests {
     fn label_propagation_finds_at_least_one_community() {
         let g = two_cluster_graph();
         let communities = label_propagation(&g);
-        assert!(!communities.is_empty(), "should find at least one community");
+        assert!(
+            !communities.is_empty(),
+            "should find at least one community"
+        );
     }
 
     #[test]
@@ -506,7 +520,10 @@ mod tests {
         let mut ids: Vec<usize> = communities.iter().map(|c| c.id).collect();
         ids.sort_unstable();
         let expected: Vec<usize> = (0..ids.len()).collect();
-        assert_eq!(ids, expected, "community IDs must be sequential starting from 0");
+        assert_eq!(
+            ids, expected,
+            "community IDs must be sequential starting from 0"
+        );
     }
 
     #[test]

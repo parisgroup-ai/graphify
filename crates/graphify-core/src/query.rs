@@ -82,7 +82,9 @@ struct GlobMatcher {
 
 impl GlobMatcher {
     fn new(pattern: &str) -> Self {
-        Self { pattern: pattern.as_bytes().to_vec() }
+        Self {
+            pattern: pattern.as_bytes().to_vec(),
+        }
     }
 
     fn is_match(&self, input: &str) -> bool {
@@ -172,7 +174,12 @@ impl QueryEngine {
         communities: Vec<Community>,
         cycles: Vec<CycleGroup>,
     ) -> Self {
-        Self { graph, metrics, communities, cycles }
+        Self {
+            graph,
+            metrics,
+            communities,
+            cycles,
+        }
     }
 
     /// Returns high-level statistics about the graph.
@@ -241,7 +248,9 @@ impl QueryEngine {
         match filters.sort_by {
             SortField::Score => {
                 results.sort_by(|a, b| {
-                    b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 });
             }
             SortField::Name => {
@@ -366,7 +375,9 @@ impl QueryEngine {
             if i + 1 < path_indices.len() {
                 // Look up edge info from outgoing_edges
                 let next_id = &raw[path_indices[i + 1]].id;
-                let edge_info = self.graph.outgoing_edges(&node_id)
+                let edge_info = self
+                    .graph
+                    .outgoing_edges(&node_id)
                     .into_iter()
                     .find(|(tgt, _)| tgt == next_id);
                 if let Some((_, edge)) = edge_info {
@@ -468,7 +479,9 @@ impl QueryEngine {
             let node_id = raw[index_path[i]].id.clone();
             if i + 1 < index_path.len() {
                 let next_id = &raw[index_path[i + 1]].id;
-                let edge_info = self.graph.outgoing_edges(&node_id)
+                let edge_info = self
+                    .graph
+                    .outgoing_edges(&node_id)
                     .into_iter()
                     .find(|(tgt, _)| tgt == next_id);
                 if let Some((_, edge)) = edge_info {
@@ -506,11 +519,7 @@ impl QueryEngine {
     /// Each entry is `(dependent_id, depth)`.  Results are sorted by depth
     /// ascending, then by name ascending.  Returns an empty `Vec` if the node
     /// does not exist.
-    pub fn transitive_dependents(
-        &self,
-        node_id: &str,
-        max_depth: usize,
-    ) -> Vec<(String, usize)> {
+    pub fn transitive_dependents(&self, node_id: &str, max_depth: usize) -> Vec<(String, usize)> {
         let start_idx = match self.graph.get_index(node_id) {
             Some(idx) => idx,
             None => return Vec::new(),
@@ -598,11 +607,8 @@ impl QueryEngine {
         // Transitive dependents (max_depth=10, take top 10)
         let trans_deps = self.transitive_dependents(node_id, 10);
         let transitive_dependent_count = trans_deps.len();
-        let top_transitive_dependents: Vec<String> = trans_deps
-            .into_iter()
-            .take(10)
-            .map(|(id, _)| id)
-            .collect();
+        let top_transitive_dependents: Vec<String> =
+            trans_deps.into_iter().take(10).map(|(id, _)| id).collect();
 
         Some(ExplainReport {
             node_id: node_id.to_string(),
@@ -631,7 +637,13 @@ mod tests {
     use crate::types::{Edge, Language, Node};
 
     fn module(id: &str) -> Node {
-        Node::module(id, format!("{}.py", id.replace('.', "/")), Language::Python, 1, true)
+        Node::module(
+            id,
+            format!("{}.py", id.replace('.', "/")),
+            Language::Python,
+            1,
+            true,
+        )
     }
 
     fn build_engine() -> QueryEngine {
@@ -645,7 +657,8 @@ mod tests {
         graph.add_edge("app.services.llm", "app.utils", Edge::imports(3));
         graph.add_edge("app.main", "os", Edge::imports(4));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
 
@@ -705,7 +718,10 @@ mod tests {
             ..SearchFilters::default()
         };
         let results = engine.search("*", &filters);
-        assert!(results.is_empty(), "all nodes are Module, filtering by Function should return empty");
+        assert!(
+            results.is_empty(),
+            "all nodes are Module, filtering by Function should return empty"
+        );
     }
 
     #[test]
@@ -738,7 +754,11 @@ mod tests {
         let engine = build_engine();
         // "app" matches app.main, app.utils, app.services.llm (3+ nodes)
         let suggestions = engine.suggest("app");
-        assert!(suggestions.len() <= 3, "suggest should return at most 3 results, got {}", suggestions.len());
+        assert!(
+            suggestions.len() <= 3,
+            "suggest should return at most 3 results, got {}",
+            suggestions.len()
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -799,7 +819,8 @@ mod tests {
         graph.add_edge("a", "b", Edge::imports(1));
         graph.add_edge("b", "c", Edge::imports(2));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
         let engine = QueryEngine::from_analyzed(graph, metrics, communities, cycles);
@@ -843,7 +864,8 @@ mod tests {
         graph.add_edge("b", "d", Edge::imports(3));
         graph.add_edge("c", "d", Edge::imports(4));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
         let engine = QueryEngine::from_analyzed(graph, metrics, communities, cycles);
@@ -866,13 +888,17 @@ mod tests {
         graph.add_edge("c", "d", Edge::imports(3));
         graph.add_edge("d", "e", Edge::imports(4));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
         let engine = QueryEngine::from_analyzed(graph, metrics, communities, cycles);
 
         let paths = engine.all_paths("a", "e", 2, 10);
-        assert!(paths.is_empty(), "max_depth=2 should not reach e (4 hops away)");
+        assert!(
+            paths.is_empty(),
+            "max_depth=2 should not reach e (4 hops away)"
+        );
     }
 
     #[test]
@@ -888,7 +914,8 @@ mod tests {
         graph.add_edge("b", "d", Edge::imports(3));
         graph.add_edge("c", "d", Edge::imports(4));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
         let engine = QueryEngine::from_analyzed(graph, metrics, communities, cycles);
@@ -913,7 +940,11 @@ mod tests {
         let engine = build_engine();
         let deps = engine.transitive_dependents("app.utils", 10);
         let ids: Vec<&str> = deps.iter().map(|(id, _)| id.as_str()).collect();
-        assert_eq!(ids.len(), 2, "app.utils should have 2 transitive dependents");
+        assert_eq!(
+            ids.len(),
+            2,
+            "app.utils should have 2 transitive dependents"
+        );
         assert!(ids.contains(&"app.main"));
         assert!(ids.contains(&"app.services.llm"));
         // Both are at depth 1
@@ -932,7 +963,8 @@ mod tests {
         graph.add_edge("c", "b", Edge::imports(1));
         graph.add_edge("b", "a", Edge::imports(2));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
         let engine = QueryEngine::from_analyzed(graph, metrics, communities, cycles);
@@ -954,7 +986,8 @@ mod tests {
         graph.add_edge("c", "b", Edge::imports(1));
         graph.add_edge("b", "a", Edge::imports(2));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
         let engine = QueryEngine::from_analyzed(graph, metrics, communities, cycles);
@@ -997,7 +1030,8 @@ mod tests {
         graph.add_edge("b", "c", Edge::imports(2));
         graph.add_edge("c", "a", Edge::imports(3));
 
-        let metrics = crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
+        let metrics =
+            crate::metrics::compute_metrics(&graph, &crate::metrics::ScoringWeights::default());
         let communities = crate::community::detect_communities(&graph);
         let cycles = crate::cycles::find_sccs(&graph);
         let engine = QueryEngine::from_analyzed(graph, metrics, communities, cycles);

@@ -10,8 +10,7 @@ use tempfile::TempDir;
 /// Returns the path to `target/debug/graphify`.
 /// `CARGO_MANIFEST_DIR` resolves to the workspace root at compile time.
 fn graphify_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug/graphify")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/graphify")
 }
 
 // ---------------------------------------------------------------------------
@@ -20,8 +19,8 @@ fn graphify_bin() -> PathBuf {
 
 #[test]
 fn test_python_fixture_pipeline() {
-    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/python_project");
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/python_project");
 
     let tmp = TempDir::new().expect("create temp dir");
     let out_dir = tmp.path().join("output");
@@ -38,7 +37,12 @@ lang = ["python"]
 local_prefix = "app"
 "#,
         output = out_dir.to_str().unwrap().replace('\\', "/"),
-        repo = fixture_dir.canonicalize().unwrap().to_str().unwrap().replace('\\', "/"),
+        repo = fixture_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
     );
 
     let config_path = tmp.path().join("graphify.toml");
@@ -96,8 +100,7 @@ local_prefix = "app"
 
 #[test]
 fn test_typescript_fixture_pipeline() {
-    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/ts_project");
+    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_project");
 
     let tmp = TempDir::new().expect("create temp dir");
     let out_dir = tmp.path().join("output");
@@ -112,7 +115,12 @@ repo = "{repo}"
 lang = ["typescript"]
 "#,
         output = out_dir.to_str().unwrap().replace('\\', "/"),
-        repo = fixture_dir.canonicalize().unwrap().to_str().unwrap().replace('\\', "/"),
+        repo = fixture_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
     );
 
     let config_path = tmp.path().join("graphify.toml");
@@ -139,7 +147,10 @@ lang = ["typescript"]
     let graph: serde_json::Value = serde_json::from_str(&raw).expect("parse graph.json");
 
     let nodes = graph["nodes"].as_array().expect("nodes must be an array");
-    assert!(!nodes.is_empty(), "nodes array must not be empty for TypeScript fixture");
+    assert!(
+        !nodes.is_empty(),
+        "nodes array must not be empty for TypeScript fixture"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +167,10 @@ fn test_init_creates_config() {
         .status()
         .expect("launch graphify binary");
 
-    assert!(status.success(), "graphify init exited with non-zero status");
+    assert!(
+        status.success(),
+        "graphify init exited with non-zero status"
+    );
 
     let config_path = tmp.path().join("graphify.toml");
     assert!(

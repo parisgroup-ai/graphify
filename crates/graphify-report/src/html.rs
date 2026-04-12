@@ -170,7 +170,7 @@ fn build_data(
                 pagerank: m.map_or(0.0, |m| m.pagerank),
                 in_degree: m.map_or(0, |m| m.in_degree),
                 out_degree: m.map_or(0, |m| m.out_degree),
-                in_cycle: m.map_or(false, |m| m.in_cycle),
+                in_cycle: m.is_some_and(|m| m.in_cycle),
                 score: m.map_or(0.0, |m| m.score),
                 community_id: m.map_or(0, |m| m.community_id),
             }
@@ -226,8 +226,20 @@ mod tests {
 
     fn make_graph() -> CodeGraph {
         let mut g = CodeGraph::new();
-        g.add_node(Node::module("app.main", "app/main.py", Language::Python, 1, true));
-        g.add_node(Node::module("app.utils", "app/utils.py", Language::Python, 1, true));
+        g.add_node(Node::module(
+            "app.main",
+            "app/main.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        g.add_node(Node::module(
+            "app.utils",
+            "app/utils.py",
+            Language::Python,
+            1,
+            true,
+        ));
         g.add_edge("app.main", "app.utils", Edge::imports(3));
         g
     }
@@ -298,11 +310,15 @@ mod tests {
             &path,
         );
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("GRAPHIFY_DATA"), "should contain data block");
+        assert!(
+            content.contains("GRAPHIFY_DATA"),
+            "should contain data block"
+        );
         let start = content.find("GRAPHIFY_DATA = ").unwrap() + "GRAPHIFY_DATA = ".len();
         let end = content[start..].find(";\n</script>").unwrap() + start;
         let json_str = &content[start..end];
-        let value: serde_json::Value = serde_json::from_str(json_str).expect("data should be valid JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(json_str).expect("data should be valid JSON");
         assert_eq!(value["project_name"], "test-project");
         assert_eq!(value["summary"]["total_nodes"], 2);
     }
@@ -320,7 +336,10 @@ mod tests {
             &path,
         );
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("forceSimulation"), "should contain D3.js force module");
+        assert!(
+            content.contains("forceSimulation"),
+            "should contain D3.js force module"
+        );
     }
 
     #[test]
@@ -344,21 +363,15 @@ mod tests {
     fn html_empty_graph() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("empty.html");
-        write_html(
-            "empty",
-            &CodeGraph::new(),
-            &[],
-            &[],
-            &[],
-            &path,
-        );
+        write_html("empty", &CodeGraph::new(), &[], &[], &[], &path);
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("GRAPHIFY_DATA"));
         let start = content.find("GRAPHIFY_DATA = ").unwrap() + "GRAPHIFY_DATA = ".len();
         let end = content[start..].find(";\n</script>").unwrap() + start;
         let json_str = &content[start..end];
-        let value: serde_json::Value = serde_json::from_str(json_str).expect("should be valid JSON");
+        let value: serde_json::Value =
+            serde_json::from_str(json_str).expect("should be valid JSON");
         assert_eq!(value["summary"]["total_nodes"], 0);
     }
 
@@ -367,7 +380,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("single.html");
         let mut g = CodeGraph::new();
-        g.add_node(Node::module("only.module", "only/module.py", Language::Python, 1, true));
+        g.add_node(Node::module(
+            "only.module",
+            "only/module.py",
+            Language::Python,
+            1,
+            true,
+        ));
         let metrics = vec![NodeMetrics {
             id: "only.module".to_string(),
             betweenness: 0.0,

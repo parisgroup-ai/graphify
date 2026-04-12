@@ -30,10 +30,7 @@ pub fn find_sccs(graph: &CodeGraph) -> Vec<CycleGroup> {
         .into_iter()
         .filter(|scc| scc.len() > 1)
         .map(|scc| {
-            let mut node_ids: Vec<String> = scc
-                .iter()
-                .map(|&idx| raw[idx].id.clone())
-                .collect();
+            let mut node_ids: Vec<String> = scc.iter().map(|&idx| raw[idx].id.clone()).collect();
             node_ids.sort(); // deterministic order
             CycleGroup { node_ids }
         })

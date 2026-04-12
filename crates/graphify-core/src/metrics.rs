@@ -74,8 +74,10 @@ pub fn betweenness_centrality(graph: &CodeGraph) -> HashMap<String, f64> {
     let all_indices: Vec<_> = raw.node_indices().collect();
 
     // Initialize centrality scores to 0 for every node.
-    let mut centrality: HashMap<String, f64> =
-        all_indices.iter().map(|&idx| (raw[idx].id.clone(), 0.0)).collect();
+    let mut centrality: HashMap<String, f64> = all_indices
+        .iter()
+        .map(|&idx| (raw[idx].id.clone(), 0.0))
+        .collect();
 
     // Choose source nodes — sample k when n > 200.
     let k = n.min(200);
@@ -181,8 +183,10 @@ pub fn pagerank(graph: &CodeGraph) -> HashMap<String, f64> {
         all_indices.iter().map(|&idx| (idx, initial)).collect();
 
     for _ in 0..100 {
-        let mut new_rank: HashMap<petgraph::graph::NodeIndex, f64> =
-            all_indices.iter().map(|&idx| (idx, (1.0 - damping) / n as f64)).collect();
+        let mut new_rank: HashMap<petgraph::graph::NodeIndex, f64> = all_indices
+            .iter()
+            .map(|&idx| (idx, (1.0 - damping) / n as f64))
+            .collect();
 
         for &v in &all_indices {
             // Distribute v's rank to all its out-neighbors.
@@ -315,7 +319,11 @@ pub fn compute_metrics(graph: &CodeGraph, weights: &ScoringWeights) -> Vec<NodeM
         .collect();
 
     // Sort by score descending.
-    metrics.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    metrics.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     metrics
 }
 
@@ -368,7 +376,10 @@ mod tests {
         assert_eq!(bt.len(), 5, "should have scores for all 5 nodes");
         // All values must be finite non-negative.
         for (_, &v) in bt.iter().collect::<Vec<_>>() {
-            assert!(v >= 0.0 && v.is_finite(), "betweenness must be non-negative finite");
+            assert!(
+                v >= 0.0 && v.is_finite(),
+                "betweenness must be non-negative finite"
+            );
         }
     }
 
@@ -441,9 +452,18 @@ mod tests {
         values.insert("z".to_string(), 30.0);
 
         let normed = normalize(&values);
-        assert!((normed["x"] - 0.0).abs() < 1e-9, "x should normalize to 0.0");
-        assert!((normed["y"] - 0.5).abs() < 1e-9, "y should normalize to 0.5");
-        assert!((normed["z"] - 1.0).abs() < 1e-9, "z should normalize to 1.0");
+        assert!(
+            (normed["x"] - 0.0).abs() < 1e-9,
+            "x should normalize to 0.0"
+        );
+        assert!(
+            (normed["y"] - 0.5).abs() < 1e-9,
+            "y should normalize to 0.5"
+        );
+        assert!(
+            (normed["z"] - 1.0).abs() < 1e-9,
+            "z should normalize to 1.0"
+        );
     }
 
     #[test]

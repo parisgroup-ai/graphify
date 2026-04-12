@@ -15,8 +15,8 @@ fn graphify_bin() -> PathBuf {
 /// Creates a TempDir with a graphify.toml pointing at the Python fixture.
 /// Returns (TempDir, config_path).
 fn setup_config() -> (TempDir, PathBuf) {
-    let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/python_project");
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/python_project");
 
     let tmp = TempDir::new().expect("create temp dir");
     let out_dir = tmp.path().join("output");

@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 // Language
@@ -105,17 +105,29 @@ pub struct Edge {
 impl Edge {
     /// Convenience constructor for an `Imports` edge.
     pub fn imports(line: usize) -> Self {
-        Self { kind: EdgeKind::Imports, weight: 1, line }
+        Self {
+            kind: EdgeKind::Imports,
+            weight: 1,
+            line,
+        }
     }
 
     /// Convenience constructor for a `Defines` edge.
     pub fn defines(line: usize) -> Self {
-        Self { kind: EdgeKind::Defines, weight: 1, line }
+        Self {
+            kind: EdgeKind::Defines,
+            weight: 1,
+            line,
+        }
     }
 
     /// Convenience constructor for a `Calls` edge.
     pub fn calls(line: usize) -> Self {
-        Self { kind: EdgeKind::Calls, weight: 1, line }
+        Self {
+            kind: EdgeKind::Calls,
+            weight: 1,
+            line,
+        }
     }
 }
 
@@ -188,13 +200,7 @@ mod tests {
 
     #[test]
     fn create_symbol_node_non_local() {
-        let node = Node::module(
-            "os",
-            "",
-            Language::Python,
-            0,
-            false,
-        );
+        let node = Node::module("os", "", Language::Python, 0, false);
         assert!(!node.is_local);
     }
 
@@ -224,13 +230,7 @@ mod tests {
 
     #[test]
     fn node_serialization_roundtrip() {
-        let node = Node::module(
-            "app.main",
-            "app/main.py",
-            Language::Python,
-            1,
-            true,
-        );
+        let node = Node::module("app.main", "app/main.py", Language::Python, 1, true);
         let json = serde_json::to_string(&node).expect("serialize");
         let restored: Node = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(node, restored);

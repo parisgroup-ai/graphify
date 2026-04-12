@@ -14,7 +14,7 @@ use graphify_core::{graph::CodeGraph, metrics::NodeMetrics};
 /// Panics if file I/O or CSV serialization fails.
 pub fn write_nodes_csv(metrics: &[NodeMetrics], graph: &CodeGraph, path: &Path) {
     let mut wtr = csv::Writer::from_path(path).expect("open nodes CSV for writing");
-    wtr.write_record(&[
+    wtr.write_record([
         "id",
         "kind",
         "file_path",
@@ -48,7 +48,7 @@ pub fn write_nodes_csv(metrics: &[NodeMetrics], graph: &CodeGraph, path: &Path) 
                 "false".to_string(),
             ),
         };
-        wtr.write_record(&[
+        wtr.write_record([
             m.id.as_str(),
             &kind,
             &file_path,
@@ -77,11 +77,11 @@ pub fn write_nodes_csv(metrics: &[NodeMetrics], graph: &CodeGraph, path: &Path) 
 /// Panics if file I/O or CSV serialization fails.
 pub fn write_edges_csv(graph: &CodeGraph, path: &Path) {
     let mut wtr = csv::Writer::from_path(path).expect("open edges CSV for writing");
-    wtr.write_record(&["source", "target", "kind", "weight", "line"])
+    wtr.write_record(["source", "target", "kind", "weight", "line"])
         .expect("write edges CSV header");
 
     for (src, tgt, edge) in graph.edges() {
-        wtr.write_record(&[
+        wtr.write_record([
             src,
             tgt,
             &format!("{:?}", edge.kind),
@@ -122,8 +122,20 @@ mod tests {
 
     fn make_graph() -> CodeGraph {
         let mut g = CodeGraph::new();
-        g.add_node(Node::module("app.main", "app/main.py", Language::Python, 1, true));
-        g.add_node(Node::module("app.utils", "app/utils.py", Language::Python, 1, true));
+        g.add_node(Node::module(
+            "app.main",
+            "app/main.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        g.add_node(Node::module(
+            "app.utils",
+            "app/utils.py",
+            Language::Python,
+            1,
+            true,
+        ));
         g.add_edge("app.main", "app.utils", Edge::imports(3));
         g
     }

@@ -74,12 +74,7 @@ impl CodeGraph {
     ///   auto-created (`is_local = false`, `line = 0`).
     /// - If an edge of the **same kind** already exists between the same two
     ///   nodes, its `weight` is incremented instead of adding a duplicate.
-    pub fn add_edge(
-        &mut self,
-        source_id: &str,
-        target_id: &str,
-        edge: Edge,
-    ) {
+    pub fn add_edge(&mut self, source_id: &str, target_id: &str, edge: Edge) {
         let src = self.get_or_create_placeholder(source_id);
         let tgt = self.get_or_create_placeholder(target_id);
 
@@ -120,10 +115,7 @@ impl CodeGraph {
     /// Returns `0` if the node does not exist.
     pub fn in_degree(&self, id: &str) -> usize {
         match self.index.get(id) {
-            Some(&idx) => self
-                .graph
-                .edges_directed(idx, Direction::Incoming)
-                .count(),
+            Some(&idx) => self.graph.edges_directed(idx, Direction::Incoming).count(),
             None => 0,
         }
     }
@@ -133,10 +125,7 @@ impl CodeGraph {
     /// Returns `0` if the node does not exist.
     pub fn out_degree(&self, id: &str) -> usize {
         match self.index.get(id) {
-            Some(&idx) => self
-                .graph
-                .edges_directed(idx, Direction::Outgoing)
-                .count(),
+            Some(&idx) => self.graph.edges_directed(idx, Direction::Outgoing).count(),
             None => 0,
         }
     }
@@ -223,7 +212,9 @@ impl CodeGraph {
     /// Exposed as `pub(crate)` so that sibling modules (e.g. `cycles`) can
     /// run petgraph algorithms directly without duplicating graph traversal
     /// logic through the public API.
-    pub(crate) fn raw_graph(&self) -> &petgraph::graph::DiGraph<crate::types::Node, crate::types::Edge> {
+    pub(crate) fn raw_graph(
+        &self,
+    ) -> &petgraph::graph::DiGraph<crate::types::Node, crate::types::Edge> {
         &self.graph
     }
 
@@ -243,12 +234,7 @@ impl CodeGraph {
 
     /// Finds an edge of the given `kind` between `src` and `tgt`, returning
     /// its [`EdgeIndex`] if found.
-    fn find_edge(
-        &self,
-        src: NodeIndex,
-        tgt: NodeIndex,
-        kind: &EdgeKind,
-    ) -> Option<EdgeIndex> {
+    fn find_edge(&self, src: NodeIndex, tgt: NodeIndex, kind: &EdgeKind) -> Option<EdgeIndex> {
         self.graph
             .edges_directed(src, Direction::Outgoing)
             .find(|e| e.target() == tgt && &e.weight().kind == kind)
@@ -272,11 +258,24 @@ mod tests {
     use crate::types::{Edge, Language, Node, NodeKind};
 
     fn python_module(id: &str, is_local: bool) -> Node {
-        Node::module(id, format!("{}.py", id.replace('.', "/")), Language::Python, 1, is_local)
+        Node::module(
+            id,
+            format!("{}.py", id.replace('.', "/")),
+            Language::Python,
+            1,
+            is_local,
+        )
     }
 
     fn python_function(id: &str, is_local: bool) -> Node {
-        Node::symbol(id, NodeKind::Function, format!("{}.py", id.replace('.', "/")), Language::Python, 10, is_local)
+        Node::symbol(
+            id,
+            NodeKind::Function,
+            format!("{}.py", id.replace('.', "/")),
+            Language::Python,
+            10,
+            is_local,
+        )
     }
 
     // -----------------------------------------------------------------------
