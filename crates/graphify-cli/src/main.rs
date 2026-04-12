@@ -393,6 +393,31 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
     // Discover files.
     let files = discover_files(&repo_path, &languages, local_prefix, &extra_excludes);
 
+    // BUG-009: Warn when discovery finds very few files — likely misconfigured
+    // repo path or local_prefix.
+    if files.len() <= 1 {
+        eprintln!(
+            "Warning: project '{}' discovered only {} file(s). Check repo path ('{}') and local_prefix ('{}') configuration.",
+            project.name,
+            files.len(),
+            project.repo,
+            local_prefix,
+        );
+    }
+
+    // Also warn if local_prefix looks like a directory but doesn't exist inside repo.
+    if !local_prefix.is_empty() {
+        let prefix_dir = repo_path.join(local_prefix);
+        if !prefix_dir.is_dir() {
+            eprintln!(
+                "Warning: project '{}' has local_prefix '{}' but directory '{}' does not exist.",
+                project.name,
+                local_prefix,
+                prefix_dir.display(),
+            );
+        }
+    }
+
     // Build extractors.
     let python_extractor = PythonExtractor::new();
     let typescript_extractor = TypeScriptExtractor::new();
@@ -596,11 +621,19 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
             let node_count = p.graph.node_count();
             let edge_count = p.graph.edge_count();
             let cycle_count = p.cycles.len();
+            // Include the top hotspot (highest-scoring node) per project.
+            let top_hotspot = p.metrics.iter()
+                .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|m| serde_json::json!({
+                    "id": m.id,
+                    "score": (m.score * 1000.0).round() / 1000.0,
+                }));
             serde_json::json!({
                 "name": p.name,
                 "nodes": node_count,
                 "edges": edge_count,
                 "cycles": cycle_count,
+                "top_hotspot": top_hotspot,
             })
         })
         .collect();
@@ -643,28 +676,38 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
         }
     }
 
-    // --- Cross-project edges -------------------------------------------------
-    let mut cross_deps: HashMap<(String, String), Vec<serde_json::Value>> = HashMap::new();
+    // --- Cross-project coupling (aggregate counts only, no full edge list) ---
+    struct CouplingStats {
+        edge_count: usize,
+        imports: usize,
+        defines: usize,
+        calls: usize,
+        shared_modules: HashSet<String>,
+    }
+
+    let mut cross_deps: HashMap<(String, String), CouplingStats> = HashMap::new();
 
     for p in projects {
-        for (src_id, tgt_id, edge) in p.graph.edges() {
+        for (_src_id, tgt_id, edge) in p.graph.edges() {
             if let Some(owners) = node_owners.get(tgt_id) {
                 for owner in owners {
                     if owner != &p.name {
-                        let kind_str = match edge.kind {
-                            graphify_core::types::EdgeKind::Imports => "Imports",
-                            graphify_core::types::EdgeKind::Defines => "Defines",
-                            graphify_core::types::EdgeKind::Calls => "Calls",
-                        };
-                        let entry = cross_deps
+                        let stats = cross_deps
                             .entry((p.name.clone(), owner.clone()))
-                            .or_default();
-                        entry.push(serde_json::json!({
-                            "from": src_id,
-                            "to": tgt_id,
-                            "kind": kind_str,
-                            "weight": edge.weight,
-                        }));
+                            .or_insert_with(|| CouplingStats {
+                                edge_count: 0,
+                                imports: 0,
+                                defines: 0,
+                                calls: 0,
+                                shared_modules: HashSet::new(),
+                            });
+                        stats.edge_count += 1;
+                        match edge.kind {
+                            graphify_core::types::EdgeKind::Imports => stats.imports += 1,
+                            graphify_core::types::EdgeKind::Defines => stats.defines += 1,
+                            graphify_core::types::EdgeKind::Calls => stats.calls += 1,
+                        }
+                        stats.shared_modules.insert(tgt_id.to_string());
                     }
                 }
             }
@@ -677,14 +720,19 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
     let cross_dependencies: Vec<serde_json::Value> = dep_keys
         .into_iter()
         .map(|(from_proj, to_proj)| {
-            let edges = cross_deps
+            let stats = cross_deps
                 .remove(&(from_proj.clone(), to_proj.clone()))
-                .unwrap_or_default();
+                .unwrap();
             serde_json::json!({
                 "from_project": from_proj,
                 "to_project": to_proj,
-                "edge_count": edges.len(),
-                "edges": edges,
+                "edge_count": stats.edge_count,
+                "shared_modules": stats.shared_modules.len(),
+                "by_kind": {
+                    "imports": stats.imports,
+                    "defines": stats.defines,
+                    "calls": stats.calls,
+                },
             })
         })
         .collect();
