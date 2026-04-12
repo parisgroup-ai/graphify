@@ -1,5 +1,5 @@
 ---
-status: open
+status: done
 priority: high
 timeEstimate: 60
 pomodoros: 0

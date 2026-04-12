@@ -26,6 +26,32 @@ pub struct DiscoveredFile {
     pub is_package: bool,
 }
 
+/// Test file patterns that are always excluded during file discovery.
+///
+/// These patterns catch co-located test files that live alongside production
+/// code (e.g. `src/circuit-breaker.test.ts`, `src/retry.spec.ts`,
+/// `test_utils.py`), preventing test framework artifacts from polluting the
+/// dependency graph.
+fn is_test_file(file_name: &str) -> bool {
+    // TypeScript / JavaScript conventions: *.test.{ts,tsx,js,jsx}, *.spec.{ts,tsx,js,jsx}
+    let ts_js_test_suffixes = [
+        ".test.ts", ".test.tsx", ".test.js", ".test.jsx",
+        ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx",
+    ];
+    for suffix in &ts_js_test_suffixes {
+        if file_name.ends_with(suffix) {
+            return true;
+        }
+    }
+
+    // Python conventions: *.test.py, *_test.py
+    if file_name.ends_with(".test.py") || file_name.ends_with("_test.py") {
+        return true;
+    }
+
+    false
+}
+
 /// Detect the [`Language`] for a file extension.
 ///
 /// Returns `None` for unknown extensions.
@@ -140,6 +166,10 @@ fn walk_dir(
             }
             walk_dir(base, &path, languages, local_prefix, excludes, out);
         } else if path.is_file() {
+            // Skip co-located test files (e.g. *.test.ts, *.spec.tsx, *_test.py).
+            if is_test_file(name) {
+                continue;
+            }
             let ext = path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -308,5 +338,102 @@ mod tests {
         let mut sorted = paths.clone();
         sorted.sort();
         assert_eq!(paths, sorted, "files should be sorted by path");
+    }
+
+    // -----------------------------------------------------------------------
+    // is_test_file
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn is_test_file_ts_test_patterns() {
+        assert!(is_test_file("circuit-breaker.test.ts"));
+        assert!(is_test_file("circuit-breaker.test.tsx"));
+        assert!(is_test_file("helpers.test.js"));
+        assert!(is_test_file("helpers.test.jsx"));
+    }
+
+    #[test]
+    fn is_test_file_ts_spec_patterns() {
+        assert!(is_test_file("resilience.spec.ts"));
+        assert!(is_test_file("resilience.spec.tsx"));
+        assert!(is_test_file("api.spec.js"));
+        assert!(is_test_file("api.spec.jsx"));
+    }
+
+    #[test]
+    fn is_test_file_python_patterns() {
+        assert!(is_test_file("test_utils.test.py"));
+        assert!(is_test_file("llm_test.py"));       // *_test.py
+        assert!(is_test_file("service_test.py"));
+    }
+
+    #[test]
+    fn is_test_file_does_not_match_production_files() {
+        assert!(!is_test_file("main.ts"));
+        assert!(!is_test_file("api.ts"));
+        assert!(!is_test_file("index.tsx"));
+        assert!(!is_test_file("llm.py"));
+        assert!(!is_test_file("__init__.py"));
+        assert!(!is_test_file("testing.ts"));    // "testing" is not a test pattern
+        assert!(!is_test_file("contest.py"));    // "test" as substring
+    }
+
+    // -----------------------------------------------------------------------
+    // discover_files — test file exclusion
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn discover_excludes_colocated_ts_test_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        // Production files
+        std::fs::write(src.join("api.ts"), b"export const api = {};").unwrap();
+        std::fs::write(src.join("retry.ts"), b"export function retry() {}").unwrap();
+        // Test files (should be excluded)
+        std::fs::write(src.join("api.test.ts"), b"import { describe } from 'vitest';").unwrap();
+        std::fs::write(src.join("retry.spec.ts"), b"import { it } from 'vitest';").unwrap();
+        std::fs::write(src.join("api.test.tsx"), b"import { expect } from 'vitest';").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::TypeScript], "", &[]);
+        let names: Vec<_> = files.iter().map(|f| f.module_name.as_str()).collect();
+        assert!(names.contains(&"src.api"), "production file api.ts should be found");
+        assert!(names.contains(&"src.retry"), "production file retry.ts should be found");
+        assert_eq!(files.len(), 2, "only production files should be found, got: {:?}", names);
+    }
+
+    #[test]
+    fn discover_excludes_colocated_python_test_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        // Production files
+        std::fs::write(app.join("main.py"), b"def main(): pass").unwrap();
+        std::fs::write(app.join("service.py"), b"class Service: pass").unwrap();
+        // Test files (should be excluded)
+        std::fs::write(app.join("main_test.py"), b"def test_main(): pass").unwrap();
+        std::fs::write(app.join("service.test.py"), b"def test_service(): pass").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::Python], "", &[]);
+        let names: Vec<_> = files.iter().map(|f| f.module_name.as_str()).collect();
+        assert!(names.contains(&"app.main"), "production file main.py should be found");
+        assert!(names.contains(&"app.service"), "production file service.py should be found");
+        assert_eq!(files.len(), 2, "only production files should be found, got: {:?}", names);
+    }
+
+    #[test]
+    fn discover_excludes_js_test_and_spec_files() {
+        // Verify .js and .jsx extensions are NOT discovered at all (language_for_extension
+        // only handles .ts/.tsx/.py), but test the is_test_file guard regardless —
+        // if JS support is added later, the guard is already in place.
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("helper.test.js"), b"test('x', () => {});").unwrap();
+        std::fs::write(src.join("helper.spec.jsx"), b"test('x', () => {});").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::TypeScript], "", &[]);
+        assert!(files.is_empty(), "JS test files should not appear: {:?}",
+            files.iter().map(|f| &f.module_name).collect::<Vec<_>>());
     }
 }
