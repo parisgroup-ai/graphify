@@ -227,10 +227,14 @@
 
     if (state.simulation) state.simulation.stop();
 
+    var vp = document.getElementById('viewport');
+    var cx = vp.clientWidth / 2;
+    var cy = vp.clientHeight / 2;
+
     state.simulation = d3.forceSimulation(state.simNodes)
       .force('link', d3.forceLink(state.simEdges).id(function (d) { return d.id; }).distance(state.linkDistance))
       .force('charge', d3.forceManyBody().strength(state.chargeStrength))
-      .force('center', d3.forceCenter(0, 0).strength(state.centerGravity))
+      .force('center', d3.forceCenter(cx, cy).strength(state.centerGravity))
       .force('collision', d3.forceCollide().radius(function (d) { return nodeRadius(d) + 2; }))
       .alphaDecay(0.02)
       .on('tick', tick);

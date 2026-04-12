@@ -109,7 +109,7 @@ pub fn write_html(
     html.push_str("\n</script>\n");
 
     // Graph data
-    html.push_str("<script>\nconst GRAPHIFY_DATA = ");
+    html.push_str("<script>\nvar GRAPHIFY_DATA = ");
     html.push_str(&data_json);
     html.push_str(";\n</script>\n");
 
