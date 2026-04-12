@@ -10,6 +10,7 @@ use graphify_core::{
     cycles::{find_sccs, find_simple_cycles},
     graph::CodeGraph,
     metrics::{compute_metrics, ScoringWeights},
+    query::{QueryEngine, SearchFilters, SortField},
     types::Language,
 };
 use graphify_extract::{
@@ -123,6 +124,50 @@ enum Commands {
         /// Output directory (overrides config setting)
         #[arg(long)]
         output: Option<PathBuf>,
+    },
+
+    /// Search nodes by pattern (glob matching on node IDs)
+    Query {
+        /// Glob pattern to match node IDs (e.g. "app.services.*")
+        pattern: String,
+
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Filter by node kind: module, function, class, method
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// Sort results: score (default), name, in_degree
+        #[arg(long, default_value = "score")]
+        sort: String,
+
+        /// Filter to a specific project
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Explain a module: profile card + impact analysis
+    Explain {
+        /// Node ID to explain (e.g. "app.services.llm")
+        node_id: String,
+
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Filter to a specific project
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -253,6 +298,119 @@ fn main() {
             }
             if project_data.len() > 1 {
                 write_summary(&project_data, &out_dir);
+            }
+        }
+
+        Commands::Query { pattern, config, kind, sort, project, json } => {
+            let cfg = load_config(&config);
+            let projects = filter_projects(&cfg, project.as_deref());
+            let multi_project = cfg.project.len() > 1;
+
+            let sort_field = match sort.to_lowercase().as_str() {
+                "name" => SortField::Name,
+                "in_degree" | "indegree" => SortField::InDegree,
+                _ => SortField::Score,
+            };
+
+            let filters = SearchFilters {
+                kind: kind.as_deref().and_then(parse_node_kind),
+                sort_by: sort_field,
+                local_only: false,
+            };
+
+            let mut all_results: Vec<(String, Vec<graphify_core::query::QueryMatch>)> = Vec::new();
+
+            for proj in &projects {
+                let engine = build_query_engine(proj, &cfg.settings);
+                let results = engine.search(&pattern, &filters);
+                if !results.is_empty() {
+                    all_results.push((proj.name.clone(), results));
+                }
+            }
+
+            if json {
+                let json_output: Vec<serde_json::Value> = all_results
+                    .iter()
+                    .flat_map(|(proj_name, results)| {
+                        results.iter().map(move |r| {
+                            let mut val = serde_json::to_value(r).unwrap();
+                            if multi_project {
+                                val.as_object_mut().unwrap().insert(
+                                    "project".to_string(),
+                                    serde_json::Value::String(proj_name.clone()),
+                                );
+                            }
+                            val
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+            } else {
+                let total: usize = all_results.iter().map(|(_, r)| r.len()).sum();
+                if total == 0 {
+                    println!("No matches for pattern '{}'.", pattern);
+                } else {
+                    println!("Found {} match(es) for '{}':", total, pattern);
+                    for (proj_name, results) in &all_results {
+                        for r in results {
+                            if multi_project {
+                                println!(
+                                    "  [{}] {} ({:?}) score={:.3} community={} cycle={}",
+                                    proj_name, r.node_id, r.kind, r.score, r.community_id, r.in_cycle
+                                );
+                            } else {
+                                println!(
+                                    "  {} ({:?}) score={:.3} community={} cycle={}",
+                                    r.node_id, r.kind, r.score, r.community_id, r.in_cycle
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Commands::Explain { node_id, config, project, json } => {
+            let cfg = load_config(&config);
+            let projects = filter_projects(&cfg, project.as_deref());
+            let multi_project = cfg.project.len() > 1;
+            let mut found = false;
+
+            for proj in &projects {
+                let engine = build_query_engine(proj, &cfg.settings);
+                if let Some(report) = engine.explain(&node_id) {
+                    found = true;
+                    if json {
+                        let mut val = serde_json::to_value(&report).unwrap();
+                        if multi_project {
+                            val.as_object_mut().unwrap().insert(
+                                "project".to_string(),
+                                serde_json::Value::String(proj.name.clone()),
+                            );
+                        }
+                        println!("{}", serde_json::to_string_pretty(&val).unwrap());
+                    } else {
+                        print_explain_report(&report, &proj.name, multi_project);
+                    }
+                    break;
+                }
+            }
+
+            if !found {
+                eprintln!("Node '{}' not found.", node_id);
+                // Try suggest across all projects
+                for proj in &projects {
+                    let engine = build_query_engine(proj, &cfg.settings);
+                    let suggestions = engine.suggest(&node_id);
+                    if !suggestions.is_empty() {
+                        eprintln!("Did you mean?");
+                        for s in &suggestions {
+                            eprintln!("  {}", s);
+                        }
+                        break;
+                    }
+                }
+                std::process::exit(1);
             }
         }
     }
@@ -524,6 +682,91 @@ fn run_analyze(graph: &CodeGraph, weights: &ScoringWeights) -> AnalysisResult {
     };
 
     (metrics, communities, cycles)
+}
+
+// ---------------------------------------------------------------------------
+// Query engine helpers
+// ---------------------------------------------------------------------------
+
+fn build_query_engine(project: &ProjectConfig, settings: &Settings) -> QueryEngine {
+    let (graph, _) = run_extract(project, settings);
+    let w = ScoringWeights::default();
+    let (mut metrics, communities, _cycles_simple) = run_analyze(&graph, &w);
+    assign_community_ids(&mut metrics, &communities);
+    let cycles = find_sccs(&graph);
+    QueryEngine::from_analyzed(graph, metrics, communities, cycles)
+}
+
+fn filter_projects<'a>(cfg: &'a Config, project_name: Option<&str>) -> Vec<&'a ProjectConfig> {
+    if let Some(name) = project_name {
+        let matched: Vec<&ProjectConfig> = cfg.project.iter().filter(|p| p.name == name).collect();
+        if matched.is_empty() {
+            eprintln!("Project '{}' not found in config.", name);
+            std::process::exit(1);
+        }
+        matched
+    } else {
+        cfg.project.iter().collect()
+    }
+}
+
+fn parse_node_kind(s: &str) -> Option<graphify_core::types::NodeKind> {
+    match s.to_lowercase().as_str() {
+        "module" | "mod" => Some(graphify_core::types::NodeKind::Module),
+        "function" | "func" | "fn" => Some(graphify_core::types::NodeKind::Function),
+        "class" => Some(graphify_core::types::NodeKind::Class),
+        "method" => Some(graphify_core::types::NodeKind::Method),
+        _ => {
+            eprintln!("Warning: unknown kind '{}', ignoring filter.", s);
+            None
+        }
+    }
+}
+
+fn print_explain_report(report: &graphify_core::query::ExplainReport, project_name: &str, multi_project: bool) {
+    println!();
+    println!("═══ {} ═══", report.node_id);
+    if multi_project {
+        println!("  Project:     {}", project_name);
+    }
+    println!("  Kind:        {:?}", report.kind);
+    println!("  File:        {}", report.file_path.display());
+    println!("  Language:    {:?}", report.language);
+    println!("  Community:   {}", report.community_id);
+    if report.in_cycle {
+        println!("  In cycle:    yes (with: {})", report.cycle_peers.join(", "));
+    } else {
+        println!("  In cycle:    no");
+    }
+
+    println!();
+    println!("  ── Metrics ──");
+    println!("  Score:         {:.3}", report.metrics.score);
+    println!("  Betweenness:   {:.3}", report.metrics.betweenness);
+    println!("  PageRank:      {:.4}", report.metrics.pagerank);
+    println!("  In-degree:     {}", report.metrics.in_degree);
+    println!("  Out-degree:    {}", report.metrics.out_degree);
+
+    println!();
+    println!("  ── Dependencies ({}) ──", report.direct_dependencies.len());
+    for dep in &report.direct_dependencies {
+        println!("  → {}", dep);
+    }
+
+    println!();
+    println!("  ── Dependents ({}) ──", report.direct_dependents.len());
+    let max_show = 5;
+    for dep in report.direct_dependents.iter().take(max_show) {
+        println!("  ← {}", dep);
+    }
+    if report.direct_dependents.len() > max_show {
+        println!("  ... and {} more", report.direct_dependents.len() - max_show);
+    }
+
+    println!();
+    println!("  ── Impact ──");
+    println!("  Transitive dependents: {} modules", report.transitive_dependent_count);
+    println!();
 }
 
 // ---------------------------------------------------------------------------
