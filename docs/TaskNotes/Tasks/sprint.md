@@ -6,17 +6,27 @@ updated: 2026-04-12
 
 # Graphify — Issues
 
-| ID      | Status      | Priority | Est    | Title                                                |
-| ------- | ----------- | -------- | ------ | ---------------------------------------------------- |
-| BUG-001 | **done**    | high     | 4h     | Python relative import misresolution (false cycles)  |
-| BUG-002 | **done**    | normal   | 2h     | TS re-export missing Defines edge                    |
-| BUG-003 | **done**    | normal   | 3h     | Cross-project summary is a stub                      |
-| BUG-004 | **done**    | low      | 1h     | Placeholder nodes always tagged Language::Python      |
-| BUG-005 | **done**    | low      | 30m    | CSV nodes file missing kind, file_path, language cols |
+| ID      | Status      | Priority | Est    | Title                                                     |
+| ------- | ----------- | -------- | ------ | --------------------------------------------------------- |
+| BUG-001 | **done**    | high     | 4h     | Python relative import misresolution (false cycles)       |
+| BUG-002 | **done**    | normal   | 2h     | TS re-export missing Defines edge                         |
+| BUG-003 | **done**    | normal   | 3h     | Cross-project summary is a stub                           |
+| BUG-004 | **done**    | low      | 1h     | Placeholder nodes always tagged Language::Python           |
+| BUG-005 | **done**    | low      | 30m    | CSV nodes file missing kind, file_path, language cols     |
+| BUG-006 | **open**    | high     | 1h     | Walker excludes miss .test.ts/.spec.ts files              |
+| BUG-007 | **open**    | critical | 3h     | TS workspace alias resolution mangles node IDs            |
+| BUG-008 | **open**    | normal   | 2h     | Louvain community detection degenerates on sparse graphs  |
+| BUG-009 | **open**    | normal   | 1h     | Walker silently produces empty graph for missing src/     |
+| BUG-010 | **open**    | low      | 1h     | Summary JSON includes full edge list (9.6MB bloat)        |
 
-## Open
+## Backlog
 
-_(none — all bugs resolved!)_
+| ID       | Status   | Priority | Est    | Title                                                |
+| -------- | -------- | -------- | ------ | ---------------------------------------------------- |
+| FEAT-001 | **open** | high     | 16h    | Interactive HTML graph visualization                 |
+| FEAT-002 | **open** | normal   | 8h     | Architectural drift detection                        |
+| FEAT-003 | **open** | low      | 16h    | New language support (Go, Rust)                      |
+| FEAT-004 | **open** | normal   | 4h     | CI quality gates                                     |
 
 ## Done
 
