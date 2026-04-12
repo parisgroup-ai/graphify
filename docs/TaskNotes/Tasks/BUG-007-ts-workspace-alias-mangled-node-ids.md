@@ -1,5 +1,5 @@
 ---
-status: open
+status: done
 priority: critical
 timeEstimate: 180
 pomodoros: 0

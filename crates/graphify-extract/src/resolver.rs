@@ -234,17 +234,22 @@ fn resolve_python_relative(raw: &str, from_module: &str, is_package: bool) -> St
 /// - `"@/lib/api"` → `"src/lib/api"` → `"src.lib.api"`
 ///
 /// If neither pattern contains `/*`, an exact-match alias is attempted.
+///
+/// When the resolved path contains parent-directory traversal (`..`), the alias
+/// points outside the current project (e.g. a workspace package reference like
+/// `@repo/* → ../../packages/*`). In that case the original import string is
+/// preserved as the node identifier rather than producing a mangled dot-notation
+/// name.
 fn apply_ts_alias(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String> {
     let alias_prefix = alias_pat.strip_suffix("/*").or_else(|| alias_pat.strip_suffix('*'));
     let target_prefix = target_pat.strip_suffix("/*").or_else(|| target_pat.strip_suffix('*'));
 
-    match (alias_prefix, target_prefix) {
+    let resolved_path = match (alias_prefix, target_prefix) {
         (Some(ap), Some(tp)) => {
             // Wildcard alias: raw must start with ap.
             if raw.starts_with(ap) {
                 let rest = &raw[ap.len()..];
-                let path = format!("{}{}", tp, rest);
-                Some(path_to_dot_notation(&path))
+                Some(format!("{}{}", tp, rest))
             } else {
                 None
             }
@@ -252,12 +257,22 @@ fn apply_ts_alias(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String
         _ => {
             // Exact alias.
             if raw == alias_pat {
-                Some(path_to_dot_notation(target_pat))
+                Some(target_pat.to_owned())
             } else {
                 None
             }
         }
+    }?;
+
+    // If the resolved path traverses outside the project, keep the original
+    // import string as the node identifier (BUG-007).
+    if resolved_path.contains("..") {
+        return Some(raw.to_owned());
     }
+
+    // Strip leading "./" before converting to dot notation.
+    let clean = resolved_path.strip_prefix("./").unwrap_or(&resolved_path);
+    Some(path_to_dot_notation(clean))
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +556,61 @@ mod tests {
         let (id, is_local) = r.resolve("@/unknown/module", "src.index", false);
         assert_eq!(id, "src.unknown.module");
         assert!(!is_local);
+    }
+
+    // -----------------------------------------------------------------------
+    // BUG-007: Workspace alias resolution
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_ts_workspace_alias_preserves_original_name() {
+        // BUG-007: `@repo/validators` with alias pointing outside project
+        // should keep the original import string, not produce `..packages.validators`.
+        let mut r = make_resolver();
+        r.ts_aliases
+            .push(("@repo/*".to_owned(), "../../packages/*".to_owned()));
+        let (id, is_local) = r.resolve("@repo/validators", "src.index", false);
+        assert_eq!(
+            id, "@repo/validators",
+            "BUG-007: workspace alias must preserve original import name"
+        );
+        assert!(!is_local);
+    }
+
+    #[test]
+    fn resolve_ts_workspace_alias_with_subpath() {
+        // `@repo/validators/mentorship` → should still preserve original name.
+        let mut r = make_resolver();
+        r.ts_aliases
+            .push(("@repo/*".to_owned(), "../../packages/*".to_owned()));
+        let (id, is_local) = r.resolve("@repo/validators/mentorship", "src.index", false);
+        assert_eq!(id, "@repo/validators/mentorship");
+        assert!(!is_local);
+    }
+
+    #[test]
+    fn resolve_ts_workspace_exact_alias_preserves_name() {
+        // Exact alias to external path: `@repo/validators` → `../../packages/validators/src`
+        let mut r = make_resolver();
+        r.ts_aliases.push((
+            "@repo/validators".to_owned(),
+            "../../packages/validators/src".to_owned(),
+        ));
+        let (id, is_local) = r.resolve("@repo/validators", "src.index", false);
+        assert_eq!(id, "@repo/validators");
+        assert!(!is_local);
+    }
+
+    #[test]
+    fn resolve_ts_alias_with_dot_slash_prefix() {
+        // Alias target with `./` prefix should be stripped before dot conversion.
+        let mut r = make_resolver();
+        r.ts_aliases
+            .push(("@/*".to_owned(), "./src/*".to_owned()));
+        r.register_module("src.lib.api");
+        let (id, is_local) = r.resolve("@/lib/api", "src.index", false);
+        assert_eq!(id, "src.lib.api");
+        assert!(is_local);
     }
 
     // -----------------------------------------------------------------------
