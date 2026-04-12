@@ -1,0 +1,525 @@
+{
+  "hotspots": [
+    {
+      "node": "typing",
+      "score": 0.666667,
+      "in_degree": 200,
+      "out_degree": 0,
+      "betweenness": 0.0,
+      "pagerank": 0.073439,
+      "instability": 0.0,
+      "kind": "",
+      "file": ""
+    },
+    {
+      "node": "logging",
+      "score": 0.534859,
+      "in_degree": 182,
+      "out_degree": 0,
+      "betweenness": 0.0,
+      "pagerank": 0.051009,
+      "instability": 0.0,
+      "kind": "",
+      "file": ""
+    },
+    {
+      "node": "app.services.llm.factory",
+      "score": 0.359978,
+      "in_degree": 7,
+      "out_degree": 7,
+      "betweenness": 0.015895,
+      "pagerank": 0.0033,
+      "instability": 0.5,
+      "kind": "",
+      "file": "app/services/llm/factory.py"
+    },
+    {
+      "node": "app.skills.runtime",
+      "score": 0.305908,
+      "in_degree": 14,
+      "out_degree": 6,
+      "betweenness": 0.012287,
+      "pagerank": 0.005487,
+      "instability": 0.3,
+      "kind": "",
+      "file": "app/skills/runtime.py"
+    },
+    {
+      "node": "app.middleware.tracing",
+      "score": 0.259824,
+      "in_degree": 53,
+      "out_degree": 10,
+      "betweenness": 0.006193,
+      "pagerank": 0.009169,
+      "instability": 0.1587,
+      "kind": "",
+      "file": "app/middleware/tracing.py"
+    },
+    {
+      "node": "app.services.claude_client",
+      "score": 0.251207,
+      "in_degree": 13,
+      "out_degree": 14,
+      "betweenness": 0.010279,
+      "pagerank": 0.00308,
+      "instability": 0.5185,
+      "kind": "",
+      "file": "app/services/claude_client.py"
+    },
+    {
+      "node": "json",
+      "score": 0.235309,
+      "in_degree": 85,
+      "out_degree": 0,
+      "betweenness": 0.0,
+      "pagerank": 0.020631,
+      "instability": 0.0,
+      "kind": "",
+      "file": ""
+    },
+    {
+      "node": "app.skills.executor",
+      "score": 0.210376,
+      "in_degree": 6,
+      "out_degree": 10,
+      "betweenness": 0.009058,
+      "pagerank": 0.002296,
+      "instability": 0.625,
+      "kind": "",
+      "file": "app/skills/executor.py"
+    },
+    {
+      "node": "app.services.llm.base",
+      "score": 0.206144,
+      "in_degree": 63,
+      "out_degree": 6,
+      "betweenness": 0.00171,
+      "pagerank": 0.014383,
+      "instability": 0.087,
+      "kind": "",
+      "file": "app/services/llm/base.py"
+    },
+    {
+      "node": "pydantic",
+      "score": 0.195617,
+      "in_degree": 50,
+      "out_degree": 0,
+      "betweenness": 0.0,
+      "pagerank": 0.024738,
+      "instability": 0.0,
+      "kind": "",
+      "file": ""
+    },
+    {
+      "node": "app.llm.gateway",
+      "score": 0.191683,
+      "in_degree": 5,
+      "out_degree": 14,
+      "betweenness": 0.008187,
+      "pagerank": 0.002569,
+      "instability": 0.7368,
+      "kind": "",
+      "file": "app/llm/gateway.py"
+    },
+    {
+      "node": "app.llm.adapter",
+      "score": 0.189153,
+      "in_degree": 3,
+      "out_degree": 8,
+      "betweenness": 0.008216,
+      "pagerank": 0.002612,
+      "instability": 0.7273,
+      "kind": "",
+      "file": "app/llm/adapter.py"
+    },
+    {
+      "node": "app.config",
+      "score": 0.166067,
+      "in_degree": 47,
+      "out_degree": 3,
+      "betweenness": 0.001764,
+      "pagerank": 0.011179,
+      "instability": 0.06,
+      "kind": "",
+      "file": "app/config.py"
+    },
+    {
+      "node": "app.dependencies.llm",
+      "score": 0.164174,
+      "in_degree": 17,
+      "out_degree": 8,
+      "betweenness": 0.005701,
+      "pagerank": 0.003588,
+      "instability": 0.32,
+      "kind": "",
+      "file": "app/dependencies/llm.py"
+    },
+    {
+      "node": "re",
+      "score": 0.162281,
+      "in_degree": 47,
+      "out_degree": 0,
+      "betweenness": 0.0,
+      "pagerank": 0.018495,
+      "instability": 0.0,
+      "kind": "",
+      "file": ""
+    }
+  ],
+  "communities": [
+    {
+      "cluster_id": 0,
+      "size": 66,
+      "inferred_name": "app.services",
+      "internal_edges": 151,
+      "external_edges": 234,
+      "density": 0.0352,
+      "cohesion_ratio": 0.3922,
+      "sample_members": [
+        "PIL",
+        "PyPDF2",
+        "app.constants.llm_operations",
+        "app.dependencies.context7",
+        "app.errors.llm"
+      ]
+    },
+    {
+      "cluster_id": 1,
+      "size": 54,
+      "inferred_name": "app.skills",
+      "internal_edges": 163,
+      "external_edges": 295,
+      "density": 0.057,
+      "cohesion_ratio": 0.3559,
+      "sample_members": [
+        "abc",
+        "app.routers.skills",
+        "app.services.llm.factory",
+        "app.services.llm.mcp_service",
+        "app.services.study.constants"
+      ]
+    },
+    {
+      "cluster_id": 2,
+      "size": 53,
+      "inferred_name": "app.services",
+      "internal_edges": 172,
+      "external_edges": 379,
+      "density": 0.0624,
+      "cohesion_ratio": 0.3122,
+      "sample_members": [
+        "anthropic",
+        "anthropic.types",
+        "app.config",
+        "app.errors",
+        "app.jobs.context_summarizer"
+      ]
+    },
+    {
+      "cluster_id": 3,
+      "size": 49,
+      "inferred_name": "app.services",
+      "internal_edges": 113,
+      "external_edges": 160,
+      "density": 0.048,
+      "cohesion_ratio": 0.4139,
+      "sample_members": [
+        "app.context.context_loader",
+        "app.jobs.generate_course_job",
+        "app.logging_http",
+        "app.main",
+        "app.models.bible"
+      ]
+    },
+    {
+      "cluster_id": 4,
+      "size": 48,
+      "inferred_name": "app.routers",
+      "internal_edges": 139,
+      "external_edges": 257,
+      "density": 0.0616,
+      "cohesion_ratio": 0.351,
+      "sample_members": [
+        "app.dependencies",
+        "app.dependencies.auth",
+        "app.dependencies.llm",
+        "app.dependencies.llm_context",
+        "app.middleware.tracing"
+      ]
+    },
+    {
+      "cluster_id": 5,
+      "size": 36,
+      "inferred_name": "app.services",
+      "internal_edges": 102,
+      "external_edges": 162,
+      "density": 0.081,
+      "cohesion_ratio": 0.3864,
+      "sample_members": [
+        "app.models.pipeline_v3",
+        "app.routers.generation_v3",
+        "app.services.context_prioritizer",
+        "app.services.npm_registry_client",
+        "app.services.prompt_compressor"
+      ]
+    },
+    {
+      "cluster_id": 6,
+      "size": 34,
+      "inferred_name": "app.services",
+      "internal_edges": 110,
+      "external_edges": 279,
+      "density": 0.098,
+      "cohesion_ratio": 0.2828,
+      "sample_members": [
+        "app.constants",
+        "app.prompts.loader",
+        "app.prompts.tutor_system_prompt",
+        "app.routers.llm",
+        "app.services.course_metadata_extractor"
+      ]
+    },
+    {
+      "cluster_id": 7,
+      "size": 18,
+      "inferred_name": "app.agents",
+      "internal_edges": 44,
+      "external_edges": 40,
+      "density": 0.1438,
+      "cohesion_ratio": 0.5238,
+      "sample_members": [
+        "app.agents",
+        "app.agents.base",
+        "app.agents.factory",
+        "app.agents.pipeline",
+        "app.agents.schemas"
+      ]
+    },
+    {
+      "cluster_id": 8,
+      "size": 1,
+      "inferred_name": "unknown",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app"
+      ]
+    },
+    {
+      "cluster_id": 9,
+      "size": 1,
+      "inferred_name": "app.agents",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.agents.tests"
+      ]
+    },
+    {
+      "cluster_id": 10,
+      "size": 1,
+      "inferred_name": "app.constants",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.constants.resources"
+      ]
+    },
+    {
+      "cluster_id": 11,
+      "size": 1,
+      "inferred_name": "app.context",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.context"
+      ]
+    },
+    {
+      "cluster_id": 12,
+      "size": 1,
+      "inferred_name": "app.context",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.context.knowledge"
+      ]
+    },
+    {
+      "cluster_id": 13,
+      "size": 1,
+      "inferred_name": "app.errors",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.errors.base"
+      ]
+    },
+    {
+      "cluster_id": 14,
+      "size": 1,
+      "inferred_name": "app.errors",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.errors.infrastructure"
+      ]
+    },
+    {
+      "cluster_id": 15,
+      "size": 1,
+      "inferred_name": "app.errors",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.errors.service"
+      ]
+    },
+    {
+      "cluster_id": 16,
+      "size": 1,
+      "inferred_name": "app.jobs",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.jobs"
+      ]
+    },
+    {
+      "cluster_id": 17,
+      "size": 1,
+      "inferred_name": "app.llm",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.llm.capabilities"
+      ]
+    },
+    {
+      "cluster_id": 18,
+      "size": 1,
+      "inferred_name": "app.middleware",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.middleware"
+      ]
+    },
+    {
+      "cluster_id": 19,
+      "size": 1,
+      "inferred_name": "app.models",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.models"
+      ]
+    },
+    {
+      "cluster_id": 20,
+      "size": 1,
+      "inferred_name": "app.services",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.services"
+      ]
+    },
+    {
+      "cluster_id": 21,
+      "size": 1,
+      "inferred_name": "app.services",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.services.repositories"
+      ]
+    },
+    {
+      "cluster_id": 22,
+      "size": 1,
+      "inferred_name": "app.services",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.services.v1"
+      ]
+    },
+    {
+      "cluster_id": 23,
+      "size": 1,
+      "inferred_name": "app.services",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.services.v3"
+      ]
+    },
+    {
+      "cluster_id": 24,
+      "size": 1,
+      "inferred_name": "app.services",
+      "internal_edges": 0,
+      "external_edges": 0,
+      "density": 0,
+      "cohesion_ratio": 0,
+      "sample_members": [
+        "app.services.video"
+      ]
+    }
+  ],
+  "dependency_cycles": [
+    [
+      "app.monitoring",
+      "app.services.redis_client",
+      "app.services.context7_client"
+    ],
+    [
+      "app.services.claude_client",
+      "app.services.streaming"
+    ],
+    [
+      "app.services.validators.froebel",
+      "app.services.validators.herbart",
+      "app.services.validators",
+      "app.services.validators.montessori",
+      "app.services.validators.language",
+      "app.services.validators.bilingual",
+      "app.services.quality_validator",
+      "app.services.validators.dewey"
+    ]
+  ],
+  "narrative": "# Narrativa Arquitetural — ana-service\n\n**Grafo:** 375 nós, 1897 arestas\n**Comunidades detectadas (Leiden):** 25\n**Ciclos de dependência (SCCs > 1):** 3\n\n## Camadas Identificadas\n\n- **app.services** — 66 nós, coesão 39% (151 arestas internas, 234 externas)\n  - `PIL`\n  - `PyPDF2`\n  - `app.constants.llm_operations`\n  - `app.dependencies.context7`\n  - `app.errors.llm`\n- **app.skills** — 54 nós, coesão 36% (163 arestas internas, 295 externas)\n  - `abc`\n  - `app.routers.skills`\n  - `app.services.llm.factory`\n  - `app.services.llm.mcp_service`\n  - `app.services.study.constants`\n- **app.services** — 53 nós, coesão 31% (172 arestas internas, 379 externas)\n  - `anthropic`\n  - `anthropic.types`\n  - `app.config`\n  - `app.errors`\n  - `app.jobs.context_summarizer`\n- **app.services** — 49 nós, coesão 41% (113 arestas internas, 160 externas)\n  - `app.context.context_loader`\n  - `app.jobs.generate_course_job`\n  - `app.logging_http`\n  - `app.main`\n  - `app.models.bible`\n- **app.routers** — 48 nós, coesão 35% (139 arestas internas, 257 externas)\n  - `app.dependencies`\n  - `app.dependencies.auth`\n  - `app.dependencies.llm`\n  - `app.dependencies.llm_context`\n  - `app.middleware.tracing`\n- **app.services** — 36 nós, coesão 39% (102 arestas internas, 162 externas)\n  - `app.models.pipeline_v3`\n  - `app.routers.generation_v3`\n  - `app.services.context_prioritizer`\n  - `app.services.npm_registry_client`\n  - `app.services.prompt_compressor`\n- **app.services** — 34 nós, coesão 28% (110 arestas internas, 279 externas)\n  - `app.constants`\n  - `app.prompts.loader`\n  - `app.prompts.tutor_system_prompt`\n  - `app.routers.llm`\n  - `app.services.course_metadata_extractor`\n- **app.agents** — 18 nós, coesão 52% (44 arestas internas, 40 externas)\n  - `app.agents`\n  - `app.agents.base`\n  - `app.agents.factory`\n  - `app.agents.pipeline`\n  - `app.agents.schemas`\n\n## Hotspots Críticos\n\n1. **`typing`** [HUB]  \n   in_degree=200, betweenness=0.0, pagerank=0.073439, I=0.0\n\n2. **`logging`** [HUB]  \n   in_degree=182, betweenness=0.0, pagerank=0.051009, I=0.0\n\n3. **`app.services.llm.factory`** [MODERADO]  \n   in_degree=7, betweenness=0.015895, pagerank=0.0033, I=0.5\n   Arquivo: `app/services/llm/factory.py`\n\n4. **`app.skills.runtime`** [HUB]  \n   in_degree=14, betweenness=0.012287, pagerank=0.005487, I=0.3\n   Arquivo: `app/skills/runtime.py`\n\n5. **`app.middleware.tracing`** [HUB]  \n   in_degree=53, betweenness=0.006193, pagerank=0.009169, I=0.1587\n   Arquivo: `app/middleware/tracing.py`\n\n## Ciclos de Dependência\n\n1. Ciclo com 3 nós: app.monitoring, app.services.redis_client, app.services.context7_client\n2. Ciclo com 2 nós: app.services.claude_client, app.services.streaming\n3. Ciclo com 8 nós: app.services.validators.froebel, app.services.validators.herbart, app.services.validators, app.services.validators.montessori, app.services.validators.language\n\n## Fluxo Principal Inferido\n\nEntrypoint provável: **`app.routers.generation_v3`** (out_degree=44, I=1.0)\nHub central: **`typing`** (in_degree=200, I=0.0)\n\nFluxo: Request → `app.routers.generation_v3` → routers → services → `typing` → providers"
+}

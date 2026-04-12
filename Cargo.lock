@@ -259,6 +259,7 @@ dependencies = [
  "graphify-core",
  "graphify-extract",
  "graphify-report",
+ "rayon",
  "serde",
  "serde_json",
  "toml",
@@ -284,6 +285,14 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-python",
  "tree-sitter-typescript",
+]
+
+[[package]]
+name = "graphify-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

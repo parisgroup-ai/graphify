@@ -1,0 +1,67 @@
+{
+  "target_dir": "/Users/cleitonparis/www/cursos/apps/ana-service/app",
+  "total_nodes": 3263,
+  "total_edges": 9384,
+  "total_cycles": 0,
+  "cycles_sample": [],
+  "top5_risk_symbols": [
+    {
+      "name": "app.services.config_client.get",
+      "file": "app/services/config_client.py",
+      "line": 281,
+      "kind": "function",
+      "betweenness": 0.0,
+      "in_degree": 173,
+      "in_cycles": false,
+      "risk_score": 0.4
+    },
+    {
+      "name": "app.services.llm.base.get",
+      "file": "app/services/llm/base.py",
+      "line": 216,
+      "kind": "function",
+      "betweenness": 0.0,
+      "in_degree": 173,
+      "in_cycles": false,
+      "risk_score": 0.4
+    },
+    {
+      "name": "app.services.redis_client.get",
+      "file": "app/services/redis_client.py",
+      "line": 307,
+      "kind": "function",
+      "betweenness": 0.0,
+      "in_degree": 173,
+      "in_cycles": false,
+      "risk_score": 0.4
+    },
+    {
+      "name": "app.services.study.stream_metadata_store.get",
+      "file": "app/services/study/stream_metadata_store.py",
+      "line": 62,
+      "kind": "function",
+      "betweenness": 0.0,
+      "in_degree": 173,
+      "in_cycles": false,
+      "risk_score": 0.4
+    },
+    {
+      "name": "app.skills.registry.get",
+      "file": "app/skills/registry.py",
+      "line": 37,
+      "kind": "function",
+      "betweenness": 0.0,
+      "in_degree": 173,
+      "in_cycles": false,
+      "risk_score": 0.4
+    }
+  ],
+  "methodology": {
+    "description": "risk_score = (betweenness_norm * 0.4) + (in_degree_norm * 0.4) + (in_cycle * 0.2)",
+    "betweenness_weight": 0.4,
+    "in_degree_weight": 0.4,
+    "cycle_weight": 0.2,
+    "normalization": "min-max scaling (0-1) para betweenness e in_degree",
+    "rationale": "Betweenness e in_degree recebem peso igual (0.4 cada) porque ambas medem impacto de mudan\u00e7a: betweenness mede propaga\u00e7\u00e3o (n\u00f3 ponte), in_degree mede depend\u00eancia direta (quantos m\u00f3dulos usam). Participa\u00e7\u00e3o em ciclo recebe peso menor (0.2) porque \u00e9 bin\u00e1rio, mas indica risco de quebra em cascata."
+  }
+}

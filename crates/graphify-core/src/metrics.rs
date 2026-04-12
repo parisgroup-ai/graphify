@@ -4,7 +4,7 @@ use petgraph::Direction;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 
-use crate::cycles::is_in_cycle;
+use crate::cycles::find_sccs;
 use crate::graph::CodeGraph;
 
 // ---------------------------------------------------------------------------
@@ -269,6 +269,13 @@ pub fn compute_metrics(graph: &CodeGraph, weights: &ScoringWeights) -> Vec<NodeM
     let raw_bt = betweenness_centrality(graph);
     let raw_pr = pagerank(graph);
 
+    // Precompute cycle membership ONCE (O(V+E)), not per-node.
+    let sccs = find_sccs(graph);
+    let cycle_members: std::collections::HashSet<&str> = sccs
+        .iter()
+        .flat_map(|scc| scc.node_ids.iter().map(|s| s.as_str()))
+        .collect();
+
     // Build raw in_degree map (as f64 for normalization).
     let raw_id_f64: HashMap<String, f64> = ids
         .iter()
@@ -286,7 +293,7 @@ pub fn compute_metrics(graph: &CodeGraph, weights: &ScoringWeights) -> Vec<NodeM
             let bt = norm_bt.get(id).copied().unwrap_or(0.0);
             let pr = norm_pr.get(id).copied().unwrap_or(0.0);
             let id_norm = norm_id.get(id).copied().unwrap_or(0.0);
-            let in_cycle = is_in_cycle(graph, id);
+            let in_cycle = cycle_members.contains(id.as_str());
             let ic = if in_cycle { 1.0 } else { 0.0 };
 
             let score = weights.betweenness * bt

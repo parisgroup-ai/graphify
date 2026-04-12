@@ -1,0 +1,214 @@
+{
+  "main": {
+    "id": "5788a0c984131adc",
+    "type": "split",
+    "children": [
+      {
+        "id": "698b46ba7a365715",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d94ffa17dc3eae35",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "_hub/vaultpilot-lab/20-fontes/Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "0572ee2a9c88db8b",
+    "type": "split",
+    "children": [
+      {
+        "id": "b83204d10acdb9a7",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "707ff5d15521bff1",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Explorador de arquivos"
+            }
+          },
+          {
+            "id": "6d2c67b65b2ec0b3",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Procurar"
+            }
+          },
+          {
+            "id": "2c538d7d8ec36ae0",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Marcadores"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "3b766a50c4fb3ccd",
+    "type": "split",
+    "children": [
+      {
+        "id": "0d153b3367f96235",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "fe54e4d8abefce0c",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "_hub/vaultpilot-lab/20-fontes/Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Links inversos para Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1"
+            }
+          },
+          {
+            "id": "d9621ed58c1aa817",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "_hub/vaultpilot-lab/20-fontes/Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Links de saída para Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1"
+            }
+          },
+          {
+            "id": "a7df101f1cf2eab4",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Etiquetas"
+            }
+          },
+          {
+            "id": "8edc1f5baa534090",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "Todas as propriedades"
+            }
+          },
+          {
+            "id": "f294ca3ccf367387",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "_hub/vaultpilot-lab/20-fontes/Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Sumário de Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Abrir a troca rápida": false,
+      "graph:Abrir visualização em gráfico": false,
+      "canvas:Criar novo canvas": false,
+      "daily-notes:Abrir a nota de hoje": false,
+      "templates:Inserir modelo": false,
+      "command-palette:Abrir paleta de comandos": false,
+      "bases:Criar nova base": false
+    }
+  },
+  "active": "d94ffa17dc3eae35",
+  "lastOpenFiles": [
+    "target/debug/deps/graphify-f8a041d86f46bd78",
+    "target/debug/deps/graphify-f8a041d86f46bd78.biplq47o6vzolks12wu7nui7j.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.6bipm9a2m4sl5znun6vjaszio.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.07dfud8yg7fd2zjb6y7v4ay1b.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.97vvjmzhzueng8fatic8k9wb8.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.esz4d80ucxwozhitnojz9lg0z.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.e57mlz8i28n0n6lftdivzwo2r.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.465dl52ehjzwq0evkayk0k1gn.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.9gqez9b3ys3z4ox7g7921j4tu.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.cy2y5cqihak76j4l52u5aqr78.1ypr4zd.rcgu.o",
+    "target/debug/deps/graphify-f8a041d86f46bd78.bg1arvncoawovz7jlv40jtimx.1ypr4zd.rcgu.o",
+    "README.md",
+    "docs/superpowers/plans/2026-04-12-graphify-rust-rewrite.md",
+    "docs/superpowers/specs/2026-04-12-graphify-rust-rewrite-design.md",
+    "CLAUDE.md",
+    "report/dead_code.png",
+    "report/circular_dependencies.png",
+    "_hub/vaultpilot-lab/20-fontes/Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz 1.md",
+    "_hub/vaultpilot-lab/20-fontes/Trump anuncia bloqueio 'de todos os navios' que tentarem entrar ou sair de Ormuz.md",
+    "scope-ana-service.md",
+    "report/architecture_report.md",
+    "report/graph_communities.png",
+    "analysis_imports.md",
+    "scope.md",
+    "evidence-template.md"
+  ]
+}

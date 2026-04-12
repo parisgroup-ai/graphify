@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
+use rayon::prelude::*;
 use serde::Deserialize;
 
 use graphify_core::{
@@ -163,7 +164,7 @@ fn main() {
                 let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
-                write_analysis_json(&metrics, &communities, &cycles_for_report, &proj_out.join("analysis.json"));
+                write_analysis_json(&metrics, &communities, &cycles_for_report, graph.edge_count(), &proj_out.join("analysis.json"));
                 write_nodes_csv(&metrics, &proj_out.join("graph_nodes.csv"));
                 write_edges_csv(&graph, &proj_out.join("graph_edges.csv"));
                 println!(
@@ -399,27 +400,31 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
         }
     }
 
-    // Extract each file and collect raw results.
+    // Extract each file in parallel via rayon, then collect results.
+    let results: Vec<ExtractionResult> = files
+        .par_iter()
+        .filter_map(|file| {
+            let source = match std::fs::read(&file.path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("Warning: cannot read {:?}: {e}", file.path);
+                    return None;
+                }
+            };
+
+            let extractor: &dyn LanguageExtractor = match file.language {
+                Language::Python => &python_extractor,
+                Language::TypeScript => &typescript_extractor,
+            };
+
+            Some(extractor.extract_file(&file.path, &source, &file.module_name))
+        })
+        .collect();
+
+    // Merge results sequentially into graph.
     let mut all_nodes = Vec::new();
     let mut all_raw_edges: Vec<(String, String, graphify_core::types::Edge)> = Vec::new();
-
-    for file in &files {
-        let source = match std::fs::read(&file.path) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                eprintln!("Warning: cannot read {:?}: {e}", file.path);
-                continue;
-            }
-        };
-
-        let extractor: &dyn LanguageExtractor = match file.language {
-            Language::Python => &python_extractor,
-            Language::TypeScript => &typescript_extractor,
-        };
-
-        let result: ExtractionResult =
-            extractor.extract_file(&file.path, &source, &file.module_name);
-
+    for result in results {
         all_nodes.extend(result.nodes);
         all_raw_edges.extend(result.edges);
     }
@@ -507,7 +512,7 @@ fn write_all_outputs(
         match fmt.as_str() {
             "json" => {
                 write_graph_json(graph, &out_dir.join("graph.json"));
-                write_analysis_json(metrics, communities, cycles, &out_dir.join("analysis.json"));
+                write_analysis_json(metrics, communities, cycles, graph.edge_count(), &out_dir.join("analysis.json"));
             }
             "csv" => {
                 write_nodes_csv(metrics, &out_dir.join("graph_nodes.csv"));

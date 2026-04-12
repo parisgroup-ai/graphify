@@ -126,6 +126,7 @@ pub fn write_analysis_json(
     metrics: &[NodeMetrics],
     communities: &[Community],
     cycles: &[Cycle],
+    total_edges: usize,
     path: &Path,
 ) {
     let nodes: Vec<MetricsRecord<'_>> = metrics
@@ -161,7 +162,7 @@ pub fn write_analysis_json(
 
     let summary = Summary {
         total_nodes: metrics.len(),
-        total_edges: 0,
+        total_edges,
         total_communities: communities.len(),
         total_cycles: cycles.len(),
         top_hotspots,
@@ -251,7 +252,7 @@ mod tests {
         }];
         let cycles: Vec<Cycle> = vec![vec!["app.main".to_string(), "app.utils".to_string()]];
 
-        write_analysis_json(&metrics, &communities, &cycles, &path);
+        write_analysis_json(&metrics, &communities, &cycles, 42, &path);
 
         assert!(path.exists(), "analysis.json should be created");
         let content = std::fs::read_to_string(&path).unwrap();

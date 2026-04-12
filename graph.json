@@ -1,0 +1,423 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "node_type": "entrypoint",
+      "layer": "app",
+      "in_degree": 0,
+      "out_degree": 16,
+      "id": "app.main"
+    },
+    {
+      "node_type": "config",
+      "layer": "config",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.config"
+    },
+    {
+      "node_type": "config",
+      "layer": "config",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.version"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.health"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.courses"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.spark_chat"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.admin"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.skills"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.generation_v3"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.study_course"
+    },
+    {
+      "node_type": "module",
+      "layer": "services",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.claude_client"
+    },
+    {
+      "node_type": "module",
+      "layer": "services",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.rate_limiter"
+    },
+    {
+      "node_type": "module",
+      "layer": "services",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.database"
+    },
+    {
+      "node_type": "module",
+      "layer": "services",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.project_cost_aggregator"
+    },
+    {
+      "node_type": "middleware",
+      "layer": "middleware",
+      "in_degree": 2,
+      "out_degree": 0,
+      "id": "app.middleware.tracing"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.llm"
+    },
+    {
+      "node_type": "router",
+      "layer": "routers",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.routers.mcp"
+    },
+    {
+      "node_type": "orchestrator",
+      "layer": "services.v3",
+      "in_degree": 0,
+      "out_degree": 12,
+      "id": "app.services.v3.pipeline_orchestrator"
+    },
+    {
+      "node_type": "model",
+      "layer": "models",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.models.pipeline_v3"
+    },
+    {
+      "node_type": "module",
+      "layer": "skills",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.skills"
+    },
+    {
+      "node_type": "module",
+      "layer": "services",
+      "in_degree": 2,
+      "out_degree": 0,
+      "id": "app.services.llm"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.bible_generator"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.domain_classifier"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.graph_filter"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.idea_spec_builder"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.knowledge_graph_extractor"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.lesson_generation_runner"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.plan_reviewer"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.variant_plan_builder"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.v3",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.v3.wave_orchestrator"
+    },
+    {
+      "node_type": "orchestrator",
+      "layer": "services.study",
+      "in_degree": 0,
+      "out_degree": 9,
+      "id": "app.services.study.study_course_service"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.study",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.study.course_helpers"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.study",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.study.course_repository"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.study",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.study.message_processor"
+    },
+    {
+      "node_type": "module",
+      "layer": "services.study",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.study.specialist_router"
+    },
+    {
+      "node_type": "module",
+      "layer": "services",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.llm_tracker"
+    },
+    {
+      "node_type": "module",
+      "layer": "services",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.services.redis_client"
+    },
+    {
+      "node_type": "utility",
+      "layer": "utility",
+      "in_degree": 1,
+      "out_degree": 0,
+      "id": "app.utils"
+    }
+  ],
+  "links": [
+    {
+      "source": "app.main",
+      "target": "app.config"
+    },
+    {
+      "source": "app.main",
+      "target": "app.version"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.health"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.courses"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.spark_chat"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.admin"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.skills"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.generation_v3"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.study_course"
+    },
+    {
+      "source": "app.main",
+      "target": "app.services.claude_client"
+    },
+    {
+      "source": "app.main",
+      "target": "app.services.rate_limiter"
+    },
+    {
+      "source": "app.main",
+      "target": "app.services.database"
+    },
+    {
+      "source": "app.main",
+      "target": "app.services.project_cost_aggregator"
+    },
+    {
+      "source": "app.main",
+      "target": "app.middleware.tracing"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.llm"
+    },
+    {
+      "source": "app.main",
+      "target": "app.routers.mcp"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.models.pipeline_v3"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.skills"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.llm"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.bible_generator"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.domain_classifier"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.graph_filter"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.idea_spec_builder"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.knowledge_graph_extractor"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.lesson_generation_runner"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.plan_reviewer"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.variant_plan_builder"
+    },
+    {
+      "source": "app.services.v3.pipeline_orchestrator",
+      "target": "app.services.v3.wave_orchestrator"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.services.llm"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.services.study.course_helpers"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.services.study.course_repository"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.services.study.message_processor"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.services.study.specialist_router"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.services.llm_tracker"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.services.redis_client"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.middleware.tracing"
+    },
+    {
+      "source": "app.services.study.study_course_service",
+      "target": "app.utils"
+    }
+  ]
+}
