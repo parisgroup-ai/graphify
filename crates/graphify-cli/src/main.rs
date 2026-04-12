@@ -17,7 +17,8 @@ use graphify_extract::{
     TypeScriptExtractor,
 };
 use graphify_report::{
-    write_analysis_json, write_edges_csv, write_graph_json, write_nodes_csv, write_report, Cycle,
+    write_analysis_json, write_edges_csv, write_graph_json, write_html, write_nodes_csv,
+    write_report, Cycle,
 };
 
 // ---------------------------------------------------------------------------
@@ -268,7 +269,7 @@ fn cmd_init() {
 output = "./report"
 # weights = [0.4, 0.2, 0.2, 0.2]   # betweenness, pagerank, in_degree, in_cycle
 # exclude = []                       # extra directories to skip
-# format = ["json", "csv", "md"]    # output formats
+# format = ["json", "csv", "md", "html"]    # output formats
 
 [[project]]
 name = "my-project"
@@ -552,6 +553,16 @@ fn write_all_outputs(
                     communities,
                     cycles,
                     &out_dir.join("architecture_report.md"),
+                );
+            }
+            "html" => {
+                write_html(
+                    project_name,
+                    graph,
+                    metrics,
+                    communities,
+                    cycles,
+                    &out_dir.join("architecture_graph.html"),
                 );
             }
             other => {
