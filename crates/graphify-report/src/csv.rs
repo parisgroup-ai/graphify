@@ -4,14 +4,23 @@ use graphify_core::{graph::CodeGraph, metrics::NodeMetrics};
 
 /// Writes node metrics to a CSV file.
 ///
-/// Header: `id,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle`
+/// Header: `id,kind,file_path,language,line,is_local,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle`
+///
+/// Node attribute columns (`kind`, `file_path`, `language`, `line`, `is_local`)
+/// are looked up from `graph`. If a metric ID is not found in the graph (should
+/// not happen in practice), those columns are written as empty strings / zeros.
 ///
 /// # Panics
 /// Panics if file I/O or CSV serialization fails.
-pub fn write_nodes_csv(metrics: &[NodeMetrics], path: &Path) {
+pub fn write_nodes_csv(metrics: &[NodeMetrics], graph: &CodeGraph, path: &Path) {
     let mut wtr = csv::Writer::from_path(path).expect("open nodes CSV for writing");
     wtr.write_record(&[
         "id",
+        "kind",
+        "file_path",
+        "language",
+        "line",
+        "is_local",
         "betweenness",
         "pagerank",
         "in_degree",
@@ -23,8 +32,29 @@ pub fn write_nodes_csv(metrics: &[NodeMetrics], path: &Path) {
     .expect("write nodes CSV header");
 
     for m in metrics {
+        let (kind, file_path, language, line, is_local) = match graph.get_node(&m.id) {
+            Some(node) => (
+                format!("{:?}", node.kind),
+                node.file_path.display().to_string(),
+                format!("{:?}", node.language),
+                node.line.to_string(),
+                node.is_local.to_string(),
+            ),
+            None => (
+                String::new(),
+                String::new(),
+                String::new(),
+                "0".to_string(),
+                "false".to_string(),
+            ),
+        };
         wtr.write_record(&[
             m.id.as_str(),
+            &kind,
+            &file_path,
+            &language,
+            &line,
+            &is_local,
             &m.betweenness.to_string(),
             &m.pagerank.to_string(),
             &m.in_degree.to_string(),
@@ -102,17 +132,22 @@ mod tests {
     fn write_nodes_csv_header_and_data() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nodes.csv");
-        write_nodes_csv(&make_metrics(), &path);
+        let graph = make_graph();
+        write_nodes_csv(&make_metrics(), &graph, &path);
 
         let content = std::fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
 
         assert_eq!(
             lines[0],
-            "id,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle"
+            "id,kind,file_path,language,line,is_local,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle"
         );
         assert!(lines.len() >= 2, "should have at least one data row");
         assert!(lines[1].starts_with("app.main,"));
+        // Verify node attribute columns are present in the data row.
+        assert!(lines[1].contains("Module"), "should contain node kind");
+        assert!(lines[1].contains("app/main.py"), "should contain file_path");
+        assert!(lines[1].contains("Python"), "should contain language");
     }
 
     #[test]

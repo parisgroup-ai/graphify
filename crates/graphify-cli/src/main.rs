@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
@@ -165,7 +165,7 @@ fn main() {
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
                 write_analysis_json(&metrics, &communities, &cycles_for_report, graph.edge_count(), &proj_out.join("analysis.json"));
-                write_nodes_csv(&metrics, &proj_out.join("graph_nodes.csv"));
+                write_nodes_csv(&metrics, &graph, &proj_out.join("graph_nodes.csv"));
                 write_edges_csv(&graph, &proj_out.join("graph_edges.csv"));
                 println!(
                     "[{}] Analyzed {} nodes, {} communities, {} cycles",
@@ -182,9 +182,8 @@ fn main() {
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
             let formats = resolve_formats(&cfg, format.as_deref());
-            let mut project_names: Vec<String> = Vec::new();
+            let mut project_graphs: Vec<(String, CodeGraph)> = Vec::new();
             for project in &cfg.project {
-                project_names.push(project.name.clone());
                 let (graph, _) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
@@ -205,9 +204,10 @@ fn main() {
                     project.name,
                     proj_out.display()
                 );
+                project_graphs.push((project.name.clone(), graph));
             }
-            if project_names.len() > 1 {
-                write_summary(&project_names, &out_dir);
+            if project_graphs.len() > 1 {
+                write_summary(&project_graphs, &out_dir);
             }
         }
 
@@ -216,9 +216,8 @@ fn main() {
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, None);
             let formats = resolve_formats(&cfg, None);
-            let mut project_names: Vec<String> = Vec::new();
+            let mut project_graphs: Vec<(String, CodeGraph)> = Vec::new();
             for project in &cfg.project {
-                project_names.push(project.name.clone());
                 let (graph, _) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
@@ -239,9 +238,10 @@ fn main() {
                     project.name,
                     proj_out.display()
                 );
+                project_graphs.push((project.name.clone(), graph));
             }
-            if project_names.len() > 1 {
-                write_summary(&project_names, &out_dir);
+            if project_graphs.len() > 1 {
+                write_summary(&project_graphs, &out_dir);
             }
         }
     }
@@ -431,6 +431,14 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
 
     // Build graph: add all nodes first.
     let mut graph = CodeGraph::new();
+
+    // Set the default language for placeholder nodes so that unresolved
+    // imports are tagged with the project's language instead of always
+    // defaulting to Python.
+    if let Some(lang) = languages.first() {
+        graph.set_default_language(lang.clone());
+    }
+
     for node in all_nodes {
         graph.add_node(node);
     }
@@ -515,7 +523,7 @@ fn write_all_outputs(
                 write_analysis_json(metrics, communities, cycles, graph.edge_count(), &out_dir.join("analysis.json"));
             }
             "csv" => {
-                write_nodes_csv(metrics, &out_dir.join("graph_nodes.csv"));
+                write_nodes_csv(metrics, graph, &out_dir.join("graph_nodes.csv"));
                 write_edges_csv(graph, &out_dir.join("graph_edges.csv"));
             }
             "md" | "markdown" => {
@@ -538,11 +546,109 @@ fn write_all_outputs(
 // Cross-project summary
 // ---------------------------------------------------------------------------
 
-fn write_summary(project_names: &[String], out_dir: &Path) {
+/// Detect cross-project dependencies and write a real summary.
+///
+/// For each project we record which node IDs belong to it. Then for every
+/// edge whose source is in project A and whose target exists in a *different*
+/// project B, we record a cross-project dependency edge. We also detect
+/// "shared modules" — node IDs that appear in more than one project.
+fn write_summary(project_graphs: &[(String, CodeGraph)], out_dir: &Path) {
+    let project_names: Vec<&str> = project_graphs.iter().map(|(n, _)| n.as_str()).collect();
+
+    // Build a map: node_id -> set of project names that contain it.
+    let mut node_owners: HashMap<String, HashSet<String>> = HashMap::new();
+    for (proj_name, graph) in project_graphs {
+        for id in graph.node_ids() {
+            node_owners
+                .entry(id.to_string())
+                .or_default()
+                .insert(proj_name.clone());
+        }
+    }
+
+    // Detect cross-project edges.
+    // For each project, iterate its edges. If the target node is owned by a
+    // different project (and not by the source project), record the cross-dep.
+    // We group cross-edges by (from_project, to_project).
+    let mut cross_deps: HashMap<(String, String), Vec<serde_json::Value>> = HashMap::new();
+
+    for (proj_name, graph) in project_graphs {
+        for (src_id, tgt_id, edge) in graph.edges() {
+            if let Some(owners) = node_owners.get(tgt_id) {
+                for owner in owners {
+                    if owner != proj_name {
+                        let kind_str = match edge.kind {
+                            graphify_core::types::EdgeKind::Imports => "Imports",
+                            graphify_core::types::EdgeKind::Defines => "Defines",
+                            graphify_core::types::EdgeKind::Calls => "Calls",
+                        };
+                        let entry = cross_deps
+                            .entry((proj_name.clone(), owner.clone()))
+                            .or_default();
+                        entry.push(serde_json::json!({
+                            "from": src_id,
+                            "to": tgt_id,
+                            "kind": kind_str,
+                            "weight": edge.weight,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    // Build the cross_dependencies array sorted by (from, to) for determinism.
+    let mut dep_keys: Vec<(String, String)> = cross_deps.keys().cloned().collect();
+    dep_keys.sort();
+    let cross_dependencies: Vec<serde_json::Value> = dep_keys
+        .into_iter()
+        .map(|(from_proj, to_proj)| {
+            let edges = cross_deps
+                .remove(&(from_proj.clone(), to_proj.clone()))
+                .unwrap_or_default();
+            serde_json::json!({
+                "from_project": from_proj,
+                "to_project": to_proj,
+                "edges": edges,
+            })
+        })
+        .collect();
+
+    let total_cross_edges: usize = cross_dependencies
+        .iter()
+        .filter_map(|d| d.get("edges").and_then(|e| e.as_array()).map(|a| a.len()))
+        .sum();
+
+    // Shared modules: node IDs that appear in more than one project.
+    let mut shared_modules: Vec<serde_json::Value> = node_owners
+        .iter()
+        .filter(|(_, owners)| owners.len() > 1)
+        .map(|(id, owners)| {
+            let mut projs: Vec<&str> = owners.iter().map(|s| s.as_str()).collect();
+            projs.sort();
+            serde_json::json!({
+                "module": id,
+                "projects": projs,
+            })
+        })
+        .collect();
+    shared_modules.sort_by(|a, b| {
+        let ma = a.get("module").and_then(|v| v.as_str()).unwrap_or("");
+        let mb = b.get("module").and_then(|v| v.as_str()).unwrap_or("");
+        ma.cmp(mb)
+    });
+
     let summary = serde_json::json!({
         "projects": project_names,
-        "count": project_names.len(),
+        "cross_dependencies": cross_dependencies,
+        "shared_modules": shared_modules,
+        "summary": {
+            "total_projects": project_names.len(),
+            "total_cross_edges": total_cross_edges,
+            "total_shared_modules": shared_modules.len(),
+        },
     });
+
     let path = out_dir.join("graphify-summary.json");
     let text = serde_json::to_string_pretty(&summary).expect("serialize summary");
     std::fs::write(&path, text).expect("write graphify-summary.json");

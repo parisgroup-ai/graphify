@@ -1,0 +1,24 @@
+# Rust / Cargo
+/target
+*.rs.bk
+
+# Python artifacts (legacy)
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Graphify output
+/report/

@@ -148,7 +148,45 @@ fn extract_export_statement(
                 Edge::imports(line),
             ));
         }
-        return; // re-exports don't define local symbols
+
+        // Also emit Defines edges for each re-exported symbol.
+        // `export { foo, bar as baz } from './mod'` defines `foo` and `baz`
+        // in the current module's public API.
+        let mut outer = node.walk();
+        for child in node.children(&mut outer) {
+            if child.kind() == "export_clause" {
+                let mut inner = child.walk();
+                for specifier in child.children(&mut inner) {
+                    if specifier.kind() == "export_specifier" {
+                        // Use the alias if present, otherwise the original name.
+                        let exported_name = specifier
+                            .child_by_field_name("alias")
+                            .or_else(|| specifier.child_by_field_name("name"))
+                            .and_then(|n| n.utf8_text(source).ok())
+                            .unwrap_or("");
+                        if !exported_name.is_empty() {
+                            let symbol_id =
+                                format!("{}.{}", module_name, exported_name);
+                            result.nodes.push(Node::symbol(
+                                &symbol_id,
+                                NodeKind::Function,
+                                path,
+                                Language::TypeScript,
+                                line,
+                                true,
+                            ));
+                            result.edges.push((
+                                module_name.to_owned(),
+                                symbol_id,
+                                Edge::defines(line),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        return;
     }
 
     // Otherwise look at the declaration child (if any).
@@ -538,6 +576,78 @@ mod tests {
             1,
             "expected 1 Imports edge to ./bar, got {:?}",
             imports
+        );
+    }
+
+    #[test]
+    fn re_export_produces_defines_edge() {
+        let result = extract("export { foo } from './bar';\n");
+        let defines: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "module.foo")
+            .collect();
+        assert_eq!(
+            defines.len(),
+            1,
+            "expected 1 Defines edge to module.foo, got {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn re_export_produces_symbol_node() {
+        let result = extract("export { foo } from './bar';\n");
+        let sym = result
+            .nodes
+            .iter()
+            .find(|n| n.id == "module.foo" && n.kind == NodeKind::Function)
+            .expect("symbol node module.foo must be created for re-export");
+        assert!(sym.is_local);
+    }
+
+    #[test]
+    fn re_export_multiple_symbols_produces_defines_edges() {
+        let result = extract("export { foo, bar } from './baz';\n");
+        let defines: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Defines)
+            .collect();
+        assert_eq!(
+            defines.len(),
+            2,
+            "expected 2 Defines edges for re-export of foo and bar, got {:?}",
+            defines
+        );
+        assert!(defines.iter().any(|(_, t, _)| t == "module.foo"));
+        assert!(defines.iter().any(|(_, t, _)| t == "module.bar"));
+    }
+
+    #[test]
+    fn re_export_with_alias_uses_alias_name() {
+        let result = extract("export { foo as myFoo } from './bar';\n");
+        let defines: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "module.myFoo")
+            .collect();
+        assert_eq!(
+            defines.len(),
+            1,
+            "expected 1 Defines edge to module.myFoo (alias), got {:?}",
+            defines
+        );
+        // Should NOT define module.foo (the original name).
+        let original: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "module.foo")
+            .collect();
+        assert!(
+            original.is_empty(),
+            "should not define module.foo when alias is present, got {:?}",
+            original
         );
     }
 

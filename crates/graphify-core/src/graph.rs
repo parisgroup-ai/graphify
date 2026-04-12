@@ -20,6 +20,10 @@ use crate::types::{Edge, EdgeKind, Language, Node};
 pub struct CodeGraph {
     graph: DiGraph<Node, Edge>,
     index: HashMap<String, NodeIndex>,
+    /// Language to assign to auto-created placeholder nodes.  Defaults to
+    /// `Language::Python` for backward compatibility but should be set via
+    /// [`CodeGraph::set_default_language`] to match the project being analyzed.
+    default_language: Language,
 }
 
 impl CodeGraph {
@@ -27,12 +31,22 @@ impl CodeGraph {
     // Construction
     // -----------------------------------------------------------------------
 
-    /// Returns an empty `CodeGraph`.
+    /// Returns an empty `CodeGraph` with the default placeholder language set
+    /// to `Language::Python` (for backward compatibility).
     pub fn new() -> Self {
         Self {
             graph: DiGraph::new(),
             index: HashMap::new(),
+            default_language: Language::Python,
         }
+    }
+
+    /// Sets the language assigned to auto-created placeholder nodes.
+    ///
+    /// Call this after construction to match the project's primary language so
+    /// that unresolved-import placeholders are tagged correctly.
+    pub fn set_default_language(&mut self, language: Language) {
+        self.default_language = language;
     }
 
     // -----------------------------------------------------------------------
@@ -185,7 +199,7 @@ impl CodeGraph {
         if let Some(&idx) = self.index.get(id) {
             return idx;
         }
-        let placeholder = Node::module(id, "", Language::Python, 0, false);
+        let placeholder = Node::module(id, "", self.default_language.clone(), 0, false);
         self.add_node(placeholder)
     }
 
