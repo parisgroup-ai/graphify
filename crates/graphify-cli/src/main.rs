@@ -201,6 +201,17 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Interactive shell for exploring the dependency graph
+    Shell {
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Specific project to load (loads all if omitted)
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -508,6 +519,10 @@ fn main() {
                 eprintln!("No path found from '{}' to '{}'.", source, target);
                 std::process::exit(1);
             }
+        }
+
+        Commands::Shell { config, project } => {
+            cmd_shell(&config, project.as_deref());
         }
     }
 }
@@ -876,6 +891,167 @@ fn print_path(path: &[graphify_core::query::PathStep]) {
         }
         print!("{}", step.node_id);
     }
+    println!();
+}
+
+// ---------------------------------------------------------------------------
+// Shell (REPL)
+// ---------------------------------------------------------------------------
+
+fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
+    use std::io::{BufRead, Write};
+
+    let cfg = load_config(config_path);
+    let projects = filter_projects(&cfg, project_filter);
+
+    // Build engines for each project
+    let mut engines: Vec<(String, QueryEngine)> = Vec::new();
+    for proj in &projects {
+        eprintln!("[{}] Loading...", proj.name);
+        let engine = build_query_engine(proj, &cfg.settings);
+        engines.push((proj.name.clone(), engine));
+    }
+
+    println!();
+    println!("Graphify interactive shell ({} project(s) loaded)", engines.len());
+    println!("Type 'help' for available commands, 'exit' to quit.");
+    println!();
+
+    let stdin = std::io::stdin();
+    let reader = std::io::BufReader::new(stdin.lock());
+
+    print!("graphify> ");
+    std::io::stdout().flush().ok();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            print!("graphify> ");
+            std::io::stdout().flush().ok();
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.splitn(3, ' ').collect();
+        let cmd = parts[0];
+
+        match cmd {
+            "exit" | "quit" => break,
+
+            "help" => {
+                println!("Commands:");
+                println!("  stats                    Show graph statistics");
+                println!("  query <pattern>          Search nodes by glob pattern");
+                println!("  path <source> <target>   Find shortest path between nodes");
+                println!("  explain <node_id>        Show detailed info about a node");
+                println!("  exit / quit              Exit the shell");
+                println!("  help                     Show this help");
+            }
+
+            "stats" => {
+                for (name, engine) in &engines {
+                    let s = engine.stats();
+                    println!(
+                        "[{}] {} nodes, {} edges, {} local, {} communities, {} cycles",
+                        name, s.node_count, s.edge_count, s.local_node_count,
+                        s.community_count, s.cycle_count
+                    );
+                }
+            }
+
+            "query" => {
+                if parts.len() < 2 {
+                    println!("Usage: query <pattern>");
+                } else {
+                    let pattern = parts[1];
+                    let filters = SearchFilters::default();
+                    for (name, engine) in &engines {
+                        let results = engine.search(pattern, &filters);
+                        if !results.is_empty() {
+                            let multi = engines.len() > 1;
+                            for r in &results {
+                                if multi {
+                                    println!(
+                                        "  [{}] {} ({:?}) score={:.3}",
+                                        name, r.node_id, r.kind, r.score
+                                    );
+                                } else {
+                                    println!(
+                                        "  {} ({:?}) score={:.3}",
+                                        r.node_id, r.kind, r.score
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            "path" => {
+                if parts.len() < 3 {
+                    println!("Usage: path <source> <target>");
+                } else {
+                    let source = parts[1];
+                    let target = parts[2];
+                    let mut found = false;
+                    for (name, engine) in &engines {
+                        if let Some(path) = engine.shortest_path(source, target) {
+                            found = true;
+                            if engines.len() > 1 {
+                                print!("[{}] ", name);
+                            }
+                            print_path(&path);
+                            break;
+                        }
+                    }
+                    if !found {
+                        println!("No path found from '{}' to '{}'.", source, target);
+                    }
+                }
+            }
+
+            "explain" => {
+                if parts.len() < 2 {
+                    println!("Usage: explain <node_id>");
+                } else {
+                    let node_id = parts[1];
+                    let mut found = false;
+                    for (name, engine) in &engines {
+                        if let Some(report) = engine.explain(node_id) {
+                            found = true;
+                            print_explain_report(&report, name, engines.len() > 1);
+                            break;
+                        }
+                    }
+                    if !found {
+                        println!("Node '{}' not found.", node_id);
+                        for (_name, engine) in &engines {
+                            let suggestions = engine.suggest(node_id);
+                            if !suggestions.is_empty() {
+                                println!("Did you mean?");
+                                for s in &suggestions {
+                                    println!("  {}", s);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            _ => {
+                println!("Unknown command '{}'. Type 'help' for available commands.", cmd);
+            }
+        }
+
+        print!("graphify> ");
+        std::io::stdout().flush().ok();
+    }
+
     println!();
 }
 
