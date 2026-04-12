@@ -142,6 +142,19 @@ impl CodeGraph {
     }
 
     // -----------------------------------------------------------------------
+    // Crate-internal accessors
+    // -----------------------------------------------------------------------
+
+    /// Returns a reference to the underlying [`petgraph::graph::DiGraph`].
+    ///
+    /// Exposed as `pub(crate)` so that sibling modules (e.g. `cycles`) can
+    /// run petgraph algorithms directly without duplicating graph traversal
+    /// logic through the public API.
+    pub(crate) fn raw_graph(&self) -> &petgraph::graph::DiGraph<crate::types::Node, crate::types::Edge> {
+        &self.graph
+    }
+
+    // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
 
