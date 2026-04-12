@@ -1,7 +1,7 @@
+use crate::lang::{ExtractionResult, LanguageExtractor};
+use graphify_core::types::{Edge, Language, Node, NodeKind};
 use std::path::Path;
 use tree_sitter::Parser;
-use graphify_core::types::{Edge, Language, Node, NodeKind};
-use crate::lang::{ExtractionResult, LanguageExtractor};
 
 // ---------------------------------------------------------------------------
 // TypeScriptExtractor
@@ -165,8 +165,7 @@ fn extract_export_statement(
                             .and_then(|n| n.utf8_text(source).ok())
                             .unwrap_or("");
                         if !exported_name.is_empty() {
-                            let symbol_id =
-                                format!("{}.{}", module_name, exported_name);
+                            let symbol_id = format!("{}.{}", module_name, exported_name);
                             result.nodes.push(Node::symbol(
                                 &symbol_id,
                                 NodeKind::Function,
@@ -241,11 +240,9 @@ fn extract_function_declaration(
         true,
     ));
 
-    result.edges.push((
-        module_name.to_owned(),
-        symbol_id,
-        Edge::defines(line),
-    ));
+    result
+        .edges
+        .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
 
     // Scan the function body for call sites.
     let mut cursor = node.walk();
@@ -287,11 +284,9 @@ fn extract_class_declaration(
         true,
     ));
 
-    result.edges.push((
-        module_name.to_owned(),
-        symbol_id,
-        Edge::defines(line),
-    ));
+    result
+        .edges
+        .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
 
     // Scan the class body for call sites.
     let mut cursor = node.walk();
@@ -325,7 +320,8 @@ fn extract_require_calls(
                         match arg.kind() {
                             "string" | "template_string" => {
                                 let raw = arg.utf8_text(source).unwrap_or("");
-                                let target = raw.trim_matches(|c| c == '\'' || c == '"' || c == '`');
+                                let target =
+                                    raw.trim_matches(|c| c == '\'' || c == '"' || c == '`');
                                 if !target.is_empty() {
                                     let line = node.start_position().row + 1;
                                     result.edges.push((
@@ -414,11 +410,7 @@ mod tests {
 
     fn extract(source: &str) -> ExtractionResult {
         let extractor = TypeScriptExtractor::new();
-        extractor.extract_file(
-            Path::new("src/module.ts"),
-            source.as_bytes(),
-            "module",
-        )
+        extractor.extract_file(Path::new("src/module.ts"), source.as_bytes(), "module")
     }
 
     // -----------------------------------------------------------------------

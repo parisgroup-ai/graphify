@@ -54,7 +54,11 @@ pub fn write_report(
     .unwrap();
 
     let mut sorted: Vec<&NodeMetrics> = metrics.iter().collect();
-    sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     for (rank, m) in sorted.iter().take(20).enumerate() {
         writeln!(

@@ -1,7 +1,7 @@
+use crate::lang::{ExtractionResult, LanguageExtractor};
+use graphify_core::types::{Edge, Language, Node, NodeKind};
 use std::path::Path;
 use tree_sitter::Parser;
-use graphify_core::types::{Edge, Language, Node, NodeKind};
-use crate::lang::{ExtractionResult, LanguageExtractor};
 
 // ---------------------------------------------------------------------------
 // PythonExtractor
@@ -42,13 +42,9 @@ impl LanguageExtractor for PythonExtractor {
         let mut result = ExtractionResult::new();
 
         // Add the module node for this file.
-        result.nodes.push(Node::module(
-            module_name,
-            path,
-            Language::Python,
-            1,
-            true,
-        ));
+        result
+            .nodes
+            .push(Node::module(module_name, path, Language::Python, 1, true));
 
         // Walk the root children to extract statements.
         let root = tree.root_node();
@@ -106,11 +102,9 @@ fn extract_import_statement(
                     child.utf8_text(source).unwrap_or("").to_owned()
                 };
                 if !target_name.is_empty() {
-                    result.edges.push((
-                        module_name.to_owned(),
-                        target_name,
-                        Edge::imports(line),
-                    ));
+                    result
+                        .edges
+                        .push((module_name.to_owned(), target_name, Edge::imports(line)));
                 }
             }
             _ => {}
@@ -180,11 +174,9 @@ fn extract_import_from_statement(
 
     if let Some(ref fm) = from_module {
         // Emit an Imports edge to the module.
-        result.edges.push((
-            module_name.to_owned(),
-            fm.clone(),
-            Edge::imports(line),
-        ));
+        result
+            .edges
+            .push((module_name.to_owned(), fm.clone(), Edge::imports(line)));
 
         // Emit Calls edges for each imported name (qualified).
         for (name, name_line) in &import_names {
@@ -194,11 +186,9 @@ fn extract_import_from_statement(
             } else {
                 format!("{}.{}", fm, name)
             };
-            result.edges.push((
-                module_name.to_owned(),
-                qualified,
-                Edge::calls(*name_line),
-            ));
+            result
+                .edges
+                .push((module_name.to_owned(), qualified, Edge::calls(*name_line)));
         }
     }
 }
@@ -236,11 +226,9 @@ fn extract_function_definition(
     ));
 
     // Add a Defines edge from the module to the symbol.
-    result.edges.push((
-        module_name.to_owned(),
-        symbol_id,
-        Edge::defines(line),
-    ));
+    result
+        .edges
+        .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
 
     // Also scan the function body for bare call sites.
     let mut cursor = node.walk();
@@ -279,11 +267,9 @@ fn extract_class_definition(
     ));
 
     // Add a Defines edge.
-    result.edges.push((
-        module_name.to_owned(),
-        symbol_id,
-        Edge::defines(line),
-    ));
+    result
+        .edges
+        .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
 
     // Scan the class body for bare call sites.
     let mut cursor = node.walk();
@@ -314,11 +300,9 @@ fn extract_calls_recursive(
                 let callee = func_child.utf8_text(source).unwrap_or("").to_owned();
                 if !callee.is_empty() {
                     let line = node.start_position().row + 1;
-                    result.edges.push((
-                        module_name.to_owned(),
-                        callee,
-                        Edge::calls(line),
-                    ));
+                    result
+                        .edges
+                        .push((module_name.to_owned(), callee, Edge::calls(line)));
                 }
             }
             // If func_child.kind() == "attribute", it's a method call — skip.
@@ -389,7 +373,12 @@ mod tests {
             .iter()
             .filter(|(_, _, e)| e.kind == EdgeKind::Imports)
             .collect();
-        assert_eq!(imports.len(), 2, "expected 2 Imports edges, got {:?}", imports);
+        assert_eq!(
+            imports.len(),
+            2,
+            "expected 2 Imports edges, got {:?}",
+            imports
+        );
         let targets: Vec<&str> = imports.iter().map(|(_, t, _)| t.as_str()).collect();
         assert!(targets.contains(&"os"), "expected 'os'");
         assert!(targets.contains(&"json"), "expected 'json'");
@@ -418,7 +407,11 @@ mod tests {
             .iter()
             .filter(|(_, t, e)| e.kind == EdgeKind::Imports && t == "app.services.llm")
             .collect();
-        assert_eq!(imports.len(), 1, "expected Imports edge to app.services.llm");
+        assert_eq!(
+            imports.len(),
+            1,
+            "expected Imports edge to app.services.llm"
+        );
     }
 
     #[test]
@@ -429,7 +422,11 @@ mod tests {
             .iter()
             .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "app.services.llm.call_llm")
             .collect();
-        assert_eq!(calls.len(), 1, "expected Calls edge to app.services.llm.call_llm");
+        assert_eq!(
+            calls.len(),
+            1,
+            "expected Calls edge to app.services.llm.call_llm"
+        );
     }
 
     #[test]
@@ -442,7 +439,11 @@ mod tests {
             .collect();
         assert_eq!(imports.len(), 1);
         // The target starts with "." (relative, unresolved).
-        assert!(imports[0].1.starts_with('.'), "expected relative import target, got {}", imports[0].1);
+        assert!(
+            imports[0].1.starts_with('.'),
+            "expected relative import target, got {}",
+            imports[0].1
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -467,7 +468,9 @@ mod tests {
         let edge = result
             .edges
             .iter()
-            .find(|(s, t, e)| e.kind == EdgeKind::Defines && s == "app.test" && t == "app.test.my_func")
+            .find(|(s, t, e)| {
+                e.kind == EdgeKind::Defines && s == "app.test" && t == "app.test.my_func"
+            })
             .expect("Defines edge from module to function");
         assert_eq!(edge.2.kind, EdgeKind::Defines);
     }
@@ -493,7 +496,9 @@ mod tests {
         let edge = result
             .edges
             .iter()
-            .find(|(s, t, e)| e.kind == EdgeKind::Defines && s == "app.test" && t == "app.test.MyClass")
+            .find(|(s, t, e)| {
+                e.kind == EdgeKind::Defines && s == "app.test" && t == "app.test.MyClass"
+            })
             .expect("Defines edge from module to class");
         assert_eq!(edge.2.kind, EdgeKind::Defines);
     }
@@ -511,8 +516,14 @@ mod tests {
             .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
             .map(|(_, t, _)| t.as_str())
             .collect();
-        assert!(call_targets.contains(&"bar"), "expected Calls edge to 'bar'");
-        assert!(call_targets.contains(&"baz"), "expected Calls edge to 'baz'");
+        assert!(
+            call_targets.contains(&"bar"),
+            "expected Calls edge to 'bar'"
+        );
+        assert!(
+            call_targets.contains(&"baz"),
+            "expected Calls edge to 'baz'"
+        );
     }
 
     #[test]
@@ -544,8 +555,14 @@ mod tests {
             .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
             .map(|(_, t, _)| t.as_str())
             .collect();
-        assert!(call_targets.contains(&"setup"), "expected Calls edge to 'setup'");
-        assert!(call_targets.contains(&"configure"), "expected Calls edge to 'configure'");
+        assert!(
+            call_targets.contains(&"setup"),
+            "expected Calls edge to 'setup'"
+        );
+        assert!(
+            call_targets.contains(&"configure"),
+            "expected Calls edge to 'configure'"
+        );
     }
 
     // -----------------------------------------------------------------------

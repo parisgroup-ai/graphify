@@ -153,7 +153,11 @@ pub fn write_analysis_json(
 
     // Top 20 hotspots sorted by score descending.
     let mut sorted: Vec<_> = metrics.iter().collect();
-    sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let top_hotspots: Vec<(String, f64)> = sorted
         .iter()
         .take(20)
@@ -194,8 +198,20 @@ mod tests {
 
     fn make_graph() -> CodeGraph {
         let mut g = CodeGraph::new();
-        g.add_node(Node::module("app.main", "app/main.py", Language::Python, 1, true));
-        g.add_node(Node::module("app.utils", "app/utils.py", Language::Python, 1, true));
+        g.add_node(Node::module(
+            "app.main",
+            "app/main.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        g.add_node(Node::module(
+            "app.utils",
+            "app/utils.py",
+            Language::Python,
+            1,
+            true,
+        ));
         g.add_edge("app.main", "app.utils", Edge::imports(3));
         g
     }

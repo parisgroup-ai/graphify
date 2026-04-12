@@ -1,5 +1,5 @@
+use graphify_core::types::{Edge, Node};
 use std::path::Path;
-use graphify_core::types::{Node, Edge};
 
 /// The result of extracting a single source file.
 pub struct ExtractionResult {
