@@ -2,29 +2,32 @@
 
 ## Last Session Summary
 
-Brainstormed, designed, planned, and fully implemented FEAT-001: Interactive HTML Graph Visualization. The feature adds a self-contained HTML report format to Graphify that renders dependency graphs as interactive force-directed visualizations with D3.js v7. Includes SVG/Canvas auto-switch, sidebar with filters/communities/cycles/search/force controls, marching ants cycle animation, community collapse/expand, PNG export. Merged to main via feature branch.
+Bug fix sprint — fixed all 5 remaining open bugs (BUG-006 through BUG-010). Used work graph pattern: BUG-007 (critical, investigative) first solo, then BUG-006/009/010 dispatched as 3 parallel subagents, then BUG-008 (architectural) last. Test count went from 137 to 150. All pushed to origin/main.
 
 ## Current State
 
 - Branch: `main`
-- Last commit: `f54f206` — `feat: interactive HTML graph visualization (FEAT-001)` (merge commit)
-- Tests: 137 passing
+- Last commit: `8cffb7e` — `fix(core): merge singleton communities on sparse graphs (BUG-008)`
+- Tests: 150 passing (`cargo test --workspace`)
 - Version: 0.1.1
-- No pending unstaged changes (only `.obsidian/workspace.json` editor state)
+- All 10 bugs (BUG-001 through BUG-010) are done
+- No pending unstaged code changes
 
 ## Open Items
 
-### Open Bugs (from sprint board)
-- BUG-006: Walker excludes miss .test.ts/.spec.ts files (high, 1h)
-- BUG-007: TS workspace alias resolution mangles node IDs (critical, 3h)
-- BUG-008: Louvain community detection degenerates on sparse graphs (normal, 2h)
-- BUG-009: Walker silently produces empty graph for missing src/ (normal, 1h)
-- BUG-010: Summary JSON includes full edge list (9.6MB bloat) (low, 1h)
+No bugs remain. Feature backlog:
 
-### Backlog Features
-- FEAT-002: Architectural drift detection (normal, 8h)
-- FEAT-003: New language support — Go, Rust (low, 16h)
-- FEAT-004: CI quality gates (normal, 4h)
+| ID | Priority | Est | Title |
+|---|---|---|---|
+| FEAT-002 | normal | 8h | Architectural drift detection |
+| FEAT-003 | low | 16h | New language support (Go, Rust) |
+| FEAT-004 | normal | 4h | CI quality gates |
+| FEAT-005 | high | 16h | Incremental builds with SHA256 cache |
+| FEAT-006 | high | 16h | Graph query interface (query, path, explain) |
+| FEAT-007 | normal | 16h | MCP server for graph queries |
+| FEAT-008 | normal | 8h | Edge confidence scoring |
+| FEAT-009 | low | 12h | Additional export formats (Neo4j, GraphML, Obsidian) |
+| FEAT-010 | low | 8h | Watch mode for auto-rebuild |
 
 ## Decisions Made (don't re-debate)
 
@@ -36,11 +39,13 @@ Brainstormed, designed, planned, and fully implemented FEAT-001: Interactive HTM
 - **D3.js v7 vendored** (not CDN) for full offline self-containment
 - **Force-directed layout** (not hierarchical) — simpler, proven for dependency graphs
 - **SVG/Canvas auto-switch at 300 nodes** — SVG for crisp interaction, Canvas for performance
-- **`var` for GRAPHIFY_DATA** — `const` at global scope doesn't create window property
 - **Safe DOM construction** — createElement/textContent only, no innerHTML
+- **Workspace alias preservation** (BUG-007) — when TS alias resolves to path with `..`, keep original import name as node ID
+- **Singleton merging** (BUG-008) — post-Louvain Phase 2: absorb connected singletons into best neighbor's community, group isolated singletons together
+- **Built-in test file exclusion** (BUG-006) — always active `is_test_file()` filter, not configurable
 
 ## Suggested Next Steps
 
-1. **BUG-007** (critical) — TS workspace alias resolution mangles node IDs. Highest priority open bug.
-2. **BUG-006** (high) — Walker should also exclude `.test.ts`/`.spec.ts` files.
-3. **Version bump to 0.2.0** — FEAT-001 is a significant new capability, warrants a minor version bump.
+1. **Version bump to 0.2.0** — FEAT-001 + 5 bug fixes is a meaningful minor release, then `git tag v0.2.0` to trigger CI release
+2. **FEAT-005** (high) — Incremental builds with SHA256 cache would dramatically improve re-analysis speed
+3. **FEAT-006** (high) — Graph query interface would make Graphify useful as a dev tool, not just a report generator

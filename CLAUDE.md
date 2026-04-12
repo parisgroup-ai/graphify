@@ -120,10 +120,14 @@ For each [[project]]:
 - Extraction parallelized with `rayon::par_iter`
 - Each `extract_file` call creates a fresh tree-sitter Parser (Parser is not Send)
 - Excluded directories: `__pycache__`, `node_modules`, `.git`, `dist`, `tests`, `__tests__`, `.next`, `build`, `.venv`, `venv`
+- Excluded test files (built-in): `*.test.{ts,tsx,js,jsx}`, `*.spec.{ts,tsx,js,jsx}`, `*.test.py`, `*_test.py`
 - Output: one subdirectory per project under the configured output path
 - Graph serialization compatible with NetworkX `node_link_data` JSON format
-- Cross-project summary (`graphify-summary.json`) only generated when 2+ projects configured
-- Tests: 137 unit + integration tests (`cargo test --workspace`)
+- Cross-project summary (`graphify-summary.json`) only generated when 2+ projects configured; contains aggregate stats only (no full edge list)
+- TS workspace aliases (`@repo/*` → `../../packages/*`) preserve the original import string as node ID when target path traverses outside the project
+- Louvain Phase 2 merges singleton communities: connected singletons → best neighbor, isolated singletons → grouped together
+- Walker warns via `eprintln!` when a project discovers ≤1 file (misconfigured `local_prefix`)
+- Tests: 150 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
@@ -143,10 +147,6 @@ git commit -m "fix: bump version to X.Y.Z"
 git tag vX.Y.Z
 git push origin main --tags            # triggers CI release
 ```
-
-## Learning context
-
-This repo doubles as a ToStudy course workspace ("Graphify: Mapeamento Arquitetural de Codebases com IA e Knowledge Graphs"). The `.cursor/rules/` and `.claude/commands/` contain tutor personas for the course, not Graphify development instructions.
 
 ## Design docs
 

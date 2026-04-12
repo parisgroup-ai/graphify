@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "graphify-core",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "petgraph",
  "rand",
@@ -277,7 +277,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-extract"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "graphify-core",
  "rayon",
@@ -289,15 +289,17 @@ dependencies = [
 
 [[package]]
 name = "graphify-integration-tests"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "graphify-core",
+ "graphify-report",
  "serde_json",
  "tempfile",
 ]
 
 [[package]]
 name = "graphify-report"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "csv",
  "graphify-core",
