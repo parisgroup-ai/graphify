@@ -135,7 +135,72 @@ pub fn detect_communities(graph: &CodeGraph) -> Vec<Community> {
         }
     }
 
+    // Phase 2: merge singleton communities.
+    //
+    // On sparse graphs Louvain Phase 1 often leaves many nodes in singleton
+    // communities because there is no modularity gain from merging isolated
+    // nodes.  Two post-processing steps reduce noise:
+    //
+    // (a) Singletons that DO have neighbours → absorb into the community of
+    //     the highest-weight neighbour.
+    // (b) Remaining singletons (truly isolated, zero edges) → group together
+    //     into a single "unclustered" community.
+    merge_singletons(&mut community, &adj, n);
+
     build_communities(&community, &all_indices, raw)
+}
+
+/// Merge singleton communities after Louvain Phase 1.
+///
+/// Step (a): any singleton whose node has at least one neighbour is absorbed
+/// into the community of its highest-weight neighbour.
+///
+/// Step (b): any remaining singletons (isolated nodes with no edges) are all
+/// assigned to a single shared community so the report is not cluttered with
+/// dozens of one-node groups.
+fn merge_singletons(community: &mut [usize], adj: &[HashMap<usize, f64>], n: usize) {
+    // Count members per community.
+    let mut sizes: HashMap<usize, usize> = HashMap::new();
+    for &c in community.iter() {
+        *sizes.entry(c).or_insert(0) += 1;
+    }
+
+    // (a) Singletons with neighbours → absorb into best neighbour's community.
+    for u in 0..n {
+        if sizes[&community[u]] > 1 {
+            continue; // not a singleton
+        }
+        let mut best_comm = community[u];
+        let mut best_w = 0.0_f64;
+        for (&v, &w) in &adj[u] {
+            if w > best_w {
+                best_w = w;
+                best_comm = community[v];
+            }
+        }
+        if best_comm != community[u] {
+            let old = community[u];
+            community[u] = best_comm;
+            *sizes.get_mut(&old).unwrap() -= 1;
+            *sizes.entry(best_comm).or_insert(0) += 1;
+        }
+    }
+
+    // (b) Remaining singletons (isolated) → group into one shared community.
+    let singletons: Vec<usize> = (0..n)
+        .filter(|&u| sizes[&community[u]] == 1)
+        .collect();
+
+    if singletons.len() > 1 {
+        // Use the label of the first singleton as the shared label.
+        let shared_label = community[singletons[0]];
+        for &u in &singletons[1..] {
+            let old = community[u];
+            community[u] = shared_label;
+            *sizes.get_mut(&old).unwrap() -= 1;
+            *sizes.entry(shared_label).or_insert(0) += 1;
+        }
+    }
 }
 
 /// Groups nodes by their community label, normalises IDs to 0..n, and returns
@@ -347,6 +412,72 @@ mod tests {
         let g = CodeGraph::new();
         let communities = detect_communities(&g);
         assert!(communities.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // BUG-008: Sparse graph singleton merging
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn louvain_sparse_graph_merges_singletons() {
+        // Simulate a sparse graph like pkg-types: a small connected cluster
+        // plus many isolated nodes. Without singleton merging, each isolated
+        // node would be its own community (~1:1 ratio).
+        let mut g = CodeGraph::new();
+
+        // Connected cluster: a → b → c
+        for id in &["a", "b", "c"] {
+            g.add_node(module(id));
+        }
+        g.add_edge("a", "b", Edge::imports(1));
+        g.add_edge("b", "c", Edge::imports(2));
+
+        // 20 isolated nodes (no edges) — simulates type-only modules
+        for i in 0..20 {
+            g.add_node(module(&format!("isolated_{}", i)));
+        }
+
+        let communities = detect_communities(&g);
+
+        // Without the fix: 23 communities (1:1 ratio).
+        // With the fix: ≤3 communities (connected cluster + 1 unclustered group).
+        assert!(
+            communities.len() <= 5,
+            "sparse graph should produce few communities, got {} for 23 nodes",
+            communities.len()
+        );
+    }
+
+    #[test]
+    fn louvain_singleton_with_neighbor_absorbed() {
+        // Node d has one edge to the a-b-c cluster but isn't strongly
+        // connected. It should be absorbed into the cluster's community
+        // rather than staying singleton.
+        let mut g = CodeGraph::new();
+        for id in &["a", "b", "c", "d"] {
+            g.add_node(module(id));
+        }
+        g.add_edge("a", "b", Edge::imports(1));
+        g.add_edge("b", "a", Edge::imports(2));
+        g.add_edge("b", "c", Edge::imports(3));
+        g.add_edge("c", "b", Edge::imports(4));
+        g.add_edge("d", "a", Edge::imports(5)); // d's only connection
+
+        let communities = detect_communities(&g);
+
+        // d should be merged into the a-b-c community, giving 1 community total.
+        assert!(
+            communities.len() <= 2,
+            "weakly-connected singleton should be absorbed, got {} communities",
+            communities.len()
+        );
+
+        // Verify d is in the same community as a
+        let d_comm = communities.iter().find(|c| c.members.contains(&"d".to_string()));
+        let a_comm = communities.iter().find(|c| c.members.contains(&"a".to_string()));
+        assert!(d_comm.is_some() && a_comm.is_some());
+        assert_eq!(d_comm.unwrap().id, a_comm.unwrap().id,
+            "d should be in the same community as a");
     }
 
     // -----------------------------------------------------------------------
