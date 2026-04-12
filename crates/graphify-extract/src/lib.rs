@@ -1,5 +1,6 @@
 pub mod lang;
 pub mod python;
+pub mod resolver;
 pub mod typescript;
 pub mod walker;
 
