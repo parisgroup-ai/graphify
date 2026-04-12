@@ -225,6 +225,30 @@ impl QueryEngine {
         matches.truncate(3);
         matches
     }
+
+    /// Returns nodes that depend on `node_id` (incoming edges).
+    ///
+    /// Each entry is `(source_node_id, edge_kind)`.  Returns an empty `Vec`
+    /// if the node does not exist.
+    pub fn dependents(&self, node_id: &str) -> Vec<(String, EdgeKind)> {
+        self.graph
+            .incoming_edges(node_id)
+            .into_iter()
+            .map(|(src, edge)| (src.to_string(), edge.kind.clone()))
+            .collect()
+    }
+
+    /// Returns nodes that `node_id` depends on (outgoing edges).
+    ///
+    /// Each entry is `(target_node_id, edge_kind)`.  Returns an empty `Vec`
+    /// if the node does not exist.
+    pub fn dependencies(&self, node_id: &str) -> Vec<(String, EdgeKind)> {
+        self.graph
+            .outgoing_edges(node_id)
+            .into_iter()
+            .map(|(tgt, edge)| (tgt.to_string(), edge.kind.clone()))
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -345,5 +369,37 @@ mod tests {
         // "app" matches app.main, app.utils, app.services.llm (3+ nodes)
         let suggestions = engine.suggest("app");
         assert!(suggestions.len() <= 3, "suggest should return at most 3 results, got {}", suggestions.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 4: dependents and dependencies
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dependents_returns_incoming() {
+        let engine = build_engine();
+        let deps = engine.dependents("app.utils");
+        let ids: Vec<&str> = deps.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids.len(), 2, "app.utils should have 2 dependents");
+        assert!(ids.contains(&"app.main"));
+        assert!(ids.contains(&"app.services.llm"));
+    }
+
+    #[test]
+    fn dependencies_returns_outgoing() {
+        let engine = build_engine();
+        let deps = engine.dependencies("app.main");
+        let ids: Vec<&str> = deps.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids.len(), 3, "app.main should have 3 dependencies");
+        assert!(ids.contains(&"app.utils"));
+        assert!(ids.contains(&"app.services.llm"));
+        assert!(ids.contains(&"os"));
+    }
+
+    #[test]
+    fn dependents_unknown_node_returns_empty() {
+        let engine = build_engine();
+        let deps = engine.dependents("nonexistent");
+        assert!(deps.is_empty());
     }
 }

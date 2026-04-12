@@ -155,6 +155,44 @@ impl CodeGraph {
             .collect()
     }
 
+    /// Returns incoming edges as `(source_id, edge)` pairs.
+    ///
+    /// Each pair represents an edge pointing **to** the node with the given
+    /// `id`, along with the ID of the source node.  Returns an empty `Vec` if
+    /// the node does not exist.
+    pub fn incoming_edges(&self, id: &str) -> Vec<(&str, &Edge)> {
+        match self.index.get(id) {
+            Some(&idx) => self
+                .graph
+                .edges_directed(idx, Direction::Incoming)
+                .map(|e| {
+                    let src = self.graph[e.source()].id.as_str();
+                    (src, e.weight())
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Returns outgoing edges as `(target_id, edge)` pairs.
+    ///
+    /// Each pair represents an edge pointing **from** the node with the given
+    /// `id`, along with the ID of the target node.  Returns an empty `Vec` if
+    /// the node does not exist.
+    pub fn outgoing_edges(&self, id: &str) -> Vec<(&str, &Edge)> {
+        match self.index.get(id) {
+            Some(&idx) => self
+                .graph
+                .edges_directed(idx, Direction::Outgoing)
+                .map(|e| {
+                    let tgt = self.graph[e.target()].id.as_str();
+                    (tgt, e.weight())
+                })
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
     /// Returns all edges as `(source_id, target_id, edge)` triples.
     ///
     /// Order is not guaranteed. This is the public equivalent of iterating
