@@ -7,16 +7,8 @@ pub use csv::{write_edges_csv, write_nodes_csv};
 pub use json::{write_analysis_json, write_graph_json};
 pub use markdown::write_report;
 
-// ---------------------------------------------------------------------------
-// Shared types
-// ---------------------------------------------------------------------------
-
-/// A community of nodes grouped by the community-detection algorithm.
-#[derive(Debug, Clone)]
-pub struct Community {
-    pub id: usize,
-    pub members: Vec<String>,
-}
+// Re-export core types used across the report modules.
+pub use graphify_core::community::Community;
 
 /// A cycle represented as an ordered list of node IDs.
 pub type Cycle = Vec<String>;
