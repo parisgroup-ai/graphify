@@ -23,6 +23,85 @@ pub struct GraphStats {
 }
 
 // ---------------------------------------------------------------------------
+// QueryMatch
+// ---------------------------------------------------------------------------
+
+/// A single search result from the query engine.
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryMatch {
+    pub node_id: String,
+    pub kind: NodeKind,
+    pub file_path: PathBuf,
+    pub score: f64,
+    pub community_id: usize,
+    pub in_cycle: bool,
+}
+
+// ---------------------------------------------------------------------------
+// SearchFilters / SortField
+// ---------------------------------------------------------------------------
+
+/// Controls how search results are filtered and sorted.
+pub struct SearchFilters {
+    pub kind: Option<NodeKind>,
+    pub sort_by: SortField,
+    pub local_only: bool,
+}
+
+impl Default for SearchFilters {
+    fn default() -> Self {
+        Self {
+            kind: None,
+            sort_by: SortField::Score,
+            local_only: false,
+        }
+    }
+}
+
+/// Field used to sort search results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SortField {
+    Score,
+    Name,
+    InDegree,
+}
+
+// ---------------------------------------------------------------------------
+// GlobMatcher
+// ---------------------------------------------------------------------------
+
+/// A simple glob pattern matcher supporting `*` (any sequence of characters)
+/// and `?` (any single character).  No external crate required.
+struct GlobMatcher {
+    pattern: Vec<u8>,
+}
+
+impl GlobMatcher {
+    fn new(pattern: &str) -> Self {
+        Self { pattern: pattern.as_bytes().to_vec() }
+    }
+
+    fn is_match(&self, input: &str) -> bool {
+        Self::do_match(&self.pattern, input.as_bytes())
+    }
+
+    fn do_match(pattern: &[u8], input: &[u8]) -> bool {
+        match (pattern.first(), input.first()) {
+            (None, None) => true,
+            (Some(b'*'), _) => {
+                // Try matching rest of pattern with current input (skip the *)
+                // or try advancing input by one character.
+                Self::do_match(&pattern[1..], input)
+                    || (!input.is_empty() && Self::do_match(pattern, &input[1..]))
+            }
+            (Some(b'?'), Some(_)) => Self::do_match(&pattern[1..], &input[1..]),
+            (Some(&p), Some(&i)) if p == i => Self::do_match(&pattern[1..], &input[1..]),
+            _ => false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // QueryEngine
 // ---------------------------------------------------------------------------
 
@@ -56,6 +135,79 @@ impl QueryEngine {
             community_count: self.communities.len(),
             cycle_count: self.cycles.len(),
         }
+    }
+
+    /// Searches for nodes matching a glob pattern, applying optional filters.
+    ///
+    /// The pattern is matched against node IDs using `*` (any chars) and `?`
+    /// (single char) wildcards.  Results are filtered by `kind` and
+    /// `local_only`, then sorted according to `sort_by`.
+    pub fn search(&self, pattern: &str, filters: &SearchFilters) -> Vec<QueryMatch> {
+        let matcher = GlobMatcher::new(pattern);
+
+        let mut results: Vec<QueryMatch> = self
+            .graph
+            .nodes()
+            .iter()
+            .filter(|node| matcher.is_match(&node.id))
+            .filter(|node| {
+                if let Some(ref kind) = filters.kind {
+                    &node.kind == kind
+                } else {
+                    true
+                }
+            })
+            .filter(|node| {
+                if filters.local_only {
+                    node.is_local
+                } else {
+                    true
+                }
+            })
+            .map(|node| {
+                let metrics = self.metrics.iter().find(|m| m.id == node.id);
+                let score = metrics.map(|m| m.score).unwrap_or(0.0);
+                let community_id = metrics.map(|m| m.community_id).unwrap_or(0);
+                let in_cycle = metrics.map(|m| m.in_cycle).unwrap_or(false);
+
+                // Override community_id from actual community detection results
+                let community_id = self
+                    .communities
+                    .iter()
+                    .find(|c| c.members.iter().any(|mid| mid == &node.id))
+                    .map(|c| c.id)
+                    .unwrap_or(community_id);
+
+                QueryMatch {
+                    node_id: node.id.clone(),
+                    kind: node.kind.clone(),
+                    file_path: node.file_path.clone(),
+                    score,
+                    community_id,
+                    in_cycle,
+                }
+            })
+            .collect();
+
+        match filters.sort_by {
+            SortField::Score => {
+                results.sort_by(|a, b| {
+                    b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+            SortField::Name => {
+                results.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+            }
+            SortField::InDegree => {
+                results.sort_by(|a, b| {
+                    let a_deg = self.graph.in_degree(&a.node_id);
+                    let b_deg = self.graph.in_degree(&b.node_id);
+                    b_deg.cmp(&a_deg)
+                });
+            }
+        }
+
+        results
     }
 }
 
@@ -106,5 +258,50 @@ mod tests {
         assert!(stats.community_count >= 1);
         // No cycles in this DAG
         assert_eq!(stats.cycle_count, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 2: search
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn search_glob_matches() {
+        let engine = build_engine();
+        let results = engine.search("app.services.*", &SearchFilters::default());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].node_id, "app.services.llm");
+    }
+
+    #[test]
+    fn search_exact_match() {
+        let engine = build_engine();
+        let results = engine.search("app.main", &SearchFilters::default());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].node_id, "app.main");
+    }
+
+    #[test]
+    fn search_no_matches() {
+        let engine = build_engine();
+        let results = engine.search("nonexistent.*", &SearchFilters::default());
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn search_filter_by_kind() {
+        let engine = build_engine();
+        let filters = SearchFilters {
+            kind: Some(NodeKind::Function),
+            ..SearchFilters::default()
+        };
+        let results = engine.search("*", &filters);
+        assert!(results.is_empty(), "all nodes are Module, filtering by Function should return empty");
+    }
+
+    #[test]
+    fn search_star_matches_all() {
+        let engine = build_engine();
+        let results = engine.search("*", &SearchFilters::default());
+        assert_eq!(results.len(), 4);
     }
 }
