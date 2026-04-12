@@ -1,0 +1,6 @@
+[package]
+name = "graphify-report"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

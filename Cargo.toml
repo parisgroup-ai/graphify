@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/graphify-core",
+    "crates/graphify-extract",
+    "crates/graphify-report",
+    "crates/graphify-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

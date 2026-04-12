@@ -1,0 +1,6 @@
+[package]
+name = "graphify-extract"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

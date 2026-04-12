@@ -1,0 +1,10 @@
+[package]
+name = "graphify-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "graphify"
+path = "src/main.rs"
+
+[dependencies]
