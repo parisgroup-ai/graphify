@@ -25,6 +25,10 @@ graphify report  --config graphify.toml    # all outputs including markdown
 # Build from source
 cargo build --release -p graphify-cli
 # Binary at target/release/graphify
+
+# Tests
+cargo test --workspace                     # all 130 tests
+cargo test -p graphify-extract             # single crate
 ```
 
 ## Configuration
@@ -42,7 +46,7 @@ format = ["json", "csv", "md"]
 name = "ana-service"
 repo = "./apps/ana-service"
 lang = ["python"]
-local_prefix = "app."
+local_prefix = "app"
 ```
 
 ## Architecture
@@ -116,18 +120,15 @@ For each [[project]]:
 - Excluded directories: `__pycache__`, `node_modules`, `.git`, `dist`, `tests`, `__tests__`, `.next`, `build`, `.venv`, `venv`
 - Output: one subdirectory per project under the configured output path
 - Graph serialization compatible with NetworkX `node_link_data` JSON format
+- Cross-project summary (`graphify-summary.json`) only generated when 2+ projects configured
 - Tests: 130 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
+- Rust 2021 edition, workspace version `0.1.0`
 - CI: GitHub Actions on tag push (`v*`), builds 4 targets (macOS Intel/ARM, Linux x86/ARM)
-- Install: `curl -fsSL .../install.sh | sh`
 - Static binaries for Linux (MUSL), universal binaries for macOS
 - Release binary ~3.5MB
-
-## Known Issues (open)
-
-_(none)_
 
 ## Learning context
 
