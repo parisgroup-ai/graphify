@@ -26,3 +26,5 @@ license.workspace = true
 [dev-dependencies]
 tempfile = { workspace = true }
 serde_json = { workspace = true }
+graphify-core = { path = "crates/graphify-core" }
+graphify-report = { path = "crates/graphify-report" }
