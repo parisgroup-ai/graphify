@@ -22,6 +22,8 @@ pub struct DiscoveredFile {
     pub language: Language,
     /// Dot-notation module name (e.g. `app.services.llm`).
     pub module_name: String,
+    /// True if this file is a package entry point (`__init__.py`, `index.ts`).
+    pub is_package: bool,
 }
 
 /// Detect the [`Language`] for a file extension.
@@ -145,10 +147,14 @@ fn walk_dir(
             if let Some(lang) = language_for_extension(ext) {
                 if languages.contains(&lang) {
                     let module_name = path_to_module(base, &path, local_prefix);
+                    let is_package = name == "__init__.py"
+                        || name == "index.ts"
+                        || name == "index.tsx";
                     out.push(DiscoveredFile {
                         path,
                         language: lang,
                         module_name,
+                        is_package,
                     });
                 }
             }

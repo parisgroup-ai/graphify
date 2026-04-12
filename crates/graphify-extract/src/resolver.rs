@@ -138,10 +138,10 @@ impl ModuleResolver {
     /// canonical dot-notation identifier, and determine whether it is local.
     ///
     /// Returns `(resolved_id, is_local)`.
-    pub fn resolve(&self, raw: &str, from_module: &str) -> (String, bool) {
+    pub fn resolve(&self, raw: &str, from_module: &str, is_package: bool) -> (String, bool) {
         // 1. Python relative imports (start with one or more dots).
         if raw.starts_with('.') && !raw.starts_with("./") && !raw.starts_with("../") {
-            let resolved = resolve_python_relative(raw, from_module);
+            let resolved = resolve_python_relative(raw, from_module, is_package);
             let is_local = self.known_modules.contains_key(&resolved);
             return (resolved, is_local);
         }
@@ -173,15 +173,20 @@ impl ModuleResolver {
 
 /// Resolve a Python relative import (starts with `.`) from `from_module`.
 ///
+/// When `is_package` is true, `from_module` represents a package entry point
+/// (`__init__.py` or `index.ts`), so the module name already IS the package
+/// and the initial leaf-pop is skipped.
+///
 /// Rules:
 /// - One dot  (`.utils`)  → sibling of `from_module` in the same package.
 /// - Two dots (`..models`) → sibling in the parent package.
 /// - N dots   → walk up N-1 levels from `from_module`'s package.
 ///
 /// Examples:
-/// - `.utils`  from `app.services.llm` → `app.services.utils`
+/// - `.utils`  from `app.services.llm` (non-package) → `app.services.utils`
+/// - `.llm`    from `app.errors`       (package)     → `app.errors.llm`
 /// - `..models` from `app.services.llm` → `app.models`
-fn resolve_python_relative(raw: &str, from_module: &str) -> String {
+fn resolve_python_relative(raw: &str, from_module: &str, is_package: bool) -> String {
     // Count leading dots.
     let dot_count = raw.chars().take_while(|&c| c == '.').count();
     let suffix = &raw[dot_count..]; // the part after the dots (may be empty)
@@ -191,8 +196,10 @@ fn resolve_python_relative(raw: &str, from_module: &str) -> String {
     // more components).
     let mut parts: Vec<&str> = from_module.split('.').collect();
 
-    // Strip the leaf (the current module's own name).
-    if !parts.is_empty() {
+    // Strip the leaf (the current module's own name) — but only for non-package
+    // modules. For package modules (__init__.py), from_module IS the package,
+    // so we keep all parts.
+    if !is_package && !parts.is_empty() {
         parts.pop();
     }
 
@@ -418,7 +425,7 @@ mod tests {
     #[test]
     fn resolve_direct_known_module() {
         let r = make_resolver();
-        let (id, is_local) = r.resolve("app.services.llm", "app.main");
+        let (id, is_local) = r.resolve("app.services.llm", "app.main", false);
         assert_eq!(id, "app.services.llm");
         assert!(is_local, "registered module should be local");
     }
@@ -426,20 +433,20 @@ mod tests {
     #[test]
     fn resolve_direct_unknown_module() {
         let r = make_resolver();
-        let (id, is_local) = r.resolve("os", "app.main");
+        let (id, is_local) = r.resolve("os", "app.main", false);
         assert_eq!(id, "os");
         assert!(!is_local, "'os' is not a local module");
     }
 
     // -----------------------------------------------------------------------
-    // Python relative imports
+    // Python relative imports (non-package modules)
     // -----------------------------------------------------------------------
 
     #[test]
     fn resolve_python_relative_single_dot() {
         // `.utils` from `app.services.llm` → `app.services.utils`
         let r = make_resolver();
-        let (id, _) = r.resolve(".utils", "app.services.llm");
+        let (id, _) = r.resolve(".utils", "app.services.llm", false);
         assert_eq!(id, "app.services.utils");
     }
 
@@ -447,7 +454,7 @@ mod tests {
     fn resolve_python_relative_double_dot() {
         // `..models` from `app.services.llm` → `app.models`
         let r = make_resolver();
-        let (id, _) = r.resolve("..models", "app.services.llm");
+        let (id, _) = r.resolve("..models", "app.services.llm", false);
         assert_eq!(id, "app.models");
     }
 
@@ -457,7 +464,7 @@ mod tests {
         // Register it so it's local.
         let mut r = make_resolver();
         r.register_module("app.services.models");
-        let (id, is_local) = r.resolve(".models", "app.services.llm");
+        let (id, is_local) = r.resolve(".models", "app.services.llm", false);
         assert_eq!(id, "app.services.models");
         assert!(is_local);
     }
@@ -466,8 +473,50 @@ mod tests {
     fn resolve_python_relative_bare_dot() {
         // `.` (bare relative) from `app.services.llm` → `app.services`
         let r = make_resolver();
-        let (id, _) = r.resolve(".", "app.services.llm");
+        let (id, _) = r.resolve(".", "app.services.llm", false);
         assert_eq!(id, "app.services");
+    }
+
+    // -----------------------------------------------------------------------
+    // Python relative imports (package / __init__.py modules)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_python_relative_from_init_single_dot() {
+        // `.llm` from `app.errors` (__init__.py) → `app.errors.llm`
+        let mut r = make_resolver();
+        r.register_module("app.errors");
+        r.register_module("app.errors.llm");
+        let (id, _) = r.resolve(".llm", "app.errors", true);
+        assert_eq!(id, "app.errors.llm");
+    }
+
+    #[test]
+    fn resolve_python_relative_from_init_double_dot() {
+        // `..models` from `app.errors` (__init__.py) → `app.models`
+        let r = make_resolver();
+        let (id, _) = r.resolve("..models", "app.errors", true);
+        assert_eq!(id, "app.models");
+    }
+
+    #[test]
+    fn resolve_python_relative_from_init_bare_dot() {
+        // `.` from `app.errors` (__init__.py) → `app.errors`
+        let r = make_resolver();
+        let (id, _) = r.resolve(".", "app.errors", true);
+        assert_eq!(id, "app.errors");
+    }
+
+    #[test]
+    fn resolve_python_relative_from_init_no_false_walk() {
+        // This is the exact BUG-001 scenario:
+        // `.llm` from `app.errors` (is_package=true) should NOT resolve to `app.llm`.
+        let mut r = make_resolver();
+        r.register_module("app.errors");
+        r.register_module("app.errors.llm");
+        r.register_module("app.llm");
+        let (id, _) = r.resolve(".llm", "app.errors", true);
+        assert_eq!(id, "app.errors.llm", "BUG-001: must NOT resolve to app.llm");
     }
 
     // -----------------------------------------------------------------------
@@ -479,7 +528,7 @@ mod tests {
         // `@/lib/api` with alias `@/*` → `src/*` → `src.lib.api`
         let mut r = make_resolver();
         r.ts_aliases.push(("@/*".to_owned(), "src/*".to_owned()));
-        let (id, is_local) = r.resolve("@/lib/api", "src.index");
+        let (id, is_local) = r.resolve("@/lib/api", "src.index", false);
         assert_eq!(id, "src.lib.api");
         assert!(is_local, "src.lib.api is registered as local");
     }
@@ -489,7 +538,7 @@ mod tests {
         // Alias resolves to something not registered → is_local=false.
         let mut r = make_resolver();
         r.ts_aliases.push(("@/*".to_owned(), "src/*".to_owned()));
-        let (id, is_local) = r.resolve("@/unknown/module", "src.index");
+        let (id, is_local) = r.resolve("@/unknown/module", "src.index", false);
         assert_eq!(id, "src.unknown.module");
         assert!(!is_local);
     }
@@ -502,7 +551,7 @@ mod tests {
     fn resolve_ts_relative_same_dir() {
         // `./services/user` from `src.index` → `src.services.user`
         let r = make_resolver();
-        let (id, is_local) = r.resolve("./services/user", "src.index");
+        let (id, is_local) = r.resolve("./services/user", "src.index", false);
         assert_eq!(id, "src.services.user");
         assert!(is_local, "src.services.user is registered");
     }
@@ -511,7 +560,7 @@ mod tests {
     fn resolve_ts_relative_parent() {
         // `../lib/api` from `src.services.user` → `src.lib.api`
         let r = make_resolver();
-        let (id, is_local) = r.resolve("../lib/api", "src.services.user");
+        let (id, is_local) = r.resolve("../lib/api", "src.services.user", false);
         assert_eq!(id, "src.lib.api");
         assert!(is_local, "src.lib.api is registered");
     }

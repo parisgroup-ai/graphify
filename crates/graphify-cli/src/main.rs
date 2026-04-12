@@ -182,7 +182,7 @@ fn main() {
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
             let formats = resolve_formats(&cfg, format.as_deref());
-            let mut project_graphs: Vec<(String, CodeGraph)> = Vec::new();
+            let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
                 let (graph, _) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
@@ -204,10 +204,15 @@ fn main() {
                     project.name,
                     proj_out.display()
                 );
-                project_graphs.push((project.name.clone(), graph));
+                project_data.push(ProjectData {
+                    name: project.name.clone(),
+                    graph,
+                    metrics,
+                    cycles: cycles_for_report,
+                });
             }
-            if project_graphs.len() > 1 {
-                write_summary(&project_graphs, &out_dir);
+            if project_data.len() > 1 {
+                write_summary(&project_data, &out_dir);
             }
         }
 
@@ -216,7 +221,7 @@ fn main() {
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, None);
             let formats = resolve_formats(&cfg, None);
-            let mut project_graphs: Vec<(String, CodeGraph)> = Vec::new();
+            let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
                 let (graph, _) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
@@ -238,10 +243,15 @@ fn main() {
                     project.name,
                     proj_out.display()
                 );
-                project_graphs.push((project.name.clone(), graph));
+                project_data.push(ProjectData {
+                    name: project.name.clone(),
+                    graph,
+                    metrics,
+                    cycles: cycles_for_report,
+                });
             }
-            if project_graphs.len() > 1 {
-                write_summary(&project_graphs, &out_dir);
+            if project_data.len() > 1 {
+                write_summary(&project_data, &out_dir);
             }
         }
     }
@@ -443,9 +453,18 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
         graph.add_node(node);
     }
 
+    // Build a set of module names that are package entry points (__init__.py,
+    // index.ts), so the resolver knows not to pop the leaf for relative imports.
+    let package_modules: HashSet<&str> = files
+        .iter()
+        .filter(|f| f.is_package)
+        .map(|f| f.module_name.as_str())
+        .collect();
+
     // Resolve edges and add them.
     for (src_id, raw_target, edge) in all_raw_edges {
-        let (resolved_target, _is_local) = resolver.resolve(&raw_target, &src_id);
+        let is_package = package_modules.contains(src_id.as_str());
+        let (resolved_target, _is_local) = resolver.resolve(&raw_target, &src_id, is_package);
         graph.add_edge(&src_id, &resolved_target, edge);
     }
 
@@ -546,44 +565,88 @@ fn write_all_outputs(
 // Cross-project summary
 // ---------------------------------------------------------------------------
 
-/// Detect cross-project dependencies and write a real summary.
-///
-/// For each project we record which node IDs belong to it. Then for every
-/// edge whose source is in project A and whose target exists in a *different*
-/// project B, we record a cross-project dependency edge. We also detect
-/// "shared modules" — node IDs that appear in more than one project.
-fn write_summary(project_graphs: &[(String, CodeGraph)], out_dir: &Path) {
-    let project_names: Vec<&str> = project_graphs.iter().map(|(n, _)| n.as_str()).collect();
+/// Aggregated per-project data used by the cross-project summary.
+struct ProjectData {
+    name: String,
+    graph: CodeGraph,
+    metrics: Vec<graphify_core::metrics::NodeMetrics>,
+    cycles: Vec<Cycle>,
+}
 
-    // Build a map: node_id -> set of project names that contain it.
+/// Write a cross-project summary with aggregate metrics, coupling data,
+/// cycle counts, and top hotspots across all projects.
+fn write_summary(projects: &[ProjectData], out_dir: &Path) {
+    let project_names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
+
+    // --- Per-project stats ---------------------------------------------------
+    let per_project: Vec<serde_json::Value> = projects
+        .iter()
+        .map(|p| {
+            let node_count = p.graph.node_count();
+            let edge_count = p.graph.edge_count();
+            let cycle_count = p.cycles.len();
+            serde_json::json!({
+                "name": p.name,
+                "nodes": node_count,
+                "edges": edge_count,
+                "cycles": cycle_count,
+            })
+        })
+        .collect();
+
+    // --- Aggregate totals ----------------------------------------------------
+    let total_nodes: usize = projects.iter().map(|p| p.graph.node_count()).sum();
+    let total_edges: usize = projects.iter().map(|p| p.graph.edge_count()).sum();
+    let total_cycles: usize = projects.iter().map(|p| p.cycles.len()).sum();
+
+    // --- Top hotspots across all projects (top 10 by score) ------------------
+    let mut all_hotspots: Vec<(&str, &graphify_core::metrics::NodeMetrics)> = projects
+        .iter()
+        .flat_map(|p| p.metrics.iter().map(move |m| (p.name.as_str(), m)))
+        .collect();
+    all_hotspots.sort_by(|a, b| b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal));
+    all_hotspots.truncate(10);
+    let top_hotspots: Vec<serde_json::Value> = all_hotspots
+        .iter()
+        .map(|(proj, m)| {
+            serde_json::json!({
+                "id": m.id,
+                "project": proj,
+                "score": (m.score * 1000.0).round() / 1000.0,
+                "betweenness": (m.betweenness * 1000.0).round() / 1000.0,
+                "pagerank": (m.pagerank * 10000.0).round() / 10000.0,
+                "in_degree": m.in_degree,
+                "in_cycle": m.in_cycle,
+            })
+        })
+        .collect();
+
+    // --- Node ownership map --------------------------------------------------
     let mut node_owners: HashMap<String, HashSet<String>> = HashMap::new();
-    for (proj_name, graph) in project_graphs {
-        for id in graph.node_ids() {
+    for p in projects {
+        for id in p.graph.node_ids() {
             node_owners
                 .entry(id.to_string())
                 .or_default()
-                .insert(proj_name.clone());
+                .insert(p.name.clone());
         }
     }
 
-    // Detect cross-project edges.
-    // For each project, iterate its edges. If the target node is owned by a
-    // different project (and not by the source project), record the cross-dep.
-    // We group cross-edges by (from_project, to_project).
+    // --- Cross-project edges -------------------------------------------------
     let mut cross_deps: HashMap<(String, String), Vec<serde_json::Value>> = HashMap::new();
 
-    for (proj_name, graph) in project_graphs {
-        for (src_id, tgt_id, edge) in graph.edges() {
+    for p in projects {
+        for (src_id, tgt_id, edge) in p.graph.edges() {
             if let Some(owners) = node_owners.get(tgt_id) {
                 for owner in owners {
-                    if owner != proj_name {
+                    if owner != &p.name {
                         let kind_str = match edge.kind {
                             graphify_core::types::EdgeKind::Imports => "Imports",
                             graphify_core::types::EdgeKind::Defines => "Defines",
                             graphify_core::types::EdgeKind::Calls => "Calls",
                         };
                         let entry = cross_deps
-                            .entry((proj_name.clone(), owner.clone()))
+                            .entry((p.name.clone(), owner.clone()))
                             .or_default();
                         entry.push(serde_json::json!({
                             "from": src_id,
@@ -609,6 +672,7 @@ fn write_summary(project_graphs: &[(String, CodeGraph)], out_dir: &Path) {
             serde_json::json!({
                 "from_project": from_proj,
                 "to_project": to_proj,
+                "edge_count": edges.len(),
                 "edges": edges,
             })
         })
@@ -616,10 +680,10 @@ fn write_summary(project_graphs: &[(String, CodeGraph)], out_dir: &Path) {
 
     let total_cross_edges: usize = cross_dependencies
         .iter()
-        .filter_map(|d| d.get("edges").and_then(|e| e.as_array()).map(|a| a.len()))
+        .filter_map(|d| d.get("edge_count").and_then(|e| e.as_u64()).map(|n| n as usize))
         .sum();
 
-    // Shared modules: node IDs that appear in more than one project.
+    // --- Shared modules ------------------------------------------------------
     let mut shared_modules: Vec<serde_json::Value> = node_owners
         .iter()
         .filter(|(_, owners)| owners.len() > 1)
@@ -638,15 +702,20 @@ fn write_summary(project_graphs: &[(String, CodeGraph)], out_dir: &Path) {
         ma.cmp(mb)
     });
 
+    // --- Assemble final JSON -------------------------------------------------
     let summary = serde_json::json!({
-        "projects": project_names,
-        "cross_dependencies": cross_dependencies,
-        "shared_modules": shared_modules,
+        "projects": per_project,
         "summary": {
             "total_projects": project_names.len(),
+            "total_nodes": total_nodes,
+            "total_edges": total_edges,
+            "total_cycles": total_cycles,
             "total_cross_edges": total_cross_edges,
             "total_shared_modules": shared_modules.len(),
         },
+        "top_hotspots": top_hotspots,
+        "cross_dependencies": cross_dependencies,
+        "shared_modules": shared_modules,
     });
 
     let path = out_dir.join("graphify-summary.json");

@@ -95,8 +95,8 @@ For each [[project]]:
 | `crates/graphify-core/src/cycles.rs` | Tarjan SCC + simple cycles |
 | `crates/graphify-extract/src/python.rs` | Python extractor (imports, defs, calls) |
 | `crates/graphify-extract/src/typescript.rs` | TypeScript extractor (imports, exports, require, calls) |
-| `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative, TS path aliases) |
-| `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion |
+| `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative w/ `is_package`, TS path aliases) |
+| `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion + `is_package` detection |
 | `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline |
 
 ### Graph representation
@@ -105,6 +105,7 @@ For each [[project]]:
 - **Edge types**: `Imports` (module→module), `Defines` (module→symbol), `Calls` (module→symbol)
 - **Weight tracking**: repeated calls increment `Edge.weight` instead of creating duplicate edges
 - **Module naming**: file paths normalized to dot notation (`app/services/llm.py` → `app.services.llm`), `__init__.py`/`index.ts` collapsed to parent
+- **Package detection**: `DiscoveredFile.is_package` tracks `__init__.py`/`index.ts` files; resolver uses this to correctly resolve relative imports from package entry points
 
 ## Conventions
 
@@ -115,7 +116,7 @@ For each [[project]]:
 - Excluded directories: `__pycache__`, `node_modules`, `.git`, `dist`, `tests`, `__tests__`, `.next`, `build`, `.venv`, `venv`
 - Output: one subdirectory per project under the configured output path
 - Graph serialization compatible with NetworkX `node_link_data` JSON format
-- Tests: 122 unit + integration tests (`cargo test --workspace`)
+- Tests: 130 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
@@ -126,10 +127,7 @@ For each [[project]]:
 
 ## Known Issues (open)
 
-- TS re-export (`export { foo } from './bar'`) missing Defines edge for exported symbol
-- Cross-project summary (`graphify-summary.json`) is a stub — only writes project names
-- Placeholder nodes for unresolved imports always tagged `Language::Python`
-- CSV nodes file missing `kind`, `file_path`, `language` columns
+_(none)_
 
 ## Learning context
 
@@ -139,3 +137,4 @@ This repo doubles as a ToStudy course workspace ("Graphify: Mapeamento Arquitetu
 
 - **Spec**: `docs/superpowers/specs/2026-04-12-graphify-rust-rewrite-design.md`
 - **Plan**: `docs/superpowers/plans/2026-04-12-graphify-rust-rewrite.md`
+- **BUG-001 design**: `docs/plans/2026-04-12-bug-001-python-relative-import-design.md`
