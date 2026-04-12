@@ -169,6 +169,38 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Find dependency paths between two nodes
+    Path {
+        /// Source node ID
+        source: String,
+        /// Target node ID
+        target: String,
+
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Show all paths (default: shortest only)
+        #[arg(long)]
+        all: bool,
+
+        /// Maximum path depth for --all (default: 10)
+        #[arg(long, default_value = "10")]
+        max_depth: usize,
+
+        /// Maximum number of paths for --all (default: 20)
+        #[arg(long, default_value = "20")]
+        max_paths: usize,
+
+        /// Filter to a specific project
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -410,6 +442,70 @@ fn main() {
                         break;
                     }
                 }
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Path { source, target, config, all, max_depth, max_paths, project, json } => {
+            let cfg = load_config(&config);
+            let projects = filter_projects(&cfg, project.as_deref());
+            let multi_project = cfg.project.len() > 1;
+            let mut found = false;
+
+            for proj in &projects {
+                let engine = build_query_engine(proj, &cfg.settings);
+
+                if all {
+                    let paths = engine.all_paths(&source, &target, max_depth, max_paths);
+                    if !paths.is_empty() {
+                        found = true;
+                        if json {
+                            let json_output = serde_json::json!({
+                                "source": source,
+                                "target": target,
+                                "project": if multi_project { Some(&proj.name) } else { None },
+                                "path_count": paths.len(),
+                                "paths": paths,
+                            });
+                            println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+                        } else {
+                            if multi_project {
+                                println!("[{}] {} path(s) from '{}' to '{}':", proj.name, paths.len(), source, target);
+                            } else {
+                                println!("{} path(s) from '{}' to '{}':", paths.len(), source, target);
+                            }
+                            for (i, path) in paths.iter().enumerate() {
+                                print!("  {}. ", i + 1);
+                                print_path(path);
+                            }
+                        }
+                        break;
+                    }
+                } else {
+                    if let Some(path) = engine.shortest_path(&source, &target) {
+                        found = true;
+                        if json {
+                            let json_output = serde_json::json!({
+                                "source": source,
+                                "target": target,
+                                "project": if multi_project { Some(&proj.name) } else { None },
+                                "hops": path.len().saturating_sub(1),
+                                "path": path,
+                            });
+                            println!("{}", serde_json::to_string_pretty(&json_output).unwrap());
+                        } else {
+                            if multi_project {
+                                print!("[{}] ", proj.name);
+                            }
+                            print_path(&path);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if !found {
+                eprintln!("No path found from '{}' to '{}'.", source, target);
                 std::process::exit(1);
             }
         }
@@ -766,6 +862,20 @@ fn print_explain_report(report: &graphify_core::query::ExplainReport, project_na
     println!();
     println!("  ── Impact ──");
     println!("  Transitive dependents: {} modules", report.transitive_dependent_count);
+    println!();
+}
+
+fn print_path(path: &[graphify_core::query::PathStep]) {
+    for (i, step) in path.iter().enumerate() {
+        if i > 0 {
+            if let Some(ref kind) = path[i - 1].edge_kind {
+                print!(" ─[{:?}]→ ", kind);
+            } else {
+                print!(" → ");
+            }
+        }
+        print!("{}", step.node_id);
+    }
     println!();
 }
 
