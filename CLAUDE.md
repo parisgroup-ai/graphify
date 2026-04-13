@@ -57,7 +57,7 @@ local_prefix = "app"
 
 ## Architecture
 
-Cargo workspace with 4 crates:
+Cargo workspace with 5 crates:
 
 | Crate | Role | Key deps |
 |---|---|---|
@@ -65,6 +65,7 @@ Cargo workspace with 4 crates:
 | `graphify-extract` | tree-sitter AST parsing, file discovery, module resolution | tree-sitter, tree-sitter-python, tree-sitter-typescript, rayon |
 | `graphify-report` | JSON, CSV, Markdown, HTML output generation | serde_json, csv |
 | `graphify-cli` | CLI (clap), config parsing, pipeline orchestration | clap, toml, rayon |
+| `graphify-mcp` | MCP server exposing graph queries to AI assistants | rmcp, tokio, clap |
 
 ### Data flow
 
@@ -134,7 +135,7 @@ For each [[project]]:
 - TS workspace aliases (`@repo/*` → `../../packages/*`) preserve the original import string as node ID when target path traverses outside the project
 - Louvain Phase 2 merges singleton communities: connected singletons → best neighbor, isolated singletons → grouped together
 - Walker warns via `eprintln!` when a project discovers ≤1 file (misconfigured `local_prefix`)
-- Tests: 181 unit + integration tests (`cargo test --workspace`)
+- Tests: 196 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
