@@ -302,4 +302,64 @@ mod tests {
         assert!(cache.lookup("b.py", "h2").is_none()); // evicted
         assert!(cache.lookup("c.py", "h3").is_some());
     }
+
+    #[test]
+    fn integration_cache_with_python_extraction() {
+        use crate::{PythonExtractor, LanguageExtractor};
+
+        // Set up temp dirs.
+        let src_dir = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cache_path = cache_dir.path().join(".graphify-cache.json");
+
+        // Write a Python source file.
+        let py_file = src_dir.path().join("main.py");
+        std::fs::write(&py_file, b"import os\ndef hello():\n    pass\n").unwrap();
+
+        // Extract.
+        let source = std::fs::read(&py_file).unwrap();
+        let hash = sha256_hex(&source);
+        let extractor = PythonExtractor::new();
+        let result = extractor.extract_file(&py_file, &source, "main");
+
+        // Save to cache.
+        let mut cache = ExtractionCache::new("");
+        cache.insert("main.py".to_string(), hash.clone(), result);
+        cache.save(&cache_path);
+
+        // Reload and verify cache hit.
+        let loaded = ExtractionCache::load(&cache_path, "").unwrap();
+        let cached = loaded.lookup("main.py", &hash);
+        assert!(cached.is_some());
+        let cached = cached.unwrap();
+        assert!(!cached.nodes.is_empty());
+        assert!(!cached.edges.is_empty());
+    }
+
+    #[test]
+    fn integration_cache_miss_after_file_modification() {
+        let _src_dir = tempfile::tempdir().unwrap();
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cache_path = cache_dir.path().join(".graphify-cache.json");
+
+        // Original content.
+        let content_v1 = b"import os\n";
+        let hash_v1 = sha256_hex(content_v1);
+
+        let mut cache = ExtractionCache::new("");
+        cache.insert(
+            "mod.py".to_string(),
+            hash_v1.clone(),
+            ExtractionResult::new(),
+        );
+        cache.save(&cache_path);
+
+        // Modified content → different hash → cache miss.
+        let content_v2 = b"import os\nimport sys\n";
+        let hash_v2 = sha256_hex(content_v2);
+        assert_ne!(hash_v1, hash_v2);
+
+        let loaded = ExtractionCache::load(&cache_path, "").unwrap();
+        assert!(loaded.lookup("mod.py", &hash_v2).is_none());
+    }
 }
