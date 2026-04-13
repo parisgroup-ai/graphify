@@ -2,6 +2,14 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## [0.4.0] - 2026-04-13
+
+### Added
+- feat(cli): `graphify trend` command for historical architecture trend aggregation across stored snapshots (FEAT-014)
+- feat(core): historical snapshot and trend aggregation model with hotspot movement and community churn (FEAT-014)
+- feat(report): trend report output in JSON and Markdown formats plus automatic per-run snapshot persistence (FEAT-014)
+- feat(cli): policy-driven architecture rules for `graphify check` (FEAT-013)
+
 ## [0.3.0] - 2026-04-13
 
 ### Added

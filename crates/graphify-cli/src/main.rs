@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use rayon::prelude::*;
@@ -10,6 +11,7 @@ use graphify_core::{
     community::detect_communities,
     cycles::{find_sccs, find_simple_cycles},
     graph::CodeGraph,
+    history::{build_historical_snapshot, compute_trend_report, load_historical_snapshots},
     metrics::{compute_metrics, ScoringWeights},
     policy::{CompiledPolicy, PolicyConfig, ProjectGraph, ProjectPolicyResult},
     query::{QueryEngine, SearchFilters, SortField},
@@ -24,7 +26,7 @@ use graphify_extract::{
 use graphify_report::{
     write_analysis_json, write_cypher, write_diff_json, write_diff_markdown, write_edges_csv,
     write_graph_json, write_graphml, write_html, write_nodes_csv, write_obsidian_vault,
-    write_report, Cycle,
+    write_report, write_trend_json, write_trend_markdown, Cycle,
 };
 
 mod watch;
@@ -313,6 +315,29 @@ enum Commands {
         /// Minimum score delta to report as significant (default: 0.05)
         #[arg(long, default_value = "0.05")]
         threshold: f64,
+    },
+
+    /// Aggregate historical architecture trends from stored snapshots
+    Trend {
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Project name (required for multi-project configs)
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Output directory for trend report files
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Limit trend aggregation to the most recent N snapshots
+        #[arg(long)]
+        limit: Option<usize>,
+
+        /// Output the trend report as JSON on stdout
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -721,6 +746,16 @@ fn main() {
                 threshold,
             );
         }
+
+        Commands::Trend {
+            config,
+            project,
+            output,
+            limit,
+            json,
+        } => {
+            cmd_trend(&config, project.as_deref(), output.as_deref(), limit, json);
+        }
     }
 }
 
@@ -896,6 +931,67 @@ fn cmd_diff(
         );
     }
     println!("Written to {}", out_dir.display());
+}
+
+fn cmd_trend(
+    config_path: &Path,
+    project_filter: Option<&str>,
+    output: Option<&Path>,
+    limit: Option<usize>,
+    json: bool,
+) {
+    let cfg = load_config(config_path);
+    let projects = filter_projects(&cfg, project_filter);
+
+    if cfg.project.len() > 1 && project_filter.is_none() {
+        eprintln!("Error: --project is required for multi-project trend reports.");
+        std::process::exit(1);
+    }
+
+    let project = projects[0];
+    let base_out = resolve_output(&cfg, None);
+    let project_out = base_out.join(&project.name);
+    let history_dir = project_out.join("history");
+
+    let snapshots = match load_historical_snapshots(&history_dir) {
+        Ok(snapshots) => snapshots,
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+    };
+
+    let report = match compute_trend_report(&project.name, &snapshots, limit) {
+        Ok(report) => report,
+        Err(err) => {
+            eprintln!("Cannot compute trend report: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    let out_dir = output.unwrap_or(&project_out);
+    std::fs::create_dir_all(out_dir).expect("create trend output directory");
+    write_trend_json(&report, &out_dir.join("trend-report.json"));
+    write_trend_markdown(&report, &out_dir.join("trend-report.md"));
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    } else {
+        println!("Architectural Trend Report");
+        println!("  Project:     {}", report.project);
+        println!("  Snapshots:   {}", report.snapshot_count);
+        println!(
+            "  Window:      {} → {}",
+            report.window.first_captured_at, report.window.last_captured_at
+        );
+        if let Some(last) = report.points.last() {
+            println!(
+                "  Latest:      {} nodes, {} edges, {} cycles",
+                last.total_nodes, last.total_edges, last.total_cycles
+            );
+        }
+        println!("Written to {}", out_dir.display());
+    }
 }
 
 fn load_snapshot(path: &Path) -> AnalysisSnapshot {
@@ -1304,6 +1400,14 @@ fn run_pipeline_for_project(
         proj_out,
         formats,
     );
+    persist_historical_snapshot(
+        &project.name,
+        &graph,
+        &metrics,
+        &communities,
+        &cycles_for_report,
+        proj_out,
+    );
     ProjectData {
         name: project.name.clone(),
         graph,
@@ -1311,6 +1415,34 @@ fn run_pipeline_for_project(
         community_count: communities.len(),
         cycles: cycles_for_report,
     }
+}
+
+fn persist_historical_snapshot(
+    project_name: &str,
+    graph: &CodeGraph,
+    metrics: &[graphify_core::metrics::NodeMetrics],
+    communities: &[graphify_core::community::Community],
+    cycles: &[Cycle],
+    proj_out: &Path,
+) {
+    let captured_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before unix epoch")
+        .as_nanos();
+    let history_dir = proj_out.join("history");
+    std::fs::create_dir_all(&history_dir).expect("create history directory");
+
+    let snapshot = build_historical_snapshot(
+        project_name,
+        graph,
+        metrics,
+        communities,
+        cycles,
+        captured_at,
+    );
+    let path = history_dir.join(format!("{captured_at}.json"));
+    let payload = serde_json::to_string_pretty(&snapshot).expect("serialize history snapshot");
+    std::fs::write(&path, payload).expect("write history snapshot");
 }
 
 // ---------------------------------------------------------------------------

@@ -86,6 +86,7 @@ Policy selectors support:
 | `graphify explain <node>` | Module profile card + impact analysis |
 | `graphify path <source> <target>` | Find dependency paths between modules |
 | `graphify diff` | Detect architectural drift between snapshots |
+| `graphify trend` | Aggregate historical trends from stored snapshots |
 | `graphify check` | Validate CI quality gates and declarative policy rules |
 | `graphify watch` | Auto-rebuild on file changes (300ms debounce) |
 | `graphify shell` | Interactive graph exploration REPL |
@@ -119,6 +120,9 @@ Each project produces a subdirectory under the configured output path:
 | `obsidian_vault/` | Markdown | Obsidian vault with one `.md` per node and `[[wikilinks]]` |
 | `drift-report.json` | JSON | Drift detection results (via `graphify diff`) |
 | `drift-report.md` | Markdown | Drift detection report |
+| `history/*.json` | JSON | Per-run historical snapshots used by `graphify trend` |
+| `trend-report.json` | JSON | Aggregated trend report across stored snapshots |
+| `trend-report.md` | Markdown | Human-readable architecture trend report |
 
 When 2+ projects are configured, a `graphify-summary.json` with aggregate stats is also generated.
 
@@ -147,6 +151,23 @@ graphify diff --baseline report/baseline/analysis.json --config graphify.toml --
 ```
 
 Detects changes across 5 dimensions: node additions/removals, hotspot score shifts, cycle introduction/resolution, community membership moves, and degree changes.
+
+## Historical Trends
+
+`graphify run` and `graphify report` now persist a compact historical snapshot for each project under `report/<project>/history/`.
+
+Aggregate those snapshots into a trend report with:
+
+```bash
+graphify trend --config graphify.toml --project my-app
+graphify trend --config graphify.toml --project my-app --limit 10 --json
+```
+
+V1 trend reports include:
+- node, edge, community, and cycle totals over time
+- hotspot entrants/exits and score movement between adjacent snapshots
+- community churn between adjacent snapshots
+- JSON and Markdown outputs written next to the project report directory by default
 
 ## Quality Gates (CI)
 
