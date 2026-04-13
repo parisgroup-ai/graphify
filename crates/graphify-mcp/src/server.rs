@@ -449,3 +449,269 @@ impl GraphifyServer {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use graphify_core::{
+        community::detect_communities,
+        cycles::find_sccs,
+        graph::CodeGraph,
+        metrics::{compute_metrics, ScoringWeights},
+        query::QueryEngine,
+        types::{Edge, Language, Node},
+    };
+
+    use super::GraphifyServer;
+
+    /// Builds a 4-node test graph:
+    ///
+    /// ```text
+    /// app.main → app.services.llm → app.utils.helpers
+    ///                              → app.models.user
+    /// ```
+    ///
+    /// All nodes are Python modules, local, with sequential line numbers.
+    fn build_test_engine() -> QueryEngine {
+        let mut graph = CodeGraph::new();
+
+        graph.add_node(Node::module(
+            "app.main",
+            "app/main.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        graph.add_node(Node::module(
+            "app.services.llm",
+            "app/services/llm.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        graph.add_node(Node::module(
+            "app.utils.helpers",
+            "app/utils/helpers.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        graph.add_node(Node::module(
+            "app.models.user",
+            "app/models/user.py",
+            Language::Python,
+            1,
+            true,
+        ));
+
+        graph.add_edge("app.main", "app.services.llm", Edge::imports(2));
+        graph.add_edge("app.services.llm", "app.utils.helpers", Edge::imports(3));
+        graph.add_edge("app.services.llm", "app.models.user", Edge::imports(4));
+
+        let metrics = compute_metrics(&graph, &ScoringWeights::default());
+        let communities = detect_communities(&graph);
+        let cycles = find_sccs(&graph);
+
+        QueryEngine::from_analyzed(graph, metrics, communities, cycles)
+    }
+
+    /// Helper: creates a `GraphifyServer` with a single project named "test"
+    /// (also the default) backed by the 4-node test graph.
+    fn build_test_server() -> GraphifyServer {
+        let engine = build_test_engine();
+        let mut engines = HashMap::new();
+        engines.insert("test".to_string(), engine);
+        GraphifyServer::new(engines, "test".to_string())
+    }
+
+    // -----------------------------------------------------------------------
+    // Project resolution
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_engine_none_uses_default() {
+        let server = build_test_server();
+        let result = server.resolve_engine(None);
+        assert!(result.is_ok(), "None should resolve to the default project");
+    }
+
+    #[test]
+    fn resolve_engine_valid_project() {
+        let server = build_test_server();
+        let result = server.resolve_engine(Some("test"));
+        assert!(result.is_ok(), "Explicit valid project name should resolve");
+    }
+
+    #[test]
+    fn resolve_engine_invalid_project() {
+        let server = build_test_server();
+        let result = server.resolve_engine(Some("nonexistent"));
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(
+            err.contains("not found"),
+            "Error should contain 'not found', got: {err}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Stats
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn stats_returns_expected_counts() {
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let stats = engine.stats();
+
+        assert_eq!(stats.node_count, 4, "should have 4 nodes");
+        assert_eq!(stats.edge_count, 3, "should have 3 edges");
+        assert_eq!(stats.local_node_count, 4, "all 4 nodes are local");
+        assert_eq!(stats.cycle_count, 0, "DAG has no cycles");
+    }
+
+    // -----------------------------------------------------------------------
+    // Search
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn search_glob_matches() {
+        use graphify_core::query::SearchFilters;
+
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let results = engine.search("app.services.*", &SearchFilters::default());
+
+        assert_eq!(
+            results.len(),
+            1,
+            "glob should match exactly app.services.llm"
+        );
+        assert_eq!(results[0].node_id, "app.services.llm");
+    }
+
+    #[test]
+    fn search_wildcard_matches_all() {
+        use graphify_core::query::SearchFilters;
+
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let results = engine.search("app.*", &SearchFilters::default());
+
+        assert_eq!(results.len(), 4, "app.* should match all 4 nodes");
+    }
+
+    // -----------------------------------------------------------------------
+    // Explain
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn explain_existing_node() {
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let report = engine.explain("app.services.llm");
+
+        assert!(report.is_some(), "existing node should return a report");
+        let report = report.unwrap();
+        assert_eq!(report.node_id, "app.services.llm");
+        assert!(!report.in_cycle, "no cycles in this DAG");
+    }
+
+    #[test]
+    fn explain_nonexistent_node() {
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let report = engine.explain("does.not.exist");
+
+        assert!(report.is_none(), "nonexistent node should return None");
+    }
+
+    // -----------------------------------------------------------------------
+    // Shortest path
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn shortest_path_connected_nodes() {
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let path = engine.shortest_path("app.main", "app.utils.helpers");
+
+        assert!(path.is_some(), "path should exist between connected nodes");
+        let steps = path.unwrap();
+        assert_eq!(
+            steps.len(),
+            3,
+            "path should be main -> llm -> helpers (3 steps)"
+        );
+        assert_eq!(steps[0].node_id, "app.main");
+        assert_eq!(steps[1].node_id, "app.services.llm");
+        assert_eq!(steps[2].node_id, "app.utils.helpers");
+    }
+
+    #[test]
+    fn shortest_path_no_route() {
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        // Reverse direction -- no edges go from helpers back to main
+        let path = engine.shortest_path("app.utils.helpers", "app.main");
+
+        assert!(path.is_none(), "no reverse path should exist in this DAG");
+    }
+
+    // -----------------------------------------------------------------------
+    // Suggest
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn suggest_partial_match() {
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let suggestions = engine.suggest("llm");
+
+        assert!(
+            !suggestions.is_empty(),
+            "should find at least one suggestion"
+        );
+        assert!(
+            suggestions.iter().any(|s| s == "app.services.llm"),
+            "suggestions should include app.services.llm"
+        );
+    }
+
+    #[test]
+    fn suggest_no_match() {
+        let server = build_test_server();
+        let engine = server.resolve_engine(None).unwrap();
+        let suggestions = engine.suggest("zzz_no_such_module");
+
+        assert!(
+            suggestions.is_empty(),
+            "garbage input should yield no suggestions"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Multiple projects
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_engine_multiple_projects() {
+        let engine_a = build_test_engine();
+        let engine_b = build_test_engine();
+        let mut engines = HashMap::new();
+        engines.insert("alpha".to_string(), engine_a);
+        engines.insert("beta".to_string(), engine_b);
+
+        let server = GraphifyServer::new(engines, "alpha".to_string());
+
+        assert!(server.resolve_engine(None).is_ok(), "default -> alpha");
+        assert!(server.resolve_engine(Some("alpha")).is_ok());
+        assert!(server.resolve_engine(Some("beta")).is_ok());
+        assert!(server.resolve_engine(Some("gamma")).is_err());
+    }
+}
