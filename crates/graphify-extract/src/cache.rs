@@ -57,6 +57,58 @@ impl ExtractionCache {
     pub fn insert(&mut self, rel_path: String, sha256: String, result: ExtractionResult) {
         self.entries.insert(rel_path, CacheEntry { sha256, result });
     }
+
+    /// Load a cache file from disk.
+    ///
+    /// Returns `None` if the file doesn't exist, can't be parsed, has a
+    /// version mismatch, or has a `local_prefix` mismatch.
+    pub fn load(path: &Path, expected_local_prefix: &str) -> Option<Self> {
+        let data = std::fs::read_to_string(path).ok()?;
+        let file: CacheFile = serde_json::from_str(&data).ok()?;
+
+        if file.version != CACHE_VERSION {
+            return None;
+        }
+        if file.local_prefix != expected_local_prefix {
+            return None;
+        }
+
+        Some(Self {
+            local_prefix: file.local_prefix,
+            entries: file.entries,
+        })
+    }
+
+    /// Remove entries whose keys are not in `active_paths`.
+    pub fn retain_paths(&mut self, active_paths: &HashSet<String>) {
+        self.entries.retain(|k, _| active_paths.contains(k));
+    }
+
+    /// Serialize the cache to disk as pretty-printed JSON.
+    pub fn save(&self, path: &Path) {
+        let file = CacheFile {
+            version: CACHE_VERSION,
+            local_prefix: self.local_prefix.clone(),
+            entries: self.entries.iter().map(|(k, v)| {
+                (k.clone(), CacheEntry {
+                    sha256: v.sha256.clone(),
+                    result: v.result.clone(),
+                })
+            }).collect(),
+        };
+        let json = serde_json::to_string_pretty(&file).expect("serialize cache");
+        std::fs::write(path, json).expect("write cache file");
+    }
+
+    /// Returns an iterator over all cached relative paths.
+    pub fn paths(&self) -> impl Iterator<Item = &String> {
+        self.entries.keys()
+    }
+
+    /// Returns the number of cached entries.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
 }
 
 /// Compute the hex-encoded SHA256 digest of `data`.
@@ -160,5 +212,85 @@ mod tests {
             make_result(),
         );
         assert!(cache.lookup("unknown/file.py", "abc123").is_none());
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join(".graphify-cache.json");
+
+        let mut cache = ExtractionCache::new("app");
+        cache.insert("app/main.py".to_string(), "hash1".to_string(), make_result());
+
+        cache.save(&cache_path);
+        assert!(cache_path.exists());
+
+        let loaded = ExtractionCache::load(&cache_path, "app");
+        assert!(loaded.is_some());
+        let loaded = loaded.unwrap();
+        let found = loaded.lookup("app/main.py", "hash1");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().nodes[0].id, "app.main");
+    }
+
+    #[test]
+    fn load_returns_none_for_missing_file() {
+        let loaded = ExtractionCache::load(Path::new("/nonexistent/.graphify-cache.json"), "app");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn load_returns_none_for_version_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join(".graphify-cache.json");
+        // Write a cache file with version 999.
+        let bad = serde_json::json!({
+            "version": 999,
+            "local_prefix": "app",
+            "entries": {}
+        });
+        std::fs::write(&cache_path, serde_json::to_string(&bad).unwrap()).unwrap();
+
+        let loaded = ExtractionCache::load(&cache_path, "app");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn load_returns_none_for_prefix_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join(".graphify-cache.json");
+
+        let mut cache = ExtractionCache::new("app");
+        cache.insert("app/main.py".to_string(), "hash1".to_string(), make_result());
+        cache.save(&cache_path);
+
+        // Load with a different prefix.
+        let loaded = ExtractionCache::load(&cache_path, "src");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn load_returns_none_for_corrupt_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join(".graphify-cache.json");
+        std::fs::write(&cache_path, "not valid json {{{{").unwrap();
+
+        let loaded = ExtractionCache::load(&cache_path, "app");
+        assert!(loaded.is_none());
+    }
+
+    #[test]
+    fn retain_paths_evicts_removed_files() {
+        let mut cache = ExtractionCache::new("app");
+        cache.insert("a.py".to_string(), "h1".to_string(), make_result());
+        cache.insert("b.py".to_string(), "h2".to_string(), make_result());
+        cache.insert("c.py".to_string(), "h3".to_string(), make_result());
+
+        let active: HashSet<String> = ["a.py", "c.py"].iter().map(|s| s.to_string()).collect();
+        cache.retain_paths(&active);
+
+        assert!(cache.lookup("a.py", "h1").is_some());
+        assert!(cache.lookup("b.py", "h2").is_none()); // evicted
+        assert!(cache.lookup("c.py", "h3").is_some());
     }
 }
