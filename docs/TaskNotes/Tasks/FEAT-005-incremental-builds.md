@@ -24,7 +24,7 @@ Add SHA256-based file caching so `graphify run` only re-extracts files that chan
 - Persist hashes + extracted nodes/edges in a cache file (e.g., `.graphify-cache.json`)
 - On subsequent runs, skip files whose hash hasn't changed
 - Merge cached extractions with new ones before analysis
-- Add `--update` flag to CLI (incremental mode) and `--full` to force rebuild
+- Enable cache by default and add `--force` to bypass it for a full rebuild
 - Frontmatter-aware hashing for Markdown files (ignore YAML metadata changes)
 
 ## Inspiration
@@ -33,13 +33,13 @@ safishamsi/graphify uses SHA256 cache + `--update` mode. On large codebases, onl
 
 ## Subtasks
 
-- [ ] Design cache file format (file path → hash + extracted data)
-- [ ] Implement SHA256 hashing in walker
-- [ ] Add cache read/write module in graphify-core or graphify-cli
-- [ ] Modify extraction pipeline to skip cached files
-- [ ] Add `--update` and `--full` CLI flags
-- [ ] Tests: cache hit, cache miss, file deleted, file modified
-- [ ] Documentation update
+- [x] Design cache file format (file path → hash + extracted data)
+- [x] Implement SHA256 hashing in walker
+- [x] Add cache read/write module in graphify-extract
+- [x] Modify extraction pipeline to skip cached files
+- [x] Enable cache by default and add `--force` for full rebuilds
+- [x] Tests: cache hit, cache miss, file deleted, file modified
+- [x] Documentation update
 
 ## Notes
 

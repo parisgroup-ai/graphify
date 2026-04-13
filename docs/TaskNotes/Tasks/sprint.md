@@ -38,6 +38,10 @@ updated: 2026-04-13
 | FEAT-010 | **done** | low      | 8h     | Watch mode for auto-rebuild                          |
 | FEAT-011 | **done** | medium   | 4h     | Auto-detect local_prefix                               |
 | FEAT-012 | **done** | low      | 2h     | Recipe-based CLI examples for monorepo workflows      |
+| FEAT-013 | **open** | high     | 16h    | Policy-driven architecture rules                      |
+| FEAT-014 | **open** | normal   | 12h    | Historical architecture trend tracking                |
+| FEAT-015 | **open** | normal   | 12h    | PR and editor integration for architecture feedback   |
+| FEAT-016 | **open** | high     | 16h    | Contract drift detection between ORM and TS types     |
 
 ## Done
 
