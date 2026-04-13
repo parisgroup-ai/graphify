@@ -79,6 +79,10 @@ enum Commands {
         /// Output directory (overrides config setting)
         #[arg(long)]
         output: Option<PathBuf>,
+
+        /// Force full rebuild, ignoring extraction cache
+        #[arg(long)]
+        force: bool,
     },
 
     /// Analyze an existing graph (produces analysis.json, CSV files)
@@ -94,6 +98,10 @@ enum Commands {
         /// Scoring weights as comma-separated floats: betweenness,pagerank,in_degree,in_cycle
         #[arg(long)]
         weights: Option<String>,
+
+        /// Force full rebuild, ignoring extraction cache
+        #[arg(long)]
+        force: bool,
     },
 
     /// Generate Markdown report (produces architecture_report.md)
@@ -113,6 +121,10 @@ enum Commands {
         /// Output formats: json,csv,md (comma-separated)
         #[arg(long)]
         format: Option<String>,
+
+        /// Force full rebuild, ignoring extraction cache
+        #[arg(long)]
+        force: bool,
     },
 
     /// Run full pipeline: extract → analyze → report (alias for report)
@@ -124,6 +136,10 @@ enum Commands {
         /// Output directory (overrides config setting)
         #[arg(long)]
         output: Option<PathBuf>,
+
+        /// Force full rebuild, ignoring extraction cache
+        #[arg(long)]
+        force: bool,
     },
 
     /// Search nodes by pattern (glob matching on node IDs)
@@ -224,7 +240,7 @@ fn main() {
     match cli.command {
         Commands::Init => cmd_init(),
 
-        Commands::Extract { config, output } => {
+        Commands::Extract { config, output, force: _force } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             for project in &cfg.project {
@@ -246,6 +262,7 @@ fn main() {
             config,
             output,
             weights,
+            force: _force,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
@@ -281,6 +298,7 @@ fn main() {
             output,
             weights,
             format,
+            force: _force,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
@@ -320,7 +338,7 @@ fn main() {
             }
         }
 
-        Commands::Run { config, output } => {
+        Commands::Run { config, output, force: _force } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, None);

@@ -20,6 +20,15 @@ struct CacheFile {
     entries: HashMap<String, CacheEntry>,
 }
 
+/// Statistics from a cache-aware extraction run.
+#[derive(Debug, Default)]
+pub struct CacheStats {
+    pub hits: usize,
+    pub misses: usize,
+    pub evicted: usize,
+    pub forced: bool,
+}
+
 /// On-disk extraction cache for incremental builds.
 ///
 /// Stores per-file `ExtractionResult` keyed by relative file path and SHA256
