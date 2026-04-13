@@ -10,7 +10,7 @@ use crate::community::Community;
 use crate::cycles::CycleGroup;
 use crate::graph::CodeGraph;
 use crate::metrics::NodeMetrics;
-use crate::types::{EdgeKind, Language, NodeKind};
+use crate::types::{ConfidenceKind, EdgeKind, Language, NodeKind};
 
 // ---------------------------------------------------------------------------
 // GraphStats
@@ -50,6 +50,7 @@ pub struct SearchFilters {
     pub kind: Option<NodeKind>,
     pub sort_by: SortField,
     pub local_only: bool,
+    pub min_confidence: Option<f64>,
 }
 
 impl Default for SearchFilters {
@@ -58,6 +59,7 @@ impl Default for SearchFilters {
             kind: None,
             sort_by: SortField::Score,
             local_only: false,
+            min_confidence: None,
         }
     }
 }
@@ -286,25 +288,39 @@ impl QueryEngine {
 
     /// Returns nodes that depend on `node_id` (incoming edges).
     ///
-    /// Each entry is `(source_node_id, edge_kind)`.  Returns an empty `Vec`
-    /// if the node does not exist.
-    pub fn dependents(&self, node_id: &str) -> Vec<(String, EdgeKind)> {
+    /// Each entry is `(source_node_id, edge_kind, confidence, confidence_kind)`.
+    /// Returns an empty `Vec` if the node does not exist.
+    pub fn dependents(&self, node_id: &str) -> Vec<(String, EdgeKind, f64, ConfidenceKind)> {
         self.graph
             .incoming_edges(node_id)
             .into_iter()
-            .map(|(src, edge)| (src.to_string(), edge.kind.clone()))
+            .map(|(src, edge)| {
+                (
+                    src.to_string(),
+                    edge.kind.clone(),
+                    edge.confidence,
+                    edge.confidence_kind.clone(),
+                )
+            })
             .collect()
     }
 
     /// Returns nodes that `node_id` depends on (outgoing edges).
     ///
-    /// Each entry is `(target_node_id, edge_kind)`.  Returns an empty `Vec`
-    /// if the node does not exist.
-    pub fn dependencies(&self, node_id: &str) -> Vec<(String, EdgeKind)> {
+    /// Each entry is `(target_node_id, edge_kind, confidence, confidence_kind)`.
+    /// Returns an empty `Vec` if the node does not exist.
+    pub fn dependencies(&self, node_id: &str) -> Vec<(String, EdgeKind, f64, ConfidenceKind)> {
         self.graph
             .outgoing_edges(node_id)
             .into_iter()
-            .map(|(tgt, edge)| (tgt.to_string(), edge.kind.clone()))
+            .map(|(tgt, edge)| {
+                (
+                    tgt.to_string(),
+                    edge.kind.clone(),
+                    edge.confidence,
+                    edge.confidence_kind.clone(),
+                )
+            })
             .collect()
     }
 
@@ -595,13 +611,13 @@ impl QueryEngine {
         let direct_dependents: Vec<String> = self
             .dependents(node_id)
             .into_iter()
-            .map(|(id, _)| id)
+            .map(|(id, _, _, _)| id)
             .collect();
 
         let direct_dependencies: Vec<String> = self
             .dependencies(node_id)
             .into_iter()
-            .map(|(id, _)| id)
+            .map(|(id, _, _, _)| id)
             .collect();
 
         // Transitive dependents (max_depth=10, take top 10)
@@ -769,7 +785,7 @@ mod tests {
     fn dependents_returns_incoming() {
         let engine = build_engine();
         let deps = engine.dependents("app.utils");
-        let ids: Vec<&str> = deps.iter().map(|(id, _)| id.as_str()).collect();
+        let ids: Vec<&str> = deps.iter().map(|(id, _, _, _)| id.as_str()).collect();
         assert_eq!(ids.len(), 2, "app.utils should have 2 dependents");
         assert!(ids.contains(&"app.main"));
         assert!(ids.contains(&"app.services.llm"));
@@ -779,7 +795,7 @@ mod tests {
     fn dependencies_returns_outgoing() {
         let engine = build_engine();
         let deps = engine.dependencies("app.main");
-        let ids: Vec<&str> = deps.iter().map(|(id, _)| id.as_str()).collect();
+        let ids: Vec<&str> = deps.iter().map(|(id, _, _, _)| id.as_str()).collect();
         assert_eq!(ids.len(), 3, "app.main should have 3 dependencies");
         assert!(ids.contains(&"app.utils"));
         assert!(ids.contains(&"app.services.llm"));

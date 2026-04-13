@@ -261,7 +261,7 @@ fn main() {
                     &metrics,
                     &communities,
                     &cycles_for_report,
-                    graph.edge_count(),
+                    &graph,
                     &proj_out.join("analysis.json"),
                 );
                 write_nodes_csv(&metrics, &graph, &proj_out.join("graph_nodes.csv"));
@@ -381,6 +381,7 @@ fn main() {
                 kind: kind.as_deref().and_then(parse_node_kind),
                 sort_by: sort_field,
                 local_only: false,
+                min_confidence: None,
             };
 
             let mut all_results: Vec<(String, Vec<graphify_core::query::QueryMatch>)> = Vec::new();
@@ -1192,7 +1193,7 @@ fn write_all_outputs(
                     metrics,
                     communities,
                     cycles,
-                    graph.edge_count(),
+                    graph,
                     &out_dir.join("analysis.json"),
                 );
             }
@@ -1206,6 +1207,7 @@ fn write_all_outputs(
                     metrics,
                     communities,
                     cycles,
+                    graph,
                     &out_dir.join("architecture_report.md"),
                 );
             }

@@ -233,6 +233,7 @@ impl GraphifyServer {
                     kind: params.kind.as_deref().and_then(parse_node_kind),
                     sort_by: sort_field,
                     local_only: params.local_only.unwrap_or(false),
+                    min_confidence: None,
                 };
                 let results = engine.search(&params.pattern, &filters);
                 Ok(CallToolResult::success(vec![Content::text(to_json(
@@ -355,10 +356,12 @@ impl GraphifyServer {
                 let deps = engine.dependents(&params.node_id);
                 let result: Vec<serde_json::Value> = deps
                     .into_iter()
-                    .map(|(id, kind)| {
+                    .map(|(id, kind, confidence, confidence_kind)| {
                         serde_json::json!({
                             "node_id": id,
                             "edge_kind": format!("{:?}", kind),
+                            "confidence": confidence,
+                            "confidence_kind": format!("{:?}", confidence_kind),
                         })
                     })
                     .collect();
@@ -384,10 +387,12 @@ impl GraphifyServer {
                 let deps = engine.dependencies(&params.node_id);
                 let result: Vec<serde_json::Value> = deps
                     .into_iter()
-                    .map(|(id, kind)| {
+                    .map(|(id, kind, confidence, confidence_kind)| {
                         serde_json::json!({
                             "node_id": id,
                             "edge_kind": format!("{:?}", kind),
+                            "confidence": confidence,
+                            "confidence_kind": format!("{:?}", confidence_kind),
                         })
                     })
                     .collect();
