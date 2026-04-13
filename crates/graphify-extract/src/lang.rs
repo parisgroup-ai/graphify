@@ -1,7 +1,9 @@
 use graphify_core::types::{Edge, Node};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// The result of extracting a single source file.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ExtractionResult {
     pub nodes: Vec<Node>,
     /// Tuples of (source_id, target_id, edge).
