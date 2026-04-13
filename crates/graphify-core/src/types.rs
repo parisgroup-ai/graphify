@@ -92,15 +92,40 @@ pub enum EdgeKind {
 }
 
 // ---------------------------------------------------------------------------
-// Edge
+// ConfidenceKind
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConfidenceKind {
+    Extracted,
+    Inferred,
+    Ambiguous,
+}
+
+// ---------------------------------------------------------------------------
+// Edge
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edge {
     pub kind: EdgeKind,
     pub weight: u32,
     pub line: usize,
+    pub confidence: f64,
+    pub confidence_kind: ConfidenceKind,
 }
+
+impl PartialEq for Edge {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.weight == other.weight
+            && self.line == other.line
+            && self.confidence.to_bits() == other.confidence.to_bits()
+            && self.confidence_kind == other.confidence_kind
+    }
+}
+
+impl Eq for Edge {}
 
 impl Edge {
     /// Convenience constructor for an `Imports` edge.
@@ -109,6 +134,8 @@ impl Edge {
             kind: EdgeKind::Imports,
             weight: 1,
             line,
+            confidence: 1.0,
+            confidence_kind: ConfidenceKind::Extracted,
         }
     }
 
@@ -118,6 +145,8 @@ impl Edge {
             kind: EdgeKind::Defines,
             weight: 1,
             line,
+            confidence: 1.0,
+            confidence_kind: ConfidenceKind::Extracted,
         }
     }
 
@@ -127,7 +156,16 @@ impl Edge {
             kind: EdgeKind::Calls,
             weight: 1,
             line,
+            confidence: 1.0,
+            confidence_kind: ConfidenceKind::Extracted,
         }
+    }
+
+    /// Builder method to set confidence score and kind.
+    pub fn with_confidence(mut self, score: f64, kind: ConfidenceKind) -> Self {
+        self.confidence = score;
+        self.confidence_kind = kind;
+        self
     }
 }
 
@@ -260,5 +298,69 @@ mod tests {
         let json = serde_json::to_string(&edge).expect("serialize");
         let restored: Edge = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(edge, restored);
+    }
+
+    #[test]
+    fn edge_constructors_default_to_extracted_confidence() {
+        let imp = Edge::imports(5);
+        assert_eq!(imp.confidence, 1.0);
+        assert_eq!(imp.confidence_kind, ConfidenceKind::Extracted);
+
+        let def = Edge::defines(10);
+        assert_eq!(def.confidence, 1.0);
+        assert_eq!(def.confidence_kind, ConfidenceKind::Extracted);
+
+        let call = Edge::calls(20);
+        assert_eq!(call.confidence, 1.0);
+        assert_eq!(call.confidence_kind, ConfidenceKind::Extracted);
+    }
+
+    #[test]
+    fn edge_with_confidence_builder() {
+        let edge = Edge::calls(5).with_confidence(0.7, ConfidenceKind::Inferred);
+        assert_eq!(edge.confidence, 0.7);
+        assert_eq!(edge.confidence_kind, ConfidenceKind::Inferred);
+        assert_eq!(edge.kind, EdgeKind::Calls);
+        assert_eq!(edge.weight, 1);
+        assert_eq!(edge.line, 5);
+    }
+
+    #[test]
+    fn edge_eq_with_confidence() {
+        let a = Edge::imports(1).with_confidence(0.9, ConfidenceKind::Inferred);
+        let b = Edge::imports(1).with_confidence(0.9, ConfidenceKind::Inferred);
+        assert_eq!(a, b);
+
+        let c = Edge::imports(1).with_confidence(0.8, ConfidenceKind::Inferred);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn edge_serialization_roundtrip_with_confidence() {
+        let edge = Edge::calls(77).with_confidence(0.85, ConfidenceKind::Inferred);
+        let json = serde_json::to_string(&edge).expect("serialize");
+        let restored: Edge = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(edge, restored);
+    }
+
+    #[test]
+    fn edge_json_contains_confidence_fields() {
+        let edge = Edge::imports(1).with_confidence(0.5, ConfidenceKind::Ambiguous);
+        let json = serde_json::to_string(&edge).expect("serialize");
+        assert!(json.contains("\"confidence\":0.5"));
+        assert!(json.contains("\"confidence_kind\":\"Ambiguous\""));
+    }
+
+    #[test]
+    fn confidence_kind_variants() {
+        let kinds = vec![
+            (ConfidenceKind::Extracted, "\"Extracted\""),
+            (ConfidenceKind::Inferred, "\"Inferred\""),
+            (ConfidenceKind::Ambiguous, "\"Ambiguous\""),
+        ];
+        for (kind, expected) in kinds {
+            let json = serde_json::to_string(&kind).expect("serialize");
+            assert_eq!(json, expected);
+        }
     }
 }
