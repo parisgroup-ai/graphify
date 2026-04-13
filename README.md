@@ -40,9 +40,38 @@ name = "my-app"
 repo = "./apps/my-app"
 lang = ["python"]
 local_prefix = "app"
+
+[[policy.group]]
+name = "feature"
+match = ["src.features.*"]
+partition_by = "segment:2"
+
+[[policy.group]]
+name = "infra"
+match = ["src.infra.*", "app.infra.*"]
+
+[[policy.rule]]
+name = "no-cross-feature-imports"
+kind = "deny"
+from = ["group:feature"]
+to = ["group:feature"]
+allow_same_partition = true
+
+[[policy.rule]]
+name = "infra-is-restricted"
+kind = "deny"
+from = ["project:*"]
+to = ["group:infra"]
+except_from = ["group:app", "group:bootstrap"]
 ```
 
 Multiple `[[project]]` sections enable monorepo analysis. Each project gets its own output subdirectory.
+
+Policy selectors support:
+- `group:<name>` for named namespace groups
+- `project:<glob>` for configured project names
+
+`partition_by = "segment:N"` lets a group derive peer partitions from dotted node IDs, so rules like feature-to-feature isolation can allow imports within the same feature while blocking cross-feature imports.
 
 ## Commands
 
@@ -57,7 +86,7 @@ Multiple `[[project]]` sections enable monorepo analysis. Each project gets its 
 | `graphify explain <node>` | Module profile card + impact analysis |
 | `graphify path <source> <target>` | Find dependency paths between modules |
 | `graphify diff` | Detect architectural drift between snapshots |
-| `graphify check` | Validate quality gates for CI (max cycles, hotspot score) |
+| `graphify check` | Validate CI quality gates and declarative policy rules |
 | `graphify watch` | Auto-rebuild on file changes (300ms debounce) |
 | `graphify shell` | Interactive graph exploration REPL |
 
@@ -126,9 +155,39 @@ Use `graphify check` in CI pipelines to enforce architectural constraints:
 ```bash
 graphify check --config graphify.toml --max-cycles 0 --max-hotspot-score 0.5
 graphify check --config graphify.toml --max-cycles 0 --json  # machine-readable output
+graphify check --config graphify.toml --json                 # policy-only checks
 ```
 
 Exit code 0 = all checks pass, non-zero = violations found.
+
+Example policy recipes:
+
+```toml
+[[policy.group]]
+name = "feature"
+match = ["src.features.*"]
+partition_by = "segment:2"
+
+[[policy.rule]]
+name = "no-cross-feature-imports"
+kind = "deny"
+from = ["group:feature"]
+to = ["group:feature"]
+allow_same_partition = true
+
+[[policy.group]]
+name = "config"
+match = ["app.config*", "src.config*"]
+
+[[policy.rule]]
+name = "config-is-restricted"
+kind = "deny"
+from = ["project:*"]
+to = ["group:config"]
+except_from = ["group:app", "group:bootstrap"]
+```
+
+`graphify check --json` now returns both limit violations and policy violations. Policy entries include `type = "policy"`, `rule`, `source_node`, `target_node`, `source_project`, and `target_project`.
 
 ## MCP Server
 

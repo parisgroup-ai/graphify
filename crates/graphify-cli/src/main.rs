@@ -11,6 +11,7 @@ use graphify_core::{
     cycles::{find_sccs, find_simple_cycles},
     graph::CodeGraph,
     metrics::{compute_metrics, ScoringWeights},
+    policy::{CompiledPolicy, PolicyConfig, ProjectGraph, ProjectPolicyResult},
     query::{QueryEngine, SearchFilters, SortField},
     types::Language,
 };
@@ -38,6 +39,8 @@ struct Config {
     settings: Settings,
     #[serde(default)]
     project: Vec<ProjectConfig>,
+    #[serde(default)]
+    policy: PolicyConfig,
 }
 
 #[derive(Deserialize, Default)]
@@ -739,6 +742,20 @@ name = "my-project"
 repo = "./src"
 lang = ["python"]           # Options: python, typescript, go, rust
 local_prefix = "app"
+
+# Optional policy rules for graphify check:
+#
+# [[policy.group]]
+# name = "feature"
+# match = ["src.features.*"]
+# partition_by = "segment:2"
+#
+# [[policy.rule]]
+# name = "no-cross-feature-imports"
+# kind = "deny"
+# from = ["group:feature"]
+# to = ["group:feature"]
+# allow_same_partition = true
 "#;
 
     let dest = Path::new("graphify.toml");
@@ -1317,12 +1334,33 @@ struct ProjectCheckSummary {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct CheckViolation {
-    kind: String,
-    actual: serde_json::Value,
-    expected_max: serde_json::Value,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    node_id: Option<String>,
+struct PolicyCheckSummary {
+    rules_evaluated: usize,
+    policy_violations: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+enum CheckViolation {
+    #[serde(rename = "limit")]
+    Limit {
+        kind: String,
+        actual: serde_json::Value,
+        expected_max: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        node_id: Option<String>,
+    },
+    #[serde(rename = "policy")]
+    Policy {
+        kind: String,
+        rule: String,
+        source_node: String,
+        target_node: String,
+        source_project: String,
+        target_project: String,
+        source_selectors: Vec<String>,
+        target_selectors: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1331,6 +1369,7 @@ struct ProjectCheckResult {
     ok: bool,
     summary: ProjectCheckSummary,
     limits: CheckLimits,
+    policy_summary: PolicyCheckSummary,
     violations: Vec<CheckViolation>,
 }
 
@@ -1342,13 +1381,12 @@ struct CheckReport {
 }
 
 fn evaluate_quality_gates(
-    project_name: &str,
     graph: &CodeGraph,
     metrics: &[graphify_core::metrics::NodeMetrics],
     communities: &[graphify_core::community::Community],
     cycles: &[Cycle],
     limits: &CheckLimits,
-) -> ProjectCheckResult {
+) -> (ProjectCheckSummary, Vec<CheckViolation>) {
     let top_hotspot = metrics.iter().max_by(|a, b| {
         a.score
             .partial_cmp(&b.score)
@@ -1368,7 +1406,7 @@ fn evaluate_quality_gates(
 
     if let Some(max_cycles) = limits.max_cycles {
         if summary.cycles > max_cycles {
-            violations.push(CheckViolation {
+            violations.push(CheckViolation::Limit {
                 kind: "max_cycles".to_string(),
                 actual: serde_json::json!(summary.cycles),
                 expected_max: serde_json::json!(max_cycles),
@@ -1379,7 +1417,7 @@ fn evaluate_quality_gates(
 
     if let Some(max_hotspot_score) = limits.max_hotspot_score {
         if summary.max_hotspot_score > max_hotspot_score {
-            violations.push(CheckViolation {
+            violations.push(CheckViolation::Limit {
                 kind: "max_hotspot_score".to_string(),
                 actual: serde_json::json!(summary.max_hotspot_score),
                 expected_max: serde_json::json!(max_hotspot_score),
@@ -1388,11 +1426,39 @@ fn evaluate_quality_gates(
         }
     }
 
+    (summary, violations)
+}
+
+fn build_project_check_result(
+    project_name: &str,
+    summary: ProjectCheckSummary,
+    limits: CheckLimits,
+    policy_result: ProjectPolicyResult,
+    mut violations: Vec<CheckViolation>,
+) -> ProjectCheckResult {
+    let policy_violations = policy_result.violations.len();
+    violations.extend(policy_result.violations.into_iter().map(|violation| {
+        CheckViolation::Policy {
+            kind: "policy_rule".to_string(),
+            rule: violation.rule,
+            source_node: violation.source_node,
+            target_node: violation.target_node,
+            source_project: violation.source_project,
+            target_project: violation.target_project,
+            source_selectors: violation.source_selectors,
+            target_selectors: violation.target_selectors,
+        }
+    }));
+
     ProjectCheckResult {
         name: project_name.to_string(),
         ok: violations.is_empty(),
         summary,
-        limits: limits.clone(),
+        limits,
+        policy_summary: PolicyCheckSummary {
+            rules_evaluated: policy_result.rules_evaluated,
+            policy_violations,
+        },
         violations,
     }
 }
@@ -1415,44 +1481,73 @@ fn print_check_report(report: &CheckReport) {
             None => format!("{:.3}", project.summary.max_hotspot_score),
         };
         println!(
-            "[{}] {} nodes={} edges={} communities={} cycles={} max_hotspot={}",
+            "[{}] {} nodes={} edges={} communities={} cycles={} max_hotspot={} policy_violations={}",
             project.name,
             status,
             project.summary.nodes,
             project.summary.edges,
             project.summary.communities,
             project.summary.cycles,
-            hotspot
+            hotspot,
+            project.policy_summary.policy_violations
         );
 
         for violation in &project.violations {
-            match violation.kind.as_str() {
-                "max_cycles" => {
+            match violation {
+                CheckViolation::Limit {
+                    kind,
+                    actual,
+                    expected_max,
+                    ..
+                } if kind == "max_cycles" => {
                     println!(
                         "  - max_cycles: actual {} > expected {}",
-                        violation.actual, violation.expected_max
+                        actual, expected_max
                     );
                 }
-                "max_hotspot_score" => {
-                    if let Some(node_id) = &violation.node_id {
+                CheckViolation::Limit {
+                    kind,
+                    actual,
+                    expected_max,
+                    node_id,
+                } if kind == "max_hotspot_score" => {
+                    if let Some(node_id) = node_id {
                         println!(
                             "  - max_hotspot_score: actual {:.3} > expected {:.3} at {}",
-                            violation.actual.as_f64().unwrap_or_default(),
-                            violation.expected_max.as_f64().unwrap_or_default(),
+                            actual.as_f64().unwrap_or_default(),
+                            expected_max.as_f64().unwrap_or_default(),
                             node_id
                         );
                     } else {
                         println!(
                             "  - max_hotspot_score: actual {:.3} > expected {:.3}",
-                            violation.actual.as_f64().unwrap_or_default(),
-                            violation.expected_max.as_f64().unwrap_or_default()
+                            actual.as_f64().unwrap_or_default(),
+                            expected_max.as_f64().unwrap_or_default()
                         );
                     }
                 }
-                _ => {
+                CheckViolation::Limit {
+                    kind,
+                    actual,
+                    expected_max,
+                    ..
+                } => {
                     println!(
                         "  - {}: actual {} > expected {}",
-                        violation.kind, violation.actual, violation.expected_max
+                        kind, actual, expected_max
+                    );
+                }
+                CheckViolation::Policy {
+                    rule,
+                    source_node,
+                    target_node,
+                    source_project,
+                    target_project,
+                    ..
+                } => {
+                    println!(
+                        "  - {}: {} -> {} [{} -> {}]",
+                        rule, source_node, target_node, source_project, target_project
                     );
                 }
             }
@@ -1479,19 +1574,72 @@ fn cmd_check(
 ) {
     let cfg = load_config(config_path);
     let projects = filter_projects(&cfg, project_filter);
-    let mut results = Vec::new();
+    let mut analyzed_projects = Vec::new();
 
     for project in &projects {
         let (graph, _excludes, stats) = run_extract(project, &cfg.settings, None, force);
         print_cache_stats(&project.name, &stats);
         let (metrics, communities, cycles) = run_analyze(&graph, &ScoringWeights::default());
-        results.push(evaluate_quality_gates(
-            &project.name,
-            &graph,
-            &metrics,
-            &communities,
-            &cycles,
+        analyzed_projects.push(CheckProjectData {
+            name: project.name.clone(),
+            graph,
+            metrics,
+            communities,
+            cycles,
+        });
+    }
+
+    let compiled_policy = if cfg.policy.is_empty() {
+        None
+    } else {
+        Some(CompiledPolicy::compile(&cfg.policy).unwrap_or_else(|err| {
+            eprintln!("Invalid policy config: {err}");
+            std::process::exit(1);
+        }))
+    };
+
+    let policy_results = if let Some(policy) = &compiled_policy {
+        let policy_inputs: Vec<ProjectGraph<'_>> = analyzed_projects
+            .iter()
+            .map(|project| ProjectGraph {
+                name: &project.name,
+                graph: &project.graph,
+            })
+            .collect();
+        policy.evaluate(&policy_inputs)
+    } else {
+        Vec::new()
+    };
+
+    let policy_by_name: HashMap<String, ProjectPolicyResult> = policy_results
+        .into_iter()
+        .map(|result| (result.name.clone(), result))
+        .collect();
+
+    let mut results = Vec::new();
+    for project in analyzed_projects {
+        let (summary, violations) = evaluate_quality_gates(
+            &project.graph,
+            &project.metrics,
+            &project.communities,
+            &project.cycles,
             &limits,
+        );
+        let policy_result =
+            policy_by_name
+                .get(&project.name)
+                .cloned()
+                .unwrap_or(ProjectPolicyResult {
+                    name: project.name.clone(),
+                    rules_evaluated: 0,
+                    violations: Vec::new(),
+                });
+        results.push(build_project_check_result(
+            &project.name,
+            summary,
+            limits.clone(),
+            policy_result,
+            violations,
         ));
     }
 
@@ -1505,6 +1653,14 @@ fn cmd_check(
     if !report.ok {
         std::process::exit(1);
     }
+}
+
+struct CheckProjectData {
+    name: String,
+    graph: CodeGraph,
+    metrics: Vec<graphify_core::metrics::NodeMetrics>,
+    communities: Vec<graphify_core::community::Community>,
+    cycles: Vec<Cycle>,
 }
 
 // ---------------------------------------------------------------------------
@@ -2378,8 +2534,7 @@ mod tests {
     #[test]
     fn evaluate_quality_gates_without_limits_passes() {
         let graph = sample_graph();
-        let result = evaluate_quality_gates(
-            "demo",
+        let (summary, violations) = evaluate_quality_gates(
             &graph,
             &[metric("a", 0.4), metric("b", 0.7)],
             &[],
@@ -2387,17 +2542,15 @@ mod tests {
             &CheckLimits::default(),
         );
 
-        assert!(result.ok, "expected no limits to pass");
-        assert!(result.violations.is_empty(), "expected no violations");
-        assert_eq!(result.summary.max_hotspot_id.as_deref(), Some("b"));
-        assert!((result.summary.max_hotspot_score - 0.7).abs() < 1e-9);
+        assert!(violations.is_empty(), "expected no violations");
+        assert_eq!(summary.max_hotspot_id.as_deref(), Some("b"));
+        assert!((summary.max_hotspot_score - 0.7).abs() < 1e-9);
     }
 
     #[test]
     fn evaluate_quality_gates_selects_highest_hotspot_score() {
         let graph = sample_graph();
-        let result = evaluate_quality_gates(
-            "demo",
+        let (summary, _violations) = evaluate_quality_gates(
             &graph,
             &[metric("a", 0.91), metric("b", 0.65)],
             &[],
@@ -2405,15 +2558,14 @@ mod tests {
             &CheckLimits::default(),
         );
 
-        assert_eq!(result.summary.max_hotspot_id.as_deref(), Some("a"));
-        assert!((result.summary.max_hotspot_score - 0.91).abs() < 1e-9);
+        assert_eq!(summary.max_hotspot_id.as_deref(), Some("a"));
+        assert!((summary.max_hotspot_score - 0.91).abs() < 1e-9);
     }
 
     #[test]
     fn evaluate_quality_gates_accumulates_multiple_violations() {
         let graph = sample_graph();
-        let result = evaluate_quality_gates(
-            "demo",
+        let (_summary, violations) = evaluate_quality_gates(
             &graph,
             &[metric("a", 0.91)],
             &[],
@@ -2424,9 +2576,14 @@ mod tests {
             },
         );
 
-        assert!(!result.ok, "expected gate failure");
-        assert_eq!(result.violations.len(), 2, "expected two violations");
-        assert_eq!(result.violations[0].kind, "max_cycles");
-        assert_eq!(result.violations[1].kind, "max_hotspot_score");
+        assert_eq!(violations.len(), 2, "expected two violations");
+        assert!(matches!(
+            &violations[0],
+            CheckViolation::Limit { kind, .. } if kind == "max_cycles"
+        ));
+        assert!(matches!(
+            &violations[1],
+            CheckViolation::Limit { kind, .. } if kind == "max_hotspot_score"
+        ));
     }
 }

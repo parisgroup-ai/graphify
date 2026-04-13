@@ -652,7 +652,6 @@ local_prefix = ""
 }
 
 #[test]
-#[ignore] // graphify check subcommand not yet implemented
 fn test_check_passes_with_permissive_limits() {
     let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_project");
 
@@ -704,7 +703,6 @@ lang = ["typescript"]
 }
 
 #[test]
-#[ignore] // graphify check subcommand not yet implemented
 fn test_check_fails_when_cycles_exceed_limit() {
     let tmp = TempDir::new().expect("create temp dir");
     let repo = tmp.path().join("cycle_repo");
@@ -759,7 +757,6 @@ local_prefix = "src"
 }
 
 #[test]
-#[ignore] // graphify check subcommand not yet implemented
 fn test_check_json_reports_violations() {
     let tmp = TempDir::new().expect("create temp dir");
     let repo = tmp.path().join("cycle_repo");
@@ -827,7 +824,6 @@ local_prefix = "src"
 }
 
 #[test]
-#[ignore] // graphify check subcommand not yet implemented
 fn test_check_multi_project_fails_if_one_project_violates() {
     let healthy_fixture =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_project");
@@ -892,5 +888,233 @@ local_prefix = "src"
     assert!(
         stdout.contains("healthy_fixture") && stdout.contains("cycle_fixture"),
         "expected both projects in check output, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_check_fails_on_policy_rule_for_cross_feature_imports() {
+    let tmp = TempDir::new().expect("create temp dir");
+    let repo = tmp.path().join("feature_repo");
+    let src = repo.join("src");
+    let features = src.join("features");
+
+    std::fs::create_dir_all(&features).expect("create features dir");
+
+    std::fs::write(
+        features.join("billing.ts"),
+        b"import './identity'; export const billing = 1;",
+    )
+    .expect("write billing module");
+    std::fs::write(features.join("identity.ts"), b"export const identity = 1;")
+        .expect("write identity module");
+
+    let out_dir = tmp.path().join("output");
+    let config_path = tmp.path().join("graphify.toml");
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "feature_fixture"
+repo = "{repo}"
+lang = ["typescript"]
+local_prefix = "src"
+
+[[policy.group]]
+name = "feature"
+match = ["src.features.*"]
+partition_by = "segment:2"
+
+[[policy.rule]]
+name = "no-cross-feature-imports"
+kind = "deny"
+from = ["group:feature"]
+to = ["group:feature"]
+allow_same_partition = true
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        repo = repo
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    );
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let output = Command::new(graphify_bin())
+        .arg("check")
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("launch graphify binary");
+
+    assert!(
+        !output.status.success(),
+        "graphify check should fail when policy rules are violated.\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("no-cross-feature-imports"),
+        "expected policy rule name in output, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn test_check_policy_json_reports_violations() {
+    let tmp = TempDir::new().expect("create temp dir");
+    let repo = tmp.path().join("feature_repo");
+    let src = repo.join("src");
+    let features = src.join("features");
+
+    std::fs::create_dir_all(&features).expect("create features dir");
+    std::fs::write(
+        features.join("billing.ts"),
+        b"import './identity'; export const billing = 1;",
+    )
+    .expect("write billing module");
+    std::fs::write(features.join("identity.ts"), b"export const identity = 1;")
+        .expect("write identity module");
+
+    let out_dir = tmp.path().join("output");
+    let config_path = tmp.path().join("graphify.toml");
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "feature_fixture"
+repo = "{repo}"
+lang = ["typescript"]
+local_prefix = "src"
+
+[[policy.group]]
+name = "feature"
+match = ["src.features.*"]
+partition_by = "segment:2"
+
+[[policy.rule]]
+name = "no-cross-feature-imports"
+kind = "deny"
+from = ["group:feature"]
+to = ["group:feature"]
+allow_same_partition = true
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        repo = repo
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    );
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let output = Command::new(graphify_bin())
+        .arg("check")
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--json")
+        .output()
+        .expect("launch graphify binary");
+
+    assert!(
+        !output.status.success(),
+        "graphify check should fail in JSON mode when a policy rule is violated.\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("parse JSON output from graphify check");
+    assert_eq!(value["ok"], serde_json::Value::Bool(false));
+    assert_eq!(
+        value["projects"][0]["policy_summary"]["policy_violations"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        value["projects"][0]["violations"][0]["type"].as_str(),
+        Some("policy")
+    );
+    assert_eq!(
+        value["projects"][0]["violations"][0]["rule"].as_str(),
+        Some("no-cross-feature-imports")
+    );
+}
+
+#[test]
+fn test_check_policy_allows_same_partition_imports() {
+    let tmp = TempDir::new().expect("create temp dir");
+    let repo = tmp.path().join("feature_repo");
+    let src = repo.join("src");
+    let billing = src.join("features").join("billing");
+
+    std::fs::create_dir_all(&billing).expect("create billing dir");
+    std::fs::write(
+        billing.join("api.ts"),
+        b"import './service'; export const billingApi = 1;",
+    )
+    .expect("write api module");
+    std::fs::write(
+        billing.join("service.ts"),
+        b"export const billingService = 1;",
+    )
+    .expect("write service module");
+
+    let out_dir = tmp.path().join("output");
+    let config_path = tmp.path().join("graphify.toml");
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "feature_fixture"
+repo = "{repo}"
+lang = ["typescript"]
+local_prefix = "src"
+
+[[policy.group]]
+name = "feature"
+match = ["src.features.*"]
+partition_by = "segment:2"
+
+[[policy.rule]]
+name = "no-cross-feature-imports"
+kind = "deny"
+from = ["group:feature"]
+to = ["group:feature"]
+allow_same_partition = true
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        repo = repo
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    );
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let output = Command::new(graphify_bin())
+        .arg("check")
+        .arg("--config")
+        .arg(&config_path)
+        .output()
+        .expect("launch graphify binary");
+
+    assert!(
+        output.status.success(),
+        "graphify check should allow imports within the same feature partition.\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("All checks passed"),
+        "expected successful output, got:\n{stdout}"
     );
 }
