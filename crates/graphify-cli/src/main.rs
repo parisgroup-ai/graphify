@@ -1572,7 +1572,113 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
 // watch command
 // ---------------------------------------------------------------------------
 
-fn cmd_watch(_config_path: &Path, _output_override: Option<&Path>, _force: bool, _format_override: Option<&str>) {
-    eprintln!("Watch mode not yet implemented");
-    std::process::exit(1);
+fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, format_override: Option<&str>) {
+    use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+    use watch::{determine_affected_projects, WatchFilter};
+
+    let cfg = load_config(config_path);
+    let out_dir = resolve_output(&cfg, output_override);
+    let weights = resolve_weights(&cfg, None);
+    let formats = resolve_formats(&cfg, format_override);
+
+    if cfg.project.is_empty() {
+        eprintln!("Error: no projects configured in config file.");
+        std::process::exit(1);
+    }
+
+    // Collect all language strings and excludes for the watch filter.
+    let all_langs: Vec<String> = cfg.project
+        .iter()
+        .flat_map(|p| p.lang.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let exclude_dirs = cfg.settings.exclude.clone().unwrap_or_default();
+
+    let canonical_out = std::fs::canonicalize(&out_dir).unwrap_or_else(|_| out_dir.clone());
+    let filter = WatchFilter::new(&all_langs, &exclude_dirs, &canonical_out);
+
+    // Collect project repo paths for affected-project detection.
+    let project_repos: Vec<PathBuf> = cfg.project
+        .iter()
+        .map(|p| {
+            let repo = PathBuf::from(&p.repo);
+            std::fs::canonicalize(&repo).unwrap_or(repo)
+        })
+        .collect();
+
+    // Run initial pipeline.
+    eprintln!("=== Initial build ===");
+    for project in &cfg.project {
+        let proj_out = out_dir.join(&project.name);
+        std::fs::create_dir_all(&proj_out).expect("create output directory");
+        let _ = run_pipeline_for_project(project, &cfg.settings, &proj_out, &weights, &formats, force);
+        eprintln!("[{}] Ready.", project.name);
+    }
+
+    // Setup file watcher.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut debouncer = new_debouncer(std::time::Duration::from_millis(300), tx)
+        .expect("create file watcher");
+
+    for repo in &project_repos {
+        debouncer.watcher().watch(repo, notify::RecursiveMode::Recursive)
+            .unwrap_or_else(|e| {
+                eprintln!("Error: cannot watch {:?}: {e}", repo);
+                std::process::exit(1);
+            });
+    }
+
+    eprintln!();
+    eprintln!("Watching {} project(s). Press Ctrl+C to stop.", cfg.project.len());
+    for (i, repo) in project_repos.iter().enumerate() {
+        eprintln!("  [{}] {}", cfg.project[i].name, repo.display());
+    }
+    eprintln!();
+
+    // Event loop.
+    loop {
+        match rx.recv() {
+            Ok(Ok(events)) => {
+                let changed_paths: Vec<PathBuf> = events
+                    .iter()
+                    .filter(|e| e.kind == DebouncedEventKind::Any)
+                    .map(|e| e.path.clone())
+                    .filter(|p| filter.should_rebuild(p))
+                    .collect();
+
+                if changed_paths.is_empty() {
+                    continue;
+                }
+
+                let affected = determine_affected_projects(&changed_paths, &project_repos);
+                if affected.is_empty() {
+                    continue;
+                }
+
+                let start = std::time::Instant::now();
+                eprintln!("--- Rebuild triggered ({} file(s) changed) ---", changed_paths.len());
+
+                for &idx in &affected {
+                    let project = &cfg.project[idx];
+                    let proj_out = out_dir.join(&project.name);
+                    std::fs::create_dir_all(&proj_out).expect("create output directory");
+                    let _ = run_pipeline_for_project(
+                        project, &cfg.settings, &proj_out, &weights, &formats, false,
+                    );
+                    eprintln!("[{}] Rebuilt.", project.name);
+                }
+
+                let elapsed = start.elapsed();
+                eprintln!("--- Done in {:.1}s ---\n", elapsed.as_secs_f64());
+            }
+            Ok(Err(e)) => {
+                eprintln!("Watch error: {e:?}");
+            }
+            Err(e) => {
+                eprintln!("Channel error: {e}");
+                break;
+            }
+        }
+    }
 }

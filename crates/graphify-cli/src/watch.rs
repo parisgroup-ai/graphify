@@ -6,14 +6,12 @@ use std::path::{Path, PathBuf};
 /// 1. File extension matches configured languages (.py, .ts, .tsx)
 /// 2. Path is not inside an excluded directory
 /// 3. Path is not inside the output directory
-#[allow(dead_code)]
 pub struct WatchFilter {
     extensions: Vec<String>,
     exclude_dirs: Vec<String>,
     output_dir: PathBuf,
 }
 
-#[allow(dead_code)]
 impl WatchFilter {
     pub fn new(
         languages: &[String],
@@ -62,6 +60,25 @@ impl WatchFilter {
 
         true
     }
+}
+
+/// Given a set of changed file paths and a list of project repo directories,
+/// returns indices of projects whose repo directory contains at least one changed file.
+pub fn determine_affected_projects(
+    changed_paths: &[PathBuf],
+    project_repos: &[PathBuf],
+) -> Vec<usize> {
+    let mut affected = Vec::new();
+    for (i, repo) in project_repos.iter().enumerate() {
+        let canonical_repo = std::fs::canonicalize(repo).unwrap_or_else(|_| repo.clone());
+        if changed_paths.iter().any(|p| {
+            let canonical_p = std::fs::canonicalize(p).unwrap_or_else(|_| p.clone());
+            canonical_p.starts_with(&canonical_repo)
+        }) {
+            affected.push(i);
+        }
+    }
+    affected
 }
 
 #[cfg(test)]
@@ -122,5 +139,38 @@ mod tests {
     fn empty_languages_rejects_all() {
         let filter = WatchFilter::new(&[], &[], Path::new("/out"));
         assert!(!filter.should_rebuild(Path::new("/project/main.py")));
+    }
+
+    #[test]
+    fn determine_affected_projects_matches_by_prefix() {
+        let repos = vec![
+            PathBuf::from("/project/apps/api"),
+            PathBuf::from("/project/apps/web"),
+        ];
+        let changed = vec![PathBuf::from("/project/apps/api/src/main.py")];
+        let affected = determine_affected_projects(&changed, &repos);
+        assert_eq!(affected, vec![0]);
+    }
+
+    #[test]
+    fn determine_affected_projects_multiple() {
+        let repos = vec![
+            PathBuf::from("/project/apps/api"),
+            PathBuf::from("/project/apps/web"),
+        ];
+        let changed = vec![
+            PathBuf::from("/project/apps/api/src/main.py"),
+            PathBuf::from("/project/apps/web/src/index.ts"),
+        ];
+        let affected = determine_affected_projects(&changed, &repos);
+        assert_eq!(affected, vec![0, 1]);
+    }
+
+    #[test]
+    fn determine_affected_projects_none() {
+        let repos = vec![PathBuf::from("/project/apps/api")];
+        let changed = vec![PathBuf::from("/other/path/file.py")];
+        let affected = determine_affected_projects(&changed, &repos);
+        assert!(affected.is_empty());
     }
 }
