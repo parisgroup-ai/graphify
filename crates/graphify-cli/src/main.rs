@@ -23,6 +23,8 @@ use graphify_report::{
     write_nodes_csv, write_obsidian_vault, write_report, Cycle,
 };
 
+mod watch;
+
 // ---------------------------------------------------------------------------
 // Config structs
 // ---------------------------------------------------------------------------
