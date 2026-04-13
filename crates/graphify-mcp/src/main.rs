@@ -277,9 +277,33 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
         .map(|f| f.module_name.as_str())
         .collect();
 
-    for (src_id, raw_target, edge) in all_raw_edges {
+    for (src_id, raw_target, mut edge) in all_raw_edges {
         let is_package = package_modules.contains(src_id.as_str());
-        let (resolved_target, _is_local, _confidence) = resolver.resolve(&raw_target, &src_id, is_package);
+        let (resolved_target, is_local, resolver_confidence) =
+            resolver.resolve(&raw_target, &src_id, is_package);
+
+        // Step 1: Apply resolver confidence (never upgrade past extractor's value).
+        let final_confidence = edge.confidence.min(resolver_confidence);
+
+        // Step 2: If resolver transformed the string, mark as Inferred.
+        if resolved_target != raw_target {
+            edge = edge.with_confidence(
+                final_confidence,
+                graphify_core::types::ConfidenceKind::Inferred,
+            );
+        } else {
+            edge.confidence = final_confidence;
+        }
+
+        // Step 3: Downgrade edges to non-local targets.
+        if !is_local {
+            let capped = edge.confidence.min(0.5);
+            edge = edge.with_confidence(
+                capped,
+                graphify_core::types::ConfidenceKind::Ambiguous,
+            );
+        }
+
         graph.add_edge(&src_id, &resolved_target, edge);
     }
 
