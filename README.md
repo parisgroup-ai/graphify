@@ -1,21 +1,29 @@
 # Graphify
 
-Architectural analysis of codebases. Extracts dependencies via tree-sitter, builds knowledge graphs, identifies hotspots, circular dependencies, and community clusters.
+Architectural analysis of codebases. Extracts dependencies via tree-sitter AST parsing, builds knowledge graphs with petgraph, and generates structured reports identifying hotspots, circular dependencies, and community clusters.
+
+Distributed as a single static binary — no runtime dependencies. macOS + Linux.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/parisgroup/graphify/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/parisgroup-ai/graphify/main/install.sh | sh
 ```
 
-Or download from [Releases](https://github.com/parisgroup/graphify/releases).
+Or download from [Releases](https://github.com/parisgroup-ai/graphify/releases).
+
+Build from source:
+
+```bash
+cargo install --path crates/graphify-cli
+```
 
 ## Quick Start
 
 ```bash
-graphify init
-# Edit graphify.toml
-graphify report
+graphify init          # generate graphify.toml
+# edit graphify.toml to point at your project(s)
+graphify run           # extract → analyze → report
 ```
 
 ## Configuration
@@ -23,36 +31,144 @@ graphify report
 ```toml
 [settings]
 output = "./report"
-weights = [0.4, 0.2, 0.2, 0.2]
+weights = [0.4, 0.2, 0.2, 0.2]  # betweenness, pagerank, in_degree, in_cycle
 exclude = ["__pycache__", "node_modules", ".git", "dist", "tests"]
-format = ["json", "csv", "md"]
+format = ["json", "csv", "md", "html"]  # also: neo4j, graphml, obsidian
 
 [[project]]
 name = "my-app"
 repo = "./apps/my-app"
 lang = ["python"]
-local_prefix = "app."
+local_prefix = "app"
 ```
+
+Multiple `[[project]]` sections enable monorepo analysis. Each project gets its own output subdirectory.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `graphify init` | Generate graphify.toml |
-| `graphify extract` | Extract dependency graph |
-| `graphify analyze` | Extract + compute metrics |
+| `graphify init` | Generate a `graphify.toml` template |
+| `graphify extract` | Extract dependency graph (produces `graph.json`) |
+| `graphify analyze` | Extract + compute metrics (produces `analysis.json`, CSV) |
 | `graphify report` | Full pipeline with all outputs |
-| `graphify run` | Alias for report |
+| `graphify run` | Alias for `report` |
 | `graphify query "pattern"` | Search nodes by glob pattern |
 | `graphify explain <node>` | Module profile card + impact analysis |
 | `graphify path <source> <target>` | Find dependency paths between modules |
 | `graphify diff` | Detect architectural drift between snapshots |
-| `graphify watch` | Auto-rebuild on file changes |
+| `graphify check` | Validate quality gates for CI (max cycles, hotspot score) |
+| `graphify watch` | Auto-rebuild on file changes (300ms debounce) |
 | `graphify shell` | Interactive graph exploration REPL |
 
-## Common Monorepo Recipes
+### Flags
 
-These examples show how the subcommands fit together in day-to-day architecture work on a multi-project repo.
+| Flag | Applies to | Description |
+|------|-----------|-------------|
+| `--config <path>` | all | Path to `graphify.toml` (default: `./graphify.toml`) |
+| `--force` | extract, analyze, report, run, check | Bypass extraction cache, full rebuild |
+| `--json` | query, explain, check | Output as JSON |
+| `--project <name>` | query, explain, path, diff, check | Filter to a specific project |
+| `--all` | path | Show all paths (not just shortest) |
+| `--max-depth <n>` | path | Limit path search depth |
+| `--threshold <f>` | diff | Minimum score delta to report (default: 0.05) |
+
+## Output Formats
+
+Each project produces a subdirectory under the configured output path:
+
+| File | Format | Description |
+|------|--------|-------------|
+| `graph.json` | JSON | Dependency graph (NetworkX `node_link_data` format) |
+| `analysis.json` | JSON | Metrics, communities, cycles, confidence summary |
+| `graph_nodes.csv` | CSV | Node metrics (betweenness, PageRank, score, community) |
+| `graph_edges.csv` | CSV | Edge list with weights and confidence |
+| `architecture_report.md` | Markdown | Human-readable report with hotspots, cycles, communities |
+| `architecture_graph.html` | HTML | Interactive D3.js force-directed graph visualization |
+| `graph.cypher` | Cypher | Neo4j import script (`CREATE` nodes + relationships) |
+| `graph.graphml` | GraphML | XML export (compatible with yEd, Gephi) |
+| `obsidian_vault/` | Markdown | Obsidian vault with one `.md` per node and `[[wikilinks]]` |
+| `drift-report.json` | JSON | Drift detection results (via `graphify diff`) |
+| `drift-report.md` | Markdown | Drift detection report |
+
+When 2+ projects are configured, a `graphify-summary.json` with aggregate stats is also generated.
+
+## Incremental Builds
+
+Graphify caches extraction results per file using SHA256 content hashing. On subsequent runs, only changed files are re-parsed.
+
+```bash
+graphify run              # first run: full extraction
+graphify run              # second run: cache hit, skips unchanged files
+graphify run --force      # bypass cache, full rebuild
+```
+
+The cache is stored as `.graphify-cache.json` in each project's output directory. It auto-invalidates on version upgrades or `local_prefix` changes.
+
+## Drift Detection
+
+Compare analysis snapshots to detect architectural drift:
+
+```bash
+# File vs file
+graphify diff --before report/v1/analysis.json --after report/v2/analysis.json
+
+# Baseline vs live project
+graphify diff --baseline report/baseline/analysis.json --config graphify.toml --project my-app
+```
+
+Detects changes across 5 dimensions: node additions/removals, hotspot score shifts, cycle introduction/resolution, community membership moves, and degree changes.
+
+## Quality Gates (CI)
+
+Use `graphify check` in CI pipelines to enforce architectural constraints:
+
+```bash
+graphify check --config graphify.toml --max-cycles 0 --max-hotspot-score 0.5
+graphify check --config graphify.toml --max-cycles 0 --json  # machine-readable output
+```
+
+Exit code 0 = all checks pass, non-zero = violations found.
+
+## MCP Server
+
+Graphify includes an MCP server (`graphify-mcp`) that exposes graph queries to AI assistants like Claude:
+
+```bash
+cargo install --path crates/graphify-mcp
+```
+
+Add to your Claude Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": ["--config", "graphify.toml"]
+    }
+  }
+}
+```
+
+Exposes 9 tools: `graphify_stats`, `graphify_search`, `graphify_explain`, `graphify_dependents`, `graphify_dependencies`, `graphify_shortest_path`, `graphify_all_paths`, `graphify_suggest`, `graphify_hotspots`.
+
+## Confidence Scoring
+
+Every edge carries a confidence score (0.0–1.0) indicating extraction certainty:
+
+| Source | Confidence | Kind |
+|--------|-----------|------|
+| Direct import | 1.0 | Extracted |
+| Python relative import | 0.9 | Extracted |
+| TS relative import | 0.9 | Extracted |
+| TS path alias | 0.85 | Extracted |
+| Bare function call | 0.7 | Inferred |
+| Non-local target | ≤0.5 | Ambiguous |
+
+Use `--json` with `query` or `explain` to see confidence data. The MCP server supports `min_confidence` filtering.
+
+## Common Monorepo Recipes
 
 ### 1. Refresh the full graph before research
 
@@ -60,16 +176,16 @@ These examples show how the subcommands fit together in day-to-day architecture 
 graphify run --config graphify.toml
 ```
 
-Use this after config changes, before architecture review, or after a large refactor. It regenerates `graph.json`, `analysis.json`, CSV exports, and the Markdown report for every configured project.
+Use this after config changes, before architecture review, or after a large refactor.
 
-### 2. Find a namespace, route group, or bounded context quickly
+### 2. Find a namespace, route group, or bounded context
 
 ```bash
 graphify query 'src.app.*study-chat*' --config graphify.toml --project web
 graphify query 'app.api.*' --config graphify.toml --project api --json
 ```
 
-Start with `query` when you know roughly what area you want but not the exact node ID. Add `--json` when another tool or script needs the results.
+Start with `query` when you know roughly what area you want but not the exact node ID.
 
 ### 3. Investigate a hotspot before refactoring it
 
@@ -78,7 +194,7 @@ graphify explain 'src.shared.domain.errors' --config graphify.toml --project pkg
 graphify explain 'src.shared.domain.errors' --config graphify.toml --project pkg-api --json
 ```
 
-Use `explain` before touching a high fan-in module. It gives you a focused profile for a single node so you can assess blast radius before making changes.
+Use `explain` before touching a high fan-in module to assess blast radius.
 
 ### 4. Trace why one module depends on another
 
@@ -87,7 +203,7 @@ graphify path 'src.hooks' 'src.trpc.react' --config graphify.toml --project web
 graphify path 'src.hooks' 'src.trpc.react' --config graphify.toml --project web --all --max-depth 6
 ```
 
-Use the default shortest path first. If the dependency looks surprising, rerun with `--all` to inspect alternate routes up to a controlled depth.
+Use the default shortest path first. Rerun with `--all` to inspect alternate routes.
 
 ### 5. Compare drift before and after a refactor
 
@@ -97,36 +213,39 @@ graphify run --config graphify.toml
 graphify diff --baseline /tmp/web-before.json --config graphify.toml --project web
 ```
 
-This is the fastest way to answer "what changed architecturally?" after a branch of work. Keep the baseline snapshot before the refactor, rerun Graphify, then diff against the live project.
-
-### 6. Review a project as an architecture workflow, not isolated commands
+### 6. Watch mode during development
 
 ```bash
-graphify run --config graphify.toml
-graphify query 'src.app.*study-chat*' --config graphify.toml --project web
-graphify explain 'src.shared.domain.errors' --config graphify.toml --project pkg-api
-graphify path 'src.hooks' 'src.trpc.react' --config graphify.toml --project web
+graphify watch --config graphify.toml
 ```
 
-This sequence works well for real monorepos:
-- refresh the graph
-- narrow the search space with `query`
-- inspect risky modules with `explain`
-- confirm dependency chains with `path`
+Monitors source files and auto-rebuilds only affected projects on changes (300ms debounce). Useful during active refactoring.
 
-## Output
+### 7. CI quality gate
 
-Each project produces:
-- `graph.json` — dependency graph (NetworkX node_link_data format)
-- `analysis.json` — metrics, communities, cycles
-- `graph_nodes.csv` — node metrics
-- `graph_edges.csv` — edge list
-- `architecture_report.md` — human-readable report
+```yaml
+# .github/workflows/arch.yml
+- run: graphify check --config graphify.toml --max-cycles 0 --max-hotspot-score 0.8
+```
+
+Fails the build if architectural constraints are violated.
 
 ## Supported Languages
 
 - Python
-- TypeScript
+- TypeScript / JavaScript
+
+## Architecture
+
+Cargo workspace with 5 crates:
+
+| Crate | Role |
+|---|---|
+| `graphify-core` | Graph model, metrics, community detection, cycles, query engine, diff |
+| `graphify-extract` | tree-sitter AST parsing, file discovery, module resolution, caching |
+| `graphify-report` | JSON, CSV, Markdown, HTML, Neo4j, GraphML, Obsidian output |
+| `graphify-cli` | CLI, config parsing, pipeline orchestration, watch mode |
+| `graphify-mcp` | MCP server for AI assistant integration |
 
 ---
 
@@ -137,7 +256,7 @@ Copy the block below into your project's `CLAUDE.md` to make Claude Code use Gra
 ````markdown
 ## Architectural Research with Graphify
 
-This project uses [Graphify](https://github.com/parisgroup/graphify) for architectural analysis. **Use Graphify as the primary source for understanding the codebase structure before reading individual files.**
+This project uses [Graphify](https://github.com/parisgroup-ai/graphify) for architectural analysis. **Use Graphify as the primary source for understanding the codebase structure before reading individual files.**
 
 ### Setup (run once)
 
@@ -168,6 +287,7 @@ When you need to understand the architecture or the impact of a change, **always
 | "What are the architectural hotspots / God modules?" | Read `report/<project>/architecture_report.md` or `analysis.json` |
 | "Are there circular dependencies?" | Read `analysis.json` → `cycles` array |
 | "Did my changes introduce drift?" | `graphify diff --baseline report/analysis.json --config graphify.toml` |
+| "Does this pass CI quality gates?" | `graphify check --config graphify.toml --max-cycles 0` |
 
 ### Rules
 
