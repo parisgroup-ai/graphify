@@ -2,6 +2,11 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## [0.4.1] - 2026-04-13
+
+### Fixed
+- fix(core): make community detection deterministic on symmetric graphs so historical trend churn does not fluctuate across identical runs
+
 ## [0.4.0] - 2026-04-13
 
 ### Added

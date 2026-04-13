@@ -111,14 +111,19 @@ pub fn detect_communities(graph: &CodeGraph) -> Vec<Community> {
             // We compare candidates relative to the gain of staying put (0).
             let mut best_gain = 0.0_f64;
             let mut best_comm = current_comm;
+            let mut candidates: Vec<(usize, f64)> =
+                comm_weight.iter().map(|(&c, &k_i_in)| (c, k_i_in)).collect();
+            candidates.sort_by_key(|(c, _)| *c);
 
-            for (&c, &k_i_in) in &comm_weight {
+            for (c, k_i_in) in candidates {
                 if c == current_comm {
                     continue;
                 }
                 let s_tot = sigma_tot.get(&c).copied().unwrap_or(0.0);
                 let gain = k_i_in / m - s_tot * ki / (2.0 * m * m);
-                if gain > best_gain {
+                if gain > best_gain + 1e-12
+                    || ((gain - best_gain).abs() <= 1e-12 && gain > 0.0 && c < best_comm)
+                {
                     best_gain = gain;
                     best_comm = c;
                 }
@@ -172,10 +177,22 @@ fn merge_singletons(community: &mut [usize], adj: &[HashMap<usize, f64>], n: usi
         }
         let mut best_comm = community[u];
         let mut best_w = 0.0_f64;
-        for (&v, &w) in &adj[u] {
-            if w > best_w {
+        let mut neighbors: Vec<(usize, f64, usize)> = adj[u]
+            .iter()
+            .map(|(&v, &w)| (community[v], w, v))
+            .collect();
+        neighbors.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+                .then_with(|| a.2.cmp(&b.2))
+        });
+        for (neighbor_comm, w, _neighbor_idx) in neighbors {
+            if w > best_w + 1e-12
+                || ((w - best_w).abs() <= 1e-12 && w > 0.0 && neighbor_comm < best_comm)
+            {
                 best_w = w;
-                best_comm = community[v];
+                best_comm = neighbor_comm;
             }
         }
         if best_comm != community[u] {
@@ -488,6 +505,41 @@ mod tests {
             d_comm.unwrap().id,
             a_comm.unwrap().id,
             "d should be in the same community as a"
+        );
+    }
+
+    #[test]
+    fn louvain_is_deterministic_on_symmetric_graph() {
+        // Symmetric cycle graph: several partitions can have equal modularity,
+        // so tie-breaking must still be deterministic across repeated runs.
+        let mut g = CodeGraph::new();
+        for id in &["a", "b", "c", "d"] {
+            g.add_node(module(id));
+        }
+        g.add_edge("a", "b", Edge::imports(1));
+        g.add_edge("b", "a", Edge::imports(2));
+        g.add_edge("b", "c", Edge::imports(3));
+        g.add_edge("c", "b", Edge::imports(4));
+        g.add_edge("c", "d", Edge::imports(5));
+        g.add_edge("d", "c", Edge::imports(6));
+        g.add_edge("d", "a", Edge::imports(7));
+        g.add_edge("a", "d", Edge::imports(8));
+
+        let mut fingerprints = std::collections::BTreeSet::new();
+        for _ in 0..50 {
+            let mut groups: Vec<Vec<String>> = detect_communities(&g)
+                .into_iter()
+                .map(|community| community.members)
+                .collect();
+            groups.sort();
+            fingerprints.insert(format!("{groups:?}"));
+        }
+
+        assert_eq!(
+            fingerprints.len(),
+            1,
+            "community detection should be deterministic, got variants: {:?}",
+            fingerprints
         );
     }
 
