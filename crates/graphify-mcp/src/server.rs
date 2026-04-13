@@ -88,6 +88,8 @@ pub struct SearchParams {
     pub kind: Option<String>,
     /// Sort results: score (default), name, in_degree.
     pub sort: Option<String>,
+    /// Only return local (in-project) nodes.
+    pub local_only: Option<bool>,
     /// Project name. Uses the default project if omitted.
     pub project: Option<String>,
 }
@@ -234,7 +236,7 @@ impl GraphifyServer {
                 let filters = SearchFilters {
                     kind: params.kind.as_deref().and_then(parse_node_kind),
                     sort_by: sort_field,
-                    local_only: false,
+                    local_only: params.local_only.unwrap_or(false),
                 };
                 let results = engine.search(&params.pattern, &filters);
                 Ok(CallToolResult::success(vec![Content::text(to_json(
@@ -430,7 +432,7 @@ impl GraphifyServer {
         &self,
         #[tool(aggr)] params: TransitiveDepsParams,
     ) -> Result<CallToolResult, rmcp::Error> {
-        let max_depth = params.max_depth.unwrap_or(10);
+        let max_depth = params.max_depth.unwrap_or(5);
         match self.resolve_engine(params.project.as_deref()) {
             Ok(engine) => {
                 let deps = engine.transitive_dependents(&params.node_id, max_depth);

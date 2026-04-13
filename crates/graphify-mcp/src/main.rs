@@ -92,20 +92,41 @@ async fn main() {
 
     for project in &config.project {
         eprintln!("  extracting '{}'...", project.name);
-        let engine = build_query_engine(project, &config.settings);
-        let stats = engine.stats();
-        eprintln!(
-            "  '{}': {} nodes, {} edges, {} communities, {} cycles",
-            project.name,
-            stats.node_count,
-            stats.edge_count,
-            stats.community_count,
-            stats.cycle_count,
-        );
-        engines.insert(project.name.clone(), engine);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            build_query_engine(project, &config.settings)
+        }));
+        match result {
+            Ok(engine) => {
+                let stats = engine.stats();
+                eprintln!(
+                    "  '{}': {} nodes, {} edges, {} communities, {} cycles",
+                    project.name,
+                    stats.node_count,
+                    stats.edge_count,
+                    stats.community_count,
+                    stats.cycle_count,
+                );
+                engines.insert(project.name.clone(), engine);
+            }
+            Err(_) => {
+                eprintln!(
+                    "  Warning: extraction failed for project '{}', skipping.",
+                    project.name
+                );
+            }
+        }
     }
 
-    let default_project = project_names[0].clone();
+    if engines.is_empty() {
+        eprintln!("Error: all project extractions failed. Nothing to serve.");
+        std::process::exit(1);
+    }
+
+    let default_project = project_names
+        .iter()
+        .find(|n| engines.contains_key(n.as_str()))
+        .cloned()
+        .unwrap_or_else(|| engines.keys().next().unwrap().clone());
     eprintln!(
         "graphify-mcp: ready ({} project(s), default='{}')",
         engines.len(),
