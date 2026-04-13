@@ -920,7 +920,7 @@ mod tests {
     #[test]
     fn resolve_rust_crate_import() {
         let r = make_rust_resolver();
-        let (id, is_local, confidence) = r.resolve("crate::handler", "src.services.db", false);
+        let (id, _is_local, confidence) = r.resolve("crate::handler", "src.services.db", false);
         assert_eq!(id, "handler");
         // Note: "handler" is not in known_modules (it's "src.handler").
         // The crate:: prefix strips to root-relative, which is just "handler".
