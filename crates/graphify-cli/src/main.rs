@@ -332,31 +332,13 @@ fn main() {
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
-                let (graph, _, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
-                print_cache_stats(&project.name, &stats);
-                let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
-                assign_community_ids(&mut metrics, &communities);
-                let cycles_for_report: Vec<Cycle> = cycles_simple;
-                write_all_outputs(
-                    &project.name,
-                    &graph,
-                    &metrics,
-                    &communities,
-                    &cycles_for_report,
-                    &proj_out,
-                    &formats,
-                );
+                let pd = run_pipeline_for_project(project, &cfg.settings, &proj_out, &w, &formats, force);
                 println!(
                     "[{}] Report written to {}",
                     project.name,
                     proj_out.display()
                 );
-                project_data.push(ProjectData {
-                    name: project.name.clone(),
-                    graph,
-                    metrics,
-                    cycles: cycles_for_report,
-                });
+                project_data.push(pd);
             }
             if project_data.len() > 1 {
                 write_summary(&project_data, &out_dir);
@@ -372,31 +354,13 @@ fn main() {
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
-                let (graph, _, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
-                print_cache_stats(&project.name, &stats);
-                let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
-                assign_community_ids(&mut metrics, &communities);
-                let cycles_for_report: Vec<Cycle> = cycles_simple;
-                write_all_outputs(
-                    &project.name,
-                    &graph,
-                    &metrics,
-                    &communities,
-                    &cycles_for_report,
-                    &proj_out,
-                    &formats,
-                );
+                let pd = run_pipeline_for_project(project, &cfg.settings, &proj_out, &w, &formats, force);
                 println!(
                     "[{}] Pipeline complete → {}",
                     project.name,
                     proj_out.display()
                 );
-                project_data.push(ProjectData {
-                    name: project.name.clone(),
-                    graph,
-                    metrics,
-                    cycles: cycles_for_report,
-                });
+                project_data.push(pd);
             }
             if project_data.len() > 1 {
                 write_summary(&project_data, &out_dir);
@@ -972,6 +936,43 @@ fn run_analyze(graph: &CodeGraph, weights: &ScoringWeights) -> AnalysisResult {
     };
 
     (metrics, communities, cycles)
+}
+
+// ---------------------------------------------------------------------------
+// Single-project pipeline helper
+// ---------------------------------------------------------------------------
+
+/// Runs the full pipeline for a single project: extract → analyze → write outputs.
+///
+/// Returns a `ProjectData` struct for use in cross-project summaries.
+fn run_pipeline_for_project(
+    project: &ProjectConfig,
+    settings: &Settings,
+    proj_out: &Path,
+    weights: &ScoringWeights,
+    formats: &[String],
+    force: bool,
+) -> ProjectData {
+    let (graph, _, stats) = run_extract(project, settings, Some(proj_out), force);
+    print_cache_stats(&project.name, &stats);
+    let (mut metrics, communities, cycles_simple) = run_analyze(&graph, weights);
+    assign_community_ids(&mut metrics, &communities);
+    let cycles_for_report: Vec<Cycle> = cycles_simple;
+    write_all_outputs(
+        &project.name,
+        &graph,
+        &metrics,
+        &communities,
+        &cycles_for_report,
+        proj_out,
+        formats,
+    );
+    ProjectData {
+        name: project.name.clone(),
+        graph,
+        metrics,
+        cycles: cycles_for_report,
+    }
 }
 
 // ---------------------------------------------------------------------------
