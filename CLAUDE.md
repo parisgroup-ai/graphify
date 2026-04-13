@@ -112,6 +112,8 @@ For each [[project]]:
 | `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion + `is_package` detection |
 | `crates/graphify-report/src/html.rs` | Interactive HTML visualization (D3.js force graph, self-contained) |
 | `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline |
+| `crates/graphify-mcp/src/main.rs` | MCP server entry point, config parsing, extraction pipeline |
+| `crates/graphify-mcp/src/server.rs` | GraphifyServer struct, 9 MCP tool handlers, ServerHandler impl |
 
 ### Graph representation
 
@@ -135,6 +137,10 @@ For each [[project]]:
 - TS workspace aliases (`@repo/*` → `../../packages/*`) preserve the original import string as node ID when target path traverses outside the project
 - Louvain Phase 2 merges singleton communities: connected singletons → best neighbor, isolated singletons → grouped together
 - Walker warns via `eprintln!` when a project discovers ≤1 file (misconfigured `local_prefix`)
+- MCP server uses `rmcp` v0.1 with `#[tool(tool_box)]` macro (not `#[tool_router]` — API differs from docs)
+- MCP server config is duplicated from CLI (small, stable structs — extract if a third consumer appears)
+- MCP extraction is eager on startup; all diagnostic output on stderr (stdout reserved for JSON-RPC)
+- MCP server wraps `QueryEngine` in `Arc` (ServerHandler requires Clone)
 - Tests: 196 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release

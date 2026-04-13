@@ -1,32 +1,30 @@
-# Session Brief — 2026-04-12 (Session 2)
+# Session Brief — 2026-04-12 (Session 3)
 
 ## Last Session Summary
 
-Shipped v0.2.0 release + FEAT-006 (graph query interface with 4 new CLI commands) + FEAT-004 (CI quality gates). Fixed all cargo fmt + clippy warnings for CI compliance. 15 commits, 150→181 tests.
+Designed and implemented FEAT-007: MCP server for graph queries. New `graphify-mcp` crate exposes all 9 QueryEngine methods as MCP tools over stdio using `rmcp`. Full brainstorm → design spec → implementation plan → subagent-driven development pipeline. 8 commits, 196 tests (15 new), pushed to origin/main.
 
 ## Current State
 
 - Branch: `main`
-- Last commit: `c68b200` — `fix: apply cargo fmt + fix clippy warnings for CI compliance`
-- Tests: 181 passing (`cargo test --workspace`)
+- Last commit: `dce10f3` — `docs: update architecture and sprint board for FEAT-007 MCP server`
+- Tests: 196 passing (`cargo test --workspace`)
 - Version: 0.2.0
 - CI: GitHub Actions quality gates (fmt + clippy + tests) on every push to main
-- All code passes `cargo fmt --check` + `cargo clippy -- -D warnings`
-- No pending unstaged code changes
+- No pending unstaged code changes (only build artifacts and deleted command files)
 
 ## Open Items
 
-No bugs remain. Feature backlog (3 done, 7 open):
+No bugs remain. Feature backlog (5 done, 5 open):
 
 | ID | Priority | Est | Title |
 |---|---|---|---|
 | FEAT-002 | normal | 8h | Architectural drift detection |
 | FEAT-003 | low | 16h | New language support (Go, Rust) |
 | FEAT-005 | high | 16h | Incremental builds with SHA256 cache |
-| FEAT-007 | normal | 16h | MCP server for graph queries (unblocked by FEAT-006) |
 | FEAT-008 | normal | 8h | Edge confidence scoring |
 | FEAT-009 | low | 12h | Additional export formats (Neo4j, GraphML, Obsidian) |
-| FEAT-010 | low | 8h | Watch mode for auto-rebuild |
+| FEAT-010 | low | 8h | Watch mode for auto-rebuild (blocked on FEAT-005) |
 
 ## Decisions Made (don't re-debate)
 
@@ -47,9 +45,15 @@ No bugs remain. Feature backlog (3 done, 7 open):
 - **No readline crate for REPL** (FEAT-006) — plain stdin, keep binary lean
 - **GlobMatcher without external crate** (FEAT-006) — simple recursive byte matching
 - **CI: strict clippy** (FEAT-004) — `-D warnings` fails the build on any lint
+- **Separate binary for MCP** (FEAT-007) — keeps graphify-cli free of tokio/rmcp deps
+- **Eager extraction on startup** (FEAT-007) — matches CLI pattern, instant tool responses
+- **Config duplication** (FEAT-007) — small stable structs, extract later if third consumer
+- **rmcp `#[tool(tool_box)]` macro** (FEAT-007) — actual API differs from docs, `tool_router` doesn't exist in v0.1
+- **Arc wrapping for QueryEngine** (FEAT-007) — ServerHandler requires Clone, Arc is zero-copy
+- **Per-project parameter on all tools** (FEAT-007) — optional, defaults to first project
 
 ## Suggested Next Steps
 
-1. **FEAT-007** (now unblocked) — MCP server importing QueryEngine from graphify-core
-2. **FEAT-005** (high) — Incremental builds with SHA256 cache
-3. **FEAT-002** (normal) — Architectural drift detection
+1. **FEAT-008** (normal) — Edge confidence scoring — well-scoped, improves analysis quality
+2. **FEAT-005** (high) — Incremental builds with SHA256 cache — performance for large codebases
+3. **FEAT-002** (normal) — Architectural drift detection — requires adoption first
