@@ -24,7 +24,7 @@ updated: 2026-04-12
 | ID       | Status   | Priority | Est    | Title                                                |
 | -------- | -------- | -------- | ------ | ---------------------------------------------------- |
 | FEAT-001 | **done** | high     | 16h    | Interactive HTML graph visualization                 |
-| FEAT-002 | **open** | normal   | 8h     | Architectural drift detection                        |
+| FEAT-002 | **done** | normal   | 8h     | Architectural drift detection                        |
 | FEAT-003 | **open** | low      | 16h    | New language support (Go, Rust)                      |
 | FEAT-004 | **done** | normal   | 4h     | CI quality gates                                     |
 | FEAT-005 | **done** | high     | 16h    | Incremental builds with SHA256 cache                 |
@@ -47,3 +47,4 @@ updated: 2026-04-12
 - [[FEAT-009-export-formats]] - Implemented: Neo4j Cypher (graph.cypher), GraphML XML (graph.graphml), Obsidian vault (obsidian_vault/), 13 new tests (2026-04-13)
 - [[FEAT-010-watch-mode]] - Implemented: `graphify watch` with notify v7, 300ms debounce, per-project rebuild, WatchFilter, 10 new tests (2026-04-13)
 - [[FEAT-005-incremental-builds]] - Implemented: SHA256-based extraction cache, per-file ExtractionResult caching, --force flag, cache stats output, 16 new tests (2026-04-12)
+- [[FEAT-002-architectural-drift-detection]] - Implemented: `graphify diff` with file-vs-file and baseline-vs-live modes, 5-dimension drift detection (summary, edges, cycles, hotspots, communities), JSON + Markdown output, 18 new tests (2026-04-13)

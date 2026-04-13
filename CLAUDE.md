@@ -25,6 +25,10 @@ graphify report  --config graphify.toml    # all outputs including markdown
 # Watch mode: auto-rebuild on file changes
 graphify watch --config graphify.toml
 
+# Architectural drift detection
+graphify diff --before report/v1/analysis.json --after report/v2/analysis.json
+graphify diff --baseline report/baseline/analysis.json --config graphify.toml
+
 # Query the graph
 graphify query "app.services.*" --config graphify.toml
 graphify path app.main app.services.llm --config graphify.toml
@@ -36,7 +40,7 @@ cargo build --release -p graphify-cli
 # Binary at target/release/graphify
 
 # Tests
-cargo test --workspace                     # all 251 tests
+cargo test --workspace                     # all 269 tests
 cargo test -p graphify-extract             # single crate
 ```
 
@@ -122,6 +126,9 @@ For each [[project]]:
 | `crates/graphify-report/src/graphml.rs` | GraphML XML export (compatible with yEd, Gephi) |
 | `crates/graphify-report/src/obsidian.rs` | Obsidian vault export (one .md per node with [[wikilinks]]) |
 | `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline, watch mode |
+| `crates/graphify-core/src/diff.rs` | AnalysisSnapshot deserialization, DiffReport, compute_diff() |
+| `crates/graphify-report/src/diff_json.rs` | Drift report JSON output |
+| `crates/graphify-report/src/diff_markdown.rs` | Drift report Markdown output |
 | `crates/graphify-cli/src/watch.rs` | WatchFilter (extension/exclude filtering), affected project detection |
 | `crates/graphify-mcp/src/main.rs` | MCP server entry point, config parsing, extraction pipeline |
 | `crates/graphify-mcp/src/server.rs` | GraphifyServer struct, 9 MCP tool handlers, ServerHandler impl |
@@ -164,7 +171,11 @@ For each [[project]]:
 - Watch mode: `notify` v7 + `notify-debouncer-mini` 0.5 with 300ms debounce
 - Watch rebuilds only affected projects (per-project path prefix matching)
 - Watch `--force` applies only to initial build; subsequent rebuilds always use cache
-- Tests: 251 unit + integration tests (`cargo test --workspace`)
+- Diff operates on analysis.json snapshots (not CodeGraph directly) — decoupled from internal types
+- Community equivalence mapping: max-overlap matching handles unstable community IDs across runs
+- Hotspot threshold default: 0.05 (configurable via --threshold)
+- Drift report output: drift-report.json + drift-report.md
+- Tests: 269 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
@@ -194,6 +205,8 @@ git push origin main --tags            # triggers CI release
 - **FEAT-008 plan**: `docs/superpowers/plans/2026-04-12-feat-008-confidence-scoring.md`
 - **FEAT-010 spec**: `docs/superpowers/specs/2026-04-13-feat-010-watch-mode-design.md`
 - **FEAT-010 plan**: `docs/superpowers/plans/2026-04-13-feat-010-watch-mode.md`
+- **FEAT-002 spec**: `docs/superpowers/specs/2026-04-13-feat-002-architectural-drift-detection-design.md`
+- **FEAT-002 plan**: `docs/superpowers/plans/2026-04-13-feat-002-architectural-drift-detection.md`
 
 ## Task tracking
 
