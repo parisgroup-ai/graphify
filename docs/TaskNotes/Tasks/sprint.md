@@ -32,7 +32,7 @@ updated: 2026-04-12
 | FEAT-007 | **done** | normal   | 16h    | MCP server for graph queries                         |
 | FEAT-008 | **done** | normal   | 8h     | Edge confidence scoring                              |
 | FEAT-009 | **done** | low      | 12h    | Additional export formats (Neo4j, GraphML, Obsidian) |
-| FEAT-010 | **open** | low      | 8h     | Watch mode for auto-rebuild                          |
+| FEAT-010 | **done** | low      | 8h     | Watch mode for auto-rebuild                          |
 
 ## Done
 
@@ -45,4 +45,5 @@ updated: 2026-04-12
 - [[FEAT-007-mcp-server]] - Implemented: MCP server (rmcp over stdio) with 9 tools, per-project support, 15 tests (2026-04-12)
 - [[FEAT-008-confidence-scoring]] - Implemented: ConfidenceKind enum (Extracted/Inferred/Ambiguous), confidence scoring on edges, resolver confidence, pipeline downgrade, all report outputs, query filtering, MCP integration, 24 new tests (2026-04-12)
 - [[FEAT-009-export-formats]] - Implemented: Neo4j Cypher (graph.cypher), GraphML XML (graph.graphml), Obsidian vault (obsidian_vault/), 13 new tests (2026-04-13)
+- [[FEAT-010-watch-mode]] - Implemented: `graphify watch` with notify v7, 300ms debounce, per-project rebuild, WatchFilter, 10 new tests (2026-04-13)
 - [[FEAT-005-incremental-builds]] - Implemented: SHA256-based extraction cache, per-file ExtractionResult caching, --force flag, cache stats output, 16 new tests (2026-04-12)

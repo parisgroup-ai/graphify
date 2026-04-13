@@ -22,6 +22,9 @@ graphify extract --config graphify.toml    # sources → graph.json per project
 graphify analyze --config graphify.toml    # metrics → analysis.json + CSV
 graphify report  --config graphify.toml    # all outputs including markdown
 
+# Watch mode: auto-rebuild on file changes
+graphify watch --config graphify.toml
+
 # Query the graph
 graphify query "app.services.*" --config graphify.toml
 graphify path app.main app.services.llm --config graphify.toml
@@ -33,7 +36,7 @@ cargo build --release -p graphify-cli
 # Binary at target/release/graphify
 
 # Tests
-cargo test --workspace                     # all 137 tests
+cargo test --workspace                     # all 251 tests
 cargo test -p graphify-extract             # single crate
 ```
 
@@ -118,7 +121,8 @@ For each [[project]]:
 | `crates/graphify-report/src/neo4j.rs` | Neo4j Cypher import script (CREATE nodes, CREATE relationships) |
 | `crates/graphify-report/src/graphml.rs` | GraphML XML export (compatible with yEd, Gephi) |
 | `crates/graphify-report/src/obsidian.rs` | Obsidian vault export (one .md per node with [[wikilinks]]) |
-| `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline |
+| `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline, watch mode |
+| `crates/graphify-cli/src/watch.rs` | WatchFilter (extension/exclude filtering), affected project detection |
 | `crates/graphify-mcp/src/main.rs` | MCP server entry point, config parsing, extraction pipeline |
 | `crates/graphify-mcp/src/server.rs` | GraphifyServer struct, 9 MCP tool handlers, ServerHandler impl |
 
@@ -157,7 +161,10 @@ For each [[project]]:
 - Cache is on by default; `--force` flag bypasses it (full rebuild, fresh cache saved)
 - Cache invalidation: version mismatch or `local_prefix` change → full discard
 - Query commands (query, explain, path, shell) don't use cache — always fresh extraction
-- Tests: 249 unit + integration tests (`cargo test --workspace`)
+- Watch mode: `notify` v7 + `notify-debouncer-mini` 0.5 with 300ms debounce
+- Watch rebuilds only affected projects (per-project path prefix matching)
+- Watch `--force` applies only to initial build; subsequent rebuilds always use cache
+- Tests: 251 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
@@ -185,6 +192,8 @@ git push origin main --tags            # triggers CI release
 - **BUG-001 design**: `docs/plans/2026-04-12-bug-001-python-relative-import-design.md`
 - **FEAT-008 spec**: `docs/superpowers/specs/2026-04-12-feat-008-confidence-scoring-design.md`
 - **FEAT-008 plan**: `docs/superpowers/plans/2026-04-12-feat-008-confidence-scoring.md`
+- **FEAT-010 spec**: `docs/superpowers/specs/2026-04-13-feat-010-watch-mode-design.md`
+- **FEAT-010 plan**: `docs/superpowers/plans/2026-04-13-feat-010-watch-mode.md`
 
 ## Task tracking
 
