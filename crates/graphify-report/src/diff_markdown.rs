@@ -37,17 +37,30 @@ fn render_diff_markdown(report: &DiffReport) -> String {
 
     // Degree changes
     if !report.edges.degree_changes.is_empty() {
-        writeln!(buf, "## Degree Changes ({})", report.edges.degree_changes.len()).unwrap();
+        writeln!(
+            buf,
+            "## Degree Changes ({})",
+            report.edges.degree_changes.len()
+        )
+        .unwrap();
         writeln!(buf).unwrap();
-        writeln!(buf, "| Node | In (before\u{2192}after) | Out (before\u{2192}after) |").unwrap();
+        writeln!(
+            buf,
+            "| Node | In (before\u{2192}after) | Out (before\u{2192}after) |"
+        )
+        .unwrap();
         writeln!(buf, "|------|-------------------|-------------------|").unwrap();
         for dc in &report.edges.degree_changes {
             writeln!(
                 buf,
                 "| `{}` | {}\u{2192}{} ({:+}) | {}\u{2192}{} ({:+}) |",
                 dc.id,
-                dc.in_degree.before, dc.in_degree.after, dc.in_degree.change,
-                dc.out_degree.before, dc.out_degree.after, dc.out_degree.change,
+                dc.in_degree.before,
+                dc.in_degree.after,
+                dc.in_degree.change,
+                dc.out_degree.before,
+                dc.out_degree.after,
+                dc.out_degree.change,
             )
             .unwrap();
         }
@@ -83,7 +96,12 @@ fn render_diff_markdown(report: &DiffReport) -> String {
     writeln!(buf).unwrap();
     write_score_table(&mut buf, "Rising", &report.hotspots.rising);
     write_score_table(&mut buf, "Falling", &report.hotspots.falling);
-    write_score_list(&mut buf, "New in Top 20", &report.hotspots.new_hotspots, true);
+    write_score_list(
+        &mut buf,
+        "New in Top 20",
+        &report.hotspots.new_hotspots,
+        true,
+    );
     write_score_list(
         &mut buf,
         "Left Top 20",
@@ -145,11 +163,7 @@ fn write_node_list(buf: &mut String, title: &str, nodes: &[String]) {
     writeln!(buf).unwrap();
 }
 
-fn write_score_table(
-    buf: &mut String,
-    title: &str,
-    changes: &[graphify_core::diff::ScoreChange],
-) {
+fn write_score_table(buf: &mut String, title: &str, changes: &[graphify_core::diff::ScoreChange]) {
     writeln!(buf, "### {}", title).unwrap();
     writeln!(buf).unwrap();
     if changes.is_empty() {
@@ -201,10 +215,26 @@ mod tests {
     fn report_with_changes() -> DiffReport {
         DiffReport {
             summary_delta: SummaryDelta {
-                nodes: Delta { before: 10, after: 12, change: 2 },
-                edges: Delta { before: 20, after: 25, change: 5 },
-                communities: Delta { before: 3, after: 4, change: 1 },
-                cycles: Delta { before: 1, after: 0, change: -1 },
+                nodes: Delta {
+                    before: 10,
+                    after: 12,
+                    change: 2,
+                },
+                edges: Delta {
+                    before: 20,
+                    after: 25,
+                    change: 5,
+                },
+                communities: Delta {
+                    before: 3,
+                    after: 4,
+                    change: 1,
+                },
+                cycles: Delta {
+                    before: 1,
+                    after: 0,
+                    change: -1,
+                },
             },
             edges: EdgeDiff {
                 added_nodes: vec!["app.new".into()],

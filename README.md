@@ -50,6 +50,70 @@ local_prefix = "app."
 | `graphify watch` | Auto-rebuild on file changes |
 | `graphify shell` | Interactive graph exploration REPL |
 
+## Common Monorepo Recipes
+
+These examples show how the subcommands fit together in day-to-day architecture work on a multi-project repo.
+
+### 1. Refresh the full graph before research
+
+```bash
+graphify run --config graphify.toml
+```
+
+Use this after config changes, before architecture review, or after a large refactor. It regenerates `graph.json`, `analysis.json`, CSV exports, and the Markdown report for every configured project.
+
+### 2. Find a namespace, route group, or bounded context quickly
+
+```bash
+graphify query 'src.app.*study-chat*' --config graphify.toml --project web
+graphify query 'app.api.*' --config graphify.toml --project api --json
+```
+
+Start with `query` when you know roughly what area you want but not the exact node ID. Add `--json` when another tool or script needs the results.
+
+### 3. Investigate a hotspot before refactoring it
+
+```bash
+graphify explain 'src.shared.domain.errors' --config graphify.toml --project pkg-api
+graphify explain 'src.shared.domain.errors' --config graphify.toml --project pkg-api --json
+```
+
+Use `explain` before touching a high fan-in module. It gives you a focused profile for a single node so you can assess blast radius before making changes.
+
+### 4. Trace why one module depends on another
+
+```bash
+graphify path 'src.hooks' 'src.trpc.react' --config graphify.toml --project web
+graphify path 'src.hooks' 'src.trpc.react' --config graphify.toml --project web --all --max-depth 6
+```
+
+Use the default shortest path first. If the dependency looks surprising, rerun with `--all` to inspect alternate routes up to a controlled depth.
+
+### 5. Compare drift before and after a refactor
+
+```bash
+cp report/web/analysis.json /tmp/web-before.json
+graphify run --config graphify.toml
+graphify diff --baseline /tmp/web-before.json --config graphify.toml --project web
+```
+
+This is the fastest way to answer "what changed architecturally?" after a branch of work. Keep the baseline snapshot before the refactor, rerun Graphify, then diff against the live project.
+
+### 6. Review a project as an architecture workflow, not isolated commands
+
+```bash
+graphify run --config graphify.toml
+graphify query 'src.app.*study-chat*' --config graphify.toml --project web
+graphify explain 'src.shared.domain.errors' --config graphify.toml --project pkg-api
+graphify path 'src.hooks' 'src.trpc.react' --config graphify.toml --project web
+```
+
+This sequence works well for real monorepos:
+- refresh the graph
+- narrow the search space with `query`
+- inspect risky modules with `explain`
+- confirm dependency chains with `path`
+
 ## Output
 
 Each project produces:

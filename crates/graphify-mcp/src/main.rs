@@ -16,8 +16,8 @@ use graphify_core::{
     types::Language,
 };
 use graphify_extract::{
-    walker::discover_files, ExtractionResult, LanguageExtractor, PythonExtractor,
-    TypeScriptExtractor,
+    walker::discover_files, ExtractionResult, GoExtractor, LanguageExtractor, PythonExtractor,
+    RustExtractor, TypeScriptExtractor,
 };
 
 use crate::server::GraphifyServer;
@@ -175,6 +175,8 @@ fn parse_languages(lang_strs: &[String]) -> Vec<Language> {
         .filter_map(|s| match s.to_lowercase().as_str() {
             "python" | "py" => Some(Language::Python),
             "typescript" | "ts" => Some(Language::TypeScript),
+            "go" => Some(Language::Go),
+            "rust" | "rs" => Some(Language::Rust),
             other => {
                 eprintln!("Warning: unknown language '{other}', skipping.");
                 None
@@ -221,6 +223,8 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
 
     let python_extractor = PythonExtractor::new();
     let typescript_extractor = TypeScriptExtractor::new();
+    let go_extractor = GoExtractor::new();
+    let rust_extractor = RustExtractor::new();
 
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
     for file in &files {
@@ -231,6 +235,13 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
         let tsconfig = repo_path.join("tsconfig.json");
         if tsconfig.exists() {
             resolver.load_tsconfig(&tsconfig);
+        }
+    }
+
+    if languages.contains(&Language::Go) {
+        let go_mod = repo_path.join("go.mod");
+        if go_mod.exists() {
+            resolver.load_go_mod(&go_mod);
         }
     }
 
@@ -248,6 +259,8 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
             let extractor: &dyn LanguageExtractor = match file.language {
                 Language::Python => &python_extractor,
                 Language::TypeScript => &typescript_extractor,
+                Language::Go => &go_extractor,
+                Language::Rust => &rust_extractor,
             };
 
             Some(extractor.extract_file(&file.path, &source, &file.module_name))

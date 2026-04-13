@@ -1,6 +1,7 @@
 ---
 uid: feat-003
-status: open
+status: done
+completed: 2026-04-13
 priority: low
 timeEstimate: 960
 tags:
@@ -27,3 +28,9 @@ Add tree-sitter extractors for Go and Rust to broaden Graphify's reach.
 ## Notes
 
 Each language is ~2-3 days of work. Lower priority than improving output quality for existing languages.
+
+## Verification (2026-04-13)
+
+- Verified Go and Rust extractor support exists in `crates/graphify-extract`
+- Verified Go `go.mod` resolution and Rust `crate::` / `super::` / `self::` resolution are present
+- Verified CLI wires `GoExtractor` and `RustExtractor` into extraction pipeline

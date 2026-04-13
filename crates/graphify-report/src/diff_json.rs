@@ -19,10 +19,26 @@ mod tests {
     fn empty_report() -> DiffReport {
         DiffReport {
             summary_delta: SummaryDelta {
-                nodes: Delta { before: 5, after: 5, change: 0 },
-                edges: Delta { before: 10, after: 10, change: 0 },
-                communities: Delta { before: 2, after: 2, change: 0 },
-                cycles: Delta { before: 0, after: 0, change: 0 },
+                nodes: Delta {
+                    before: 5,
+                    after: 5,
+                    change: 0,
+                },
+                edges: Delta {
+                    before: 10,
+                    after: 10,
+                    change: 0,
+                },
+                communities: Delta {
+                    before: 2,
+                    after: 2,
+                    change: 0,
+                },
+                cycles: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
             },
             edges: EdgeDiff {
                 added_nodes: vec![],

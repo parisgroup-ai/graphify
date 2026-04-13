@@ -72,12 +72,7 @@ pub fn write_obsidian_vault(
         writeln!(buf, "---").unwrap();
         writeln!(buf, "id: \"{}\"", node.id).unwrap();
         writeln!(buf, "kind: {:?}", node.kind).unwrap();
-        writeln!(
-            buf,
-            "file_path: \"{}\"",
-            node.file_path.to_string_lossy()
-        )
-        .unwrap();
+        writeln!(buf, "file_path: \"{}\"", node.file_path.to_string_lossy()).unwrap();
         writeln!(buf, "language: {:?}", node.language).unwrap();
         writeln!(buf, "line: {}", node.line).unwrap();
         writeln!(buf, "is_local: {}", node.is_local).unwrap();
@@ -312,7 +307,10 @@ mod tests {
         let content = std::fs::read_to_string(vault_path.join("app.main.md")).unwrap();
         assert!(content.contains("score: 0.4000"));
         assert!(content.contains("betweenness: 0.5000"));
-        assert!(!content.contains("community: 0"), "no community without communities list");
+        assert!(
+            !content.contains("community: 0"),
+            "no community without communities list"
+        );
     }
 
     #[test]

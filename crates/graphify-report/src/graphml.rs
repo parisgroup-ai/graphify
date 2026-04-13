@@ -108,7 +108,12 @@ pub fn write_graphml(graph: &CodeGraph, path: &Path) {
             xml_escape(&node.file_path.to_string_lossy())
         )
         .unwrap();
-        writeln!(buf, r#"      <data key="language">{:?}</data>"#, node.language).unwrap();
+        writeln!(
+            buf,
+            r#"      <data key="language">{:?}</data>"#,
+            node.language
+        )
+        .unwrap();
         writeln!(buf, r#"      <data key="line">{}</data>"#, node.line).unwrap();
         writeln!(
             buf,
@@ -131,9 +136,18 @@ pub fn write_graphml(graph: &CodeGraph, path: &Path) {
         writeln!(buf, r#"      <data key="edge_kind">{:?}</data>"#, edge.kind).unwrap();
         writeln!(buf, r#"      <data key="weight">{}</data>"#, edge.weight).unwrap();
         writeln!(buf, r#"      <data key="edge_line">{}</data>"#, edge.line).unwrap();
-        writeln!(buf, r#"      <data key="confidence">{}</data>"#, edge.confidence).unwrap();
-        writeln!(buf, r#"      <data key="confidence_kind">{:?}</data>"#, edge.confidence_kind)
-            .unwrap();
+        writeln!(
+            buf,
+            r#"      <data key="confidence">{}</data>"#,
+            edge.confidence
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            r#"      <data key="confidence_kind">{:?}</data>"#,
+            edge.confidence_kind
+        )
+        .unwrap();
         writeln!(buf, r#"    </edge>"#).unwrap();
     }
 

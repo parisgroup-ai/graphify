@@ -13,6 +13,8 @@ const DEFAULT_EXCLUDES: &[&str] = &[
     "build",
     ".venv",
     "venv",
+    "vendor",
+    "target",
 ];
 
 /// A single source file discovered by [`discover_files`].
@@ -55,6 +57,11 @@ fn is_test_file(file_name: &str) -> bool {
         return true;
     }
 
+    // Go conventions: *_test.go
+    if file_name.ends_with("_test.go") {
+        return true;
+    }
+
     false
 }
 
@@ -65,8 +72,21 @@ fn language_for_extension(ext: &str) -> Option<Language> {
     match ext {
         "py" => Some(Language::Python),
         "ts" | "tsx" => Some(Language::TypeScript),
+        "go" => Some(Language::Go),
+        "rs" => Some(Language::Rust),
         _ => None,
     }
+}
+
+fn is_eligible_source_file(path: &Path, languages: &[Language]) -> Option<Language> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if is_test_file(name) {
+        return None;
+    }
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let lang = language_for_extension(ext)?;
+    languages.contains(&lang).then_some(lang)
 }
 
 /// Convert a file path relative to `base` into a dot-notation module name,
@@ -75,6 +95,7 @@ fn language_for_extension(ext: &str) -> Option<Language> {
 /// Rules:
 /// - `__init__.py` → parent package name (strip `/__init__.py` suffix)
 /// - `index.ts` / `index.tsx` → parent package name
+/// - `mod.rs` / `lib.rs` / `main.rs` → parent package name (Rust entry points)
 /// - All other files → strip extension, replace `/` with `.`
 /// - If `local_prefix` is non-empty, prepend it (with `.`) only when the
 ///   resulting name doesn't already start with it.
@@ -97,11 +118,12 @@ pub fn path_to_module(base: &Path, file: &Path, local_prefix: &str) -> String {
 
     let file_name = rel.file_name().and_then(|s| s.to_str()).unwrap_or("");
 
-    // Special files: use parent package only.
+    // Special files: use parent package only (entry points collapse to parent).
     let is_init = file_name == "__init__.py";
     let is_index = file_name == "index.ts" || file_name == "index.tsx";
+    let is_rust_entry = file_name == "mod.rs" || file_name == "lib.rs" || file_name == "main.rs";
 
-    if !is_init && !is_index {
+    if !is_init && !is_index && !is_rust_entry {
         parts.push(stem.to_owned());
     }
 
@@ -138,6 +160,87 @@ pub fn discover_files(
     results
 }
 
+/// Detect the effective `local_prefix` for a project when the config omits it.
+///
+/// Heuristic:
+/// - Count eligible source files by first directory below `root`
+/// - `src` wins if it contains >60% of all eligible files
+/// - otherwise `app` wins if it contains >60% of all eligible files
+/// - otherwise return an empty prefix (root-relative)
+pub fn detect_local_prefix(root: &Path, languages: &[Language], extra_excludes: &[&str]) -> String {
+    let mut excludes: Vec<&str> = DEFAULT_EXCLUDES.to_vec();
+    excludes.extend_from_slice(extra_excludes);
+
+    let mut total_files = 0usize;
+    let mut root_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    count_source_roots(
+        root,
+        root,
+        languages,
+        &excludes,
+        &mut total_files,
+        &mut root_counts,
+    );
+
+    if total_files == 0 {
+        return String::new();
+    }
+
+    let threshold = |count: usize| (count as f64) / (total_files as f64) > 0.6;
+
+    if threshold(*root_counts.get("src").unwrap_or(&0)) {
+        return "src".to_owned();
+    }
+    if threshold(*root_counts.get("app").unwrap_or(&0)) {
+        return "app".to_owned();
+    }
+
+    String::new()
+}
+
+fn count_source_roots(
+    base: &Path,
+    dir: &Path,
+    languages: &[Language],
+    excludes: &[&str],
+    total_files: &mut usize,
+    root_counts: &mut std::collections::HashMap<String, usize>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
+        if path.is_dir() {
+            if excludes.contains(&name) {
+                continue;
+            }
+            count_source_roots(base, &path, languages, excludes, total_files, root_counts);
+            continue;
+        }
+
+        if !path.is_file() || is_eligible_source_file(&path, languages).is_none() {
+            continue;
+        }
+
+        *total_files += 1;
+
+        let rel = path.strip_prefix(base).unwrap_or(&path);
+        let root_name = rel
+            .components()
+            .next()
+            .and_then(|c| c.as_os_str().to_str())
+            .unwrap_or("")
+            .to_owned();
+        *root_counts.entry(root_name).or_insert(0) += 1;
+    }
+}
+
 fn walk_dir(
     base: &Path,
     dir: &Path,
@@ -161,23 +264,20 @@ fn walk_dir(
             }
             walk_dir(base, &path, languages, local_prefix, excludes, out);
         } else if path.is_file() {
-            // Skip co-located test files (e.g. *.test.ts, *.spec.tsx, *_test.py).
-            if is_test_file(name) {
-                continue;
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if let Some(lang) = language_for_extension(ext) {
-                if languages.contains(&lang) {
-                    let module_name = path_to_module(base, &path, local_prefix);
-                    let is_package =
-                        name == "__init__.py" || name == "index.ts" || name == "index.tsx";
-                    out.push(DiscoveredFile {
-                        path,
-                        language: lang,
-                        module_name,
-                        is_package,
-                    });
-                }
+            if let Some(lang) = is_eligible_source_file(&path, languages) {
+                let module_name = path_to_module(base, &path, local_prefix);
+                let is_package = name == "__init__.py"
+                    || name == "index.ts"
+                    || name == "index.tsx"
+                    || name == "mod.rs"
+                    || name == "lib.rs"
+                    || name == "main.rs";
+                out.push(DiscoveredFile {
+                    path,
+                    language: lang,
+                    module_name,
+                    is_package,
+                });
             }
         }
     }
@@ -475,5 +575,206 @@ mod tests {
             "JS test files should not appear: {:?}",
             files.iter().map(|f| &f.module_name).collect::<Vec<_>>()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Go support
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn path_to_module_go_regular_file() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/cmd/server/main.go");
+        assert_eq!(path_to_module(base, file, ""), "cmd.server.main");
+    }
+
+    #[test]
+    fn path_to_module_go_with_prefix() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/pkg/handler.go");
+        assert_eq!(path_to_module(base, file, "pkg"), "pkg.handler");
+    }
+
+    #[test]
+    fn is_test_file_go_patterns() {
+        assert!(is_test_file("handler_test.go"));
+        assert!(is_test_file("main_test.go"));
+        assert!(!is_test_file("main.go"));
+        assert!(!is_test_file("handler.go"));
+        assert!(!is_test_file("testing.go")); // not a test file
+    }
+
+    #[test]
+    fn discover_go_files_and_exclude_test_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pkg = tmp.path().join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(pkg.join("handler.go"), b"package pkg").unwrap();
+        std::fs::write(pkg.join("handler_test.go"), b"package pkg").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::Go], "", &[]);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].module_name, "pkg.handler");
+        assert_eq!(files[0].language, Language::Go);
+    }
+
+    #[test]
+    fn discover_excludes_vendor_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vendor = tmp.path().join("vendor/github.com/lib");
+        std::fs::create_dir_all(&vendor).unwrap();
+        std::fs::write(vendor.join("dep.go"), b"package lib").unwrap();
+        let src = tmp.path().join("cmd");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("main.go"), b"package main").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::Go], "", &[]);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].module_name, "cmd.main");
+    }
+
+    // -----------------------------------------------------------------------
+    // Rust support
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn path_to_module_rust_regular_file() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/handler.rs");
+        assert_eq!(path_to_module(base, file, ""), "src.handler");
+    }
+
+    #[test]
+    fn path_to_module_rust_mod_rs() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/services/mod.rs");
+        assert_eq!(path_to_module(base, file, ""), "src.services");
+    }
+
+    #[test]
+    fn path_to_module_rust_lib_rs() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/lib.rs");
+        assert_eq!(path_to_module(base, file, ""), "src");
+    }
+
+    #[test]
+    fn path_to_module_rust_main_rs() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/main.rs");
+        assert_eq!(path_to_module(base, file, ""), "src");
+    }
+
+    #[test]
+    fn discover_rust_files_with_entry_points() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let svc = tmp.path().join("src/services");
+        std::fs::create_dir_all(&svc).unwrap();
+        std::fs::write(src.join("lib.rs"), b"mod services;").unwrap();
+        std::fs::write(src.join("handler.rs"), b"pub fn handle() {}").unwrap();
+        std::fs::write(svc.join("mod.rs"), b"pub mod db;").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::Rust], "", &[]);
+        let names: Vec<&str> = files.iter().map(|f| f.module_name.as_str()).collect();
+        assert!(names.contains(&"src"), "lib.rs should map to 'src'");
+        assert!(
+            names.contains(&"src.handler"),
+            "handler.rs should map to 'src.handler'"
+        );
+        assert!(
+            names.contains(&"src.services"),
+            "mod.rs should map to 'src.services'"
+        );
+
+        // Verify is_package flags
+        let lib_file = files.iter().find(|f| f.module_name == "src").unwrap();
+        assert!(lib_file.is_package, "lib.rs should be marked as package");
+        let handler_file = files
+            .iter()
+            .find(|f| f.module_name == "src.handler")
+            .unwrap();
+        assert!(!handler_file.is_package, "handler.rs should not be package");
+    }
+
+    #[test]
+    fn discover_excludes_target_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target/debug");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("build.rs"), b"fn main() {}").unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("lib.rs"), b"pub mod core;").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::Rust], "", &[]);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].module_name, "src");
+    }
+
+    // -----------------------------------------------------------------------
+    // local_prefix auto-detection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn detect_local_prefix_prefers_src_when_it_dominates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(src.join("a.ts"), b"export const a = 1;").unwrap();
+        std::fs::write(src.join("b.ts"), b"export const b = 1;").unwrap();
+        std::fs::write(src.join("c.ts"), b"export const c = 1;").unwrap();
+        std::fs::write(lib.join("helper.ts"), b"export const helper = 1;").unwrap();
+
+        let detected = detect_local_prefix(tmp.path(), &[Language::TypeScript], &[]);
+        assert_eq!(detected, "src");
+    }
+
+    #[test]
+    fn detect_local_prefix_prefers_app_when_it_dominates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let scripts = tmp.path().join("scripts");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::write(app.join("main.py"), b"def main(): pass").unwrap();
+        std::fs::write(app.join("api.py"), b"def api(): pass").unwrap();
+        std::fs::write(app.join("models.py"), b"class User: pass").unwrap();
+        std::fs::write(scripts.join("seed.py"), b"def seed(): pass").unwrap();
+
+        let detected = detect_local_prefix(tmp.path(), &[Language::Python], &[]);
+        assert_eq!(detected, "app");
+    }
+
+    #[test]
+    fn detect_local_prefix_returns_empty_when_no_directory_dominates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let app = tmp.path().join("app");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(src.join("a.ts"), b"export const a = 1;").unwrap();
+        std::fs::write(src.join("b.ts"), b"export const b = 1;").unwrap();
+        std::fs::write(app.join("main.ts"), b"export const main = 1;").unwrap();
+        std::fs::write(app.join("screen.ts"), b"export const screen = 1;").unwrap();
+
+        let detected = detect_local_prefix(tmp.path(), &[Language::TypeScript], &[]);
+        assert_eq!(detected, "");
+    }
+
+    #[test]
+    fn detect_local_prefix_returns_empty_when_root_files_are_significant() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("a.ts"), b"export const a = 1;").unwrap();
+        std::fs::write(src.join("b.ts"), b"export const b = 1;").unwrap();
+        std::fs::write(tmp.path().join("index.ts"), b"export const root = 1;").unwrap();
+        std::fs::write(tmp.path().join("config.ts"), b"export const config = 1;").unwrap();
+
+        let detected = detect_local_prefix(tmp.path(), &[Language::TypeScript], &[]);
+        assert_eq!(detected, "");
     }
 }

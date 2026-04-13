@@ -13,16 +13,14 @@ pub struct WatchFilter {
 }
 
 impl WatchFilter {
-    pub fn new(
-        languages: &[String],
-        exclude_dirs: &[String],
-        output_dir: &Path,
-    ) -> Self {
+    pub fn new(languages: &[String], exclude_dirs: &[String], output_dir: &Path) -> Self {
         let extensions: Vec<String> = languages
             .iter()
             .flat_map(|lang| match lang.to_lowercase().as_str() {
                 "python" => vec!["py".to_string()],
                 "typescript" => vec!["ts".to_string(), "tsx".to_string()],
+                "go" => vec!["go".to_string()],
+                "rust" => vec!["rs".to_string()],
                 _ => vec![],
             })
             .collect();
@@ -48,7 +46,9 @@ impl WatchFilter {
         // Check excluded directories
         let path_str = path.to_string_lossy();
         for exclude in &self.exclude_dirs {
-            if path_str.contains(&format!("/{exclude}/")) || path_str.contains(&format!("\\{exclude}\\")) {
+            if path_str.contains(&format!("/{exclude}/"))
+                || path_str.contains(&format!("\\{exclude}\\"))
+            {
                 return false;
             }
         }
@@ -88,7 +88,11 @@ mod tests {
     fn make_filter() -> WatchFilter {
         WatchFilter::new(
             &["python".to_string(), "typescript".to_string()],
-            &["node_modules".to_string(), "__pycache__".to_string(), ".git".to_string()],
+            &[
+                "node_modules".to_string(),
+                "__pycache__".to_string(),
+                ".git".to_string(),
+            ],
             Path::new("/project/report"),
         )
     }

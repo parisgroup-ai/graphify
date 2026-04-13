@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use rayon::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
+use graphify_core::diff::{compute_diff, AnalysisSnapshot};
 use graphify_core::{
     community::detect_communities,
     cycles::{find_sccs, find_simple_cycles},
@@ -13,10 +14,10 @@ use graphify_core::{
     query::{QueryEngine, SearchFilters, SortField},
     types::Language,
 };
-use graphify_core::diff::{AnalysisSnapshot, compute_diff};
 use graphify_extract::{
     cache::{sha256_hex, CacheStats, ExtractionCache},
-    walker::discover_files, ExtractionResult, LanguageExtractor, PythonExtractor,
+    walker::{detect_local_prefix, discover_files},
+    ExtractionResult, GoExtractor, LanguageExtractor, PythonExtractor, RustExtractor,
     TypeScriptExtractor,
 };
 use graphify_report::{
@@ -141,6 +142,33 @@ enum Commands {
         /// Output directory (overrides config setting)
         #[arg(long)]
         output: Option<PathBuf>,
+
+        /// Force full rebuild, ignoring extraction cache
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Check architectural quality gates for CI
+    Check {
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Maximum allowed cycle count
+        #[arg(long)]
+        max_cycles: Option<usize>,
+
+        /// Maximum allowed hotspot score
+        #[arg(long)]
+        max_hotspot_score: Option<f64>,
+
+        /// Filter to a specific project
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
 
         /// Force full rebuild, ignoring extraction cache
         #[arg(long)]
@@ -295,13 +323,18 @@ fn main() {
     match cli.command {
         Commands::Init => cmd_init(),
 
-        Commands::Extract { config, output, force } => {
+        Commands::Extract {
+            config,
+            output,
+            force,
+        } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
-                let (graph, _excludes, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
+                let (graph, _excludes, stats) =
+                    run_extract(project, &cfg.settings, Some(&proj_out), force);
                 print_cache_stats(&project.name, &stats);
                 write_graph_json(&graph, &proj_out.join("graph.json"));
                 println!(
@@ -365,7 +398,14 @@ fn main() {
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
-                let pd = run_pipeline_for_project(project, &cfg.settings, &proj_out, &w, &formats, force);
+                let pd = run_pipeline_for_project(
+                    project,
+                    &cfg.settings,
+                    &proj_out,
+                    &w,
+                    &formats,
+                    force,
+                );
                 println!(
                     "[{}] Report written to {}",
                     project.name,
@@ -373,12 +413,17 @@ fn main() {
                 );
                 project_data.push(pd);
             }
+            prune_stale_project_dirs(&out_dir, &cfg.project);
             if project_data.len() > 1 {
                 write_summary(&project_data, &out_dir);
             }
         }
 
-        Commands::Run { config, output, force } => {
+        Commands::Run {
+            config,
+            output,
+            force,
+        } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, None);
@@ -387,7 +432,14 @@ fn main() {
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
-                let pd = run_pipeline_for_project(project, &cfg.settings, &proj_out, &w, &formats, force);
+                let pd = run_pipeline_for_project(
+                    project,
+                    &cfg.settings,
+                    &proj_out,
+                    &w,
+                    &formats,
+                    force,
+                );
                 println!(
                     "[{}] Pipeline complete → {}",
                     project.name,
@@ -395,9 +447,30 @@ fn main() {
                 );
                 project_data.push(pd);
             }
+            prune_stale_project_dirs(&out_dir, &cfg.project);
             if project_data.len() > 1 {
                 write_summary(&project_data, &out_dir);
             }
+        }
+
+        Commands::Check {
+            config,
+            max_cycles,
+            max_hotspot_score,
+            project,
+            json,
+            force,
+        } => {
+            cmd_check(
+                &config,
+                project.as_deref(),
+                force,
+                CheckLimits {
+                    max_cycles,
+                    max_hotspot_score,
+                },
+                json,
+            );
         }
 
         Commands::Query {
@@ -617,7 +690,12 @@ fn main() {
             cmd_shell(&config, project.as_deref());
         }
 
-        Commands::Watch { config, output, force, format } => {
+        Commands::Watch {
+            config,
+            output,
+            force,
+            format,
+        } => {
             cmd_watch(&config, output.as_deref(), force, format.as_deref());
         }
 
@@ -659,7 +737,7 @@ output = "./report"
 [[project]]
 name = "my-project"
 repo = "./src"
-lang = ["python"]
+lang = ["python"]           # Options: python, typescript, go, rust
 local_prefix = "app"
 "#;
 
@@ -899,6 +977,8 @@ fn parse_languages(lang_strs: &[String]) -> Vec<Language> {
         .filter_map(|s| match s.to_lowercase().as_str() {
             "python" | "py" => Some(Language::Python),
             "typescript" | "ts" => Some(Language::TypeScript),
+            "go" => Some(Language::Go),
+            "rust" | "rs" => Some(Language::Rust),
             other => {
                 eprintln!("Warning: unknown language '{other}', skipping.");
                 None
@@ -919,14 +999,38 @@ fn run_extract(
 ) -> (CodeGraph, Vec<String>, CacheStats) {
     let repo_path = PathBuf::from(&project.repo);
     let languages = parse_languages(&project.lang);
-    let local_prefix = project.local_prefix.as_deref().unwrap_or("");
 
     // Build extra excludes as Vec<&str> slices.
     let extra_owned: Vec<String> = settings.exclude.clone().unwrap_or_default();
     let extra_excludes: Vec<&str> = extra_owned.iter().map(|s| s.as_str()).collect();
 
+    let (effective_local_prefix, auto_detected) = match project.local_prefix.as_deref() {
+        Some(prefix) => (prefix.to_owned(), false),
+        None => (
+            detect_local_prefix(&repo_path, &languages, &extra_excludes),
+            true,
+        ),
+    };
+
+    if auto_detected {
+        let shown_prefix = if effective_local_prefix.is_empty() {
+            "(root-level)"
+        } else {
+            effective_local_prefix.as_str()
+        };
+        eprintln!(
+            "[{}] Auto-detected local_prefix: {}",
+            project.name, shown_prefix
+        );
+    }
+
     // Discover files.
-    let files = discover_files(&repo_path, &languages, local_prefix, &extra_excludes);
+    let files = discover_files(
+        &repo_path,
+        &languages,
+        &effective_local_prefix,
+        &extra_excludes,
+    );
 
     // BUG-009: Warn when discovery finds very few files — likely misconfigured
     // repo path or local_prefix.
@@ -936,18 +1040,18 @@ fn run_extract(
             project.name,
             files.len(),
             project.repo,
-            local_prefix,
+            effective_local_prefix,
         );
     }
 
     // Also warn if local_prefix looks like a directory but doesn't exist inside repo.
-    if !local_prefix.is_empty() {
-        let prefix_dir = repo_path.join(local_prefix);
+    if !effective_local_prefix.is_empty() {
+        let prefix_dir = repo_path.join(&effective_local_prefix);
         if !prefix_dir.is_dir() {
             eprintln!(
                 "Warning: project '{}' has local_prefix '{}' but directory '{}' does not exist.",
                 project.name,
-                local_prefix,
+                effective_local_prefix,
                 prefix_dir.display(),
             );
         }
@@ -957,10 +1061,10 @@ fn run_extract(
     let cache = match (force, cache_dir) {
         (false, Some(dir)) => {
             let cache_path = dir.join(".graphify-cache.json");
-            ExtractionCache::load(&cache_path, local_prefix)
-                .unwrap_or_else(|| ExtractionCache::new(local_prefix))
+            ExtractionCache::load(&cache_path, &effective_local_prefix)
+                .unwrap_or_else(|| ExtractionCache::new(&effective_local_prefix))
         }
-        _ => ExtractionCache::new(local_prefix),
+        _ => ExtractionCache::new(&effective_local_prefix),
     };
 
     let mut stats = CacheStats {
@@ -971,6 +1075,8 @@ fn run_extract(
     // Build extractors.
     let python_extractor = PythonExtractor::new();
     let typescript_extractor = TypeScriptExtractor::new();
+    let go_extractor = GoExtractor::new();
+    let rust_extractor = RustExtractor::new();
 
     // Build resolver.
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
@@ -983,6 +1089,14 @@ fn run_extract(
         let tsconfig = repo_path.join("tsconfig.json");
         if tsconfig.exists() {
             resolver.load_tsconfig(&tsconfig);
+        }
+    }
+
+    // Load go.mod if Go is in the language list.
+    if languages.contains(&Language::Go) {
+        let go_mod = repo_path.join("go.mod");
+        if go_mod.exists() {
+            resolver.load_go_mod(&go_mod);
         }
     }
 
@@ -1018,6 +1132,8 @@ fn run_extract(
             let extractor: &dyn LanguageExtractor = match file.language {
                 Language::Python => &python_extractor,
                 Language::TypeScript => &typescript_extractor,
+                Language::Go => &go_extractor,
+                Language::Rust => &rust_extractor,
             };
 
             let result = extractor.extract_file(&file.path, &source, &file.module_name);
@@ -1026,7 +1142,7 @@ fn run_extract(
         .collect();
 
     // Build new cache from extraction results and count stats.
-    let mut new_cache = ExtractionCache::new(local_prefix);
+    let mut new_cache = ExtractionCache::new(&effective_local_prefix);
     let mut results: Vec<ExtractionResult> = Vec::with_capacity(extraction_with_meta.len());
 
     for (rel_path, hash, result, was_hit) in extraction_with_meta {
@@ -1041,7 +1157,10 @@ fn run_extract(
 
     // Count evictions: old cache entries whose paths aren't in the current discovered file set.
     let current_paths: HashSet<String> = new_cache.paths().cloned().collect();
-    stats.evicted = cache.paths().filter(|p| !current_paths.contains(*p)).count();
+    stats.evicted = cache
+        .paths()
+        .filter(|p| !current_paths.contains(*p))
+        .count();
 
     // Merge results sequentially into graph.
     let mut all_nodes = Vec::new();
@@ -1172,7 +1291,219 @@ fn run_pipeline_for_project(
         name: project.name.clone(),
         graph,
         metrics,
+        community_count: communities.len(),
         cycles: cycles_for_report,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Quality gates
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Default)]
+struct CheckLimits {
+    max_cycles: Option<usize>,
+    max_hotspot_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectCheckSummary {
+    nodes: usize,
+    edges: usize,
+    communities: usize,
+    cycles: usize,
+    max_hotspot_score: f64,
+    max_hotspot_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CheckViolation {
+    kind: String,
+    actual: serde_json::Value,
+    expected_max: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    node_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectCheckResult {
+    name: String,
+    ok: bool,
+    summary: ProjectCheckSummary,
+    limits: CheckLimits,
+    violations: Vec<CheckViolation>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CheckReport {
+    ok: bool,
+    violations: usize,
+    projects: Vec<ProjectCheckResult>,
+}
+
+fn evaluate_quality_gates(
+    project_name: &str,
+    graph: &CodeGraph,
+    metrics: &[graphify_core::metrics::NodeMetrics],
+    communities: &[graphify_core::community::Community],
+    cycles: &[Cycle],
+    limits: &CheckLimits,
+) -> ProjectCheckResult {
+    let top_hotspot = metrics.iter().max_by(|a, b| {
+        a.score
+            .partial_cmp(&b.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let summary = ProjectCheckSummary {
+        nodes: graph.node_count(),
+        edges: graph.edge_count(),
+        communities: communities.len(),
+        cycles: cycles.len(),
+        max_hotspot_score: top_hotspot.map(|m| m.score).unwrap_or(0.0),
+        max_hotspot_id: top_hotspot.map(|m| m.id.clone()),
+    };
+
+    let mut violations = Vec::new();
+
+    if let Some(max_cycles) = limits.max_cycles {
+        if summary.cycles > max_cycles {
+            violations.push(CheckViolation {
+                kind: "max_cycles".to_string(),
+                actual: serde_json::json!(summary.cycles),
+                expected_max: serde_json::json!(max_cycles),
+                node_id: None,
+            });
+        }
+    }
+
+    if let Some(max_hotspot_score) = limits.max_hotspot_score {
+        if summary.max_hotspot_score > max_hotspot_score {
+            violations.push(CheckViolation {
+                kind: "max_hotspot_score".to_string(),
+                actual: serde_json::json!(summary.max_hotspot_score),
+                expected_max: serde_json::json!(max_hotspot_score),
+                node_id: summary.max_hotspot_id.clone(),
+            });
+        }
+    }
+
+    ProjectCheckResult {
+        name: project_name.to_string(),
+        ok: violations.is_empty(),
+        summary,
+        limits: limits.clone(),
+        violations,
+    }
+}
+
+fn build_check_report(projects: Vec<ProjectCheckResult>) -> CheckReport {
+    let violations = projects.iter().map(|p| p.violations.len()).sum();
+    let ok = projects.iter().all(|p| p.ok);
+    CheckReport {
+        ok,
+        violations,
+        projects,
+    }
+}
+
+fn print_check_report(report: &CheckReport) {
+    for project in &report.projects {
+        let status = if project.ok { "PASS" } else { "FAIL" };
+        let hotspot = match &project.summary.max_hotspot_id {
+            Some(node_id) => format!("{:.3} ({node_id})", project.summary.max_hotspot_score),
+            None => format!("{:.3}", project.summary.max_hotspot_score),
+        };
+        println!(
+            "[{}] {} nodes={} edges={} communities={} cycles={} max_hotspot={}",
+            project.name,
+            status,
+            project.summary.nodes,
+            project.summary.edges,
+            project.summary.communities,
+            project.summary.cycles,
+            hotspot
+        );
+
+        for violation in &project.violations {
+            match violation.kind.as_str() {
+                "max_cycles" => {
+                    println!(
+                        "  - max_cycles: actual {} > expected {}",
+                        violation.actual, violation.expected_max
+                    );
+                }
+                "max_hotspot_score" => {
+                    if let Some(node_id) = &violation.node_id {
+                        println!(
+                            "  - max_hotspot_score: actual {:.3} > expected {:.3} at {}",
+                            violation.actual.as_f64().unwrap_or_default(),
+                            violation.expected_max.as_f64().unwrap_or_default(),
+                            node_id
+                        );
+                    } else {
+                        println!(
+                            "  - max_hotspot_score: actual {:.3} > expected {:.3}",
+                            violation.actual.as_f64().unwrap_or_default(),
+                            violation.expected_max.as_f64().unwrap_or_default()
+                        );
+                    }
+                }
+                _ => {
+                    println!(
+                        "  - {}: actual {} > expected {}",
+                        violation.kind, violation.actual, violation.expected_max
+                    );
+                }
+            }
+        }
+    }
+
+    if report.ok {
+        println!("All checks passed");
+    } else {
+        let failing_projects = report.projects.iter().filter(|p| !p.ok).count();
+        println!(
+            "Check failed: {} violation(s) across {} project(s)",
+            report.violations, failing_projects
+        );
+    }
+}
+
+fn cmd_check(
+    config_path: &Path,
+    project_filter: Option<&str>,
+    force: bool,
+    limits: CheckLimits,
+    json: bool,
+) {
+    let cfg = load_config(config_path);
+    let projects = filter_projects(&cfg, project_filter);
+    let mut results = Vec::new();
+
+    for project in &projects {
+        let (graph, _excludes, stats) = run_extract(project, &cfg.settings, None, force);
+        print_cache_stats(&project.name, &stats);
+        let (metrics, communities, cycles) = run_analyze(&graph, &ScoringWeights::default());
+        results.push(evaluate_quality_gates(
+            &project.name,
+            &graph,
+            &metrics,
+            &communities,
+            &cycles,
+            &limits,
+        ));
+    }
+
+    let report = build_check_report(results);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    } else {
+        print_check_report(&report);
+    }
+
+    if !report.ok {
+        std::process::exit(1);
     }
 }
 
@@ -1206,8 +1537,10 @@ fn parse_node_kind(s: &str) -> Option<graphify_core::types::NodeKind> {
     match s.to_lowercase().as_str() {
         "module" | "mod" => Some(graphify_core::types::NodeKind::Module),
         "function" | "func" | "fn" => Some(graphify_core::types::NodeKind::Function),
-        "class" => Some(graphify_core::types::NodeKind::Class),
+        "class" | "struct" => Some(graphify_core::types::NodeKind::Class),
         "method" => Some(graphify_core::types::NodeKind::Method),
+        "trait" | "interface" => Some(graphify_core::types::NodeKind::Trait),
+        "enum" => Some(graphify_core::types::NodeKind::Enum),
         _ => {
             eprintln!("Warning: unknown kind '{}', ignoring filter.", s);
             None
@@ -1567,6 +1900,116 @@ fn write_all_outputs(
     }
 }
 
+fn prune_stale_project_dirs(out_dir: &Path, active_projects: &[ProjectConfig]) {
+    if !out_dir.exists() {
+        return;
+    }
+
+    let active_names: HashSet<&str> = active_projects.iter().map(|p| p.name.as_str()).collect();
+    let entries = match std::fs::read_dir(out_dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            eprintln!(
+                "Warning: could not inspect output directory {}: {err}",
+                out_dir.display()
+            );
+            return;
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(err) => {
+                eprintln!(
+                    "Warning: could not inspect an entry inside {}: {err}",
+                    out_dir.display()
+                );
+                continue;
+            }
+        };
+
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(err) => {
+                eprintln!(
+                    "Warning: could not determine entry type for {}: {err}",
+                    entry.path().display()
+                );
+                continue;
+            }
+        };
+
+        if !file_type.is_dir() {
+            continue;
+        }
+
+        let dir_name = entry.file_name();
+        let dir_name = dir_name.to_string_lossy();
+        if active_names.contains(dir_name.as_ref()) {
+            continue;
+        }
+
+        let path = entry.path();
+        if is_prunable_stale_project_dir(&path) {
+            if let Err(err) = std::fs::remove_dir_all(&path) {
+                eprintln!(
+                    "Warning: failed to prune stale Graphify output directory {}: {err}",
+                    path.display()
+                );
+            } else {
+                eprintln!("Pruned stale Graphify output directory {}", path.display());
+            }
+        }
+    }
+}
+
+fn is_prunable_stale_project_dir(path: &Path) -> bool {
+    let entries = match std::fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+
+    let mut has_graphify_artifact = false;
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => return false,
+        };
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(_) => return false,
+        };
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+
+        let is_known_file = file_type.is_file()
+            && matches!(
+                name.as_ref(),
+                ".graphify-cache.json"
+                    | "graph.json"
+                    | "analysis.json"
+                    | "graph_nodes.csv"
+                    | "graph_edges.csv"
+                    | "architecture_report.md"
+                    | "architecture_graph.html"
+                    | "graph.cypher"
+                    | "graph.graphml"
+            );
+        let is_known_dir = file_type.is_dir() && matches!(name.as_ref(), "obsidian_vault");
+
+        if is_known_file || is_known_dir {
+            has_graphify_artifact = true;
+            continue;
+        }
+
+        return false;
+    }
+
+    has_graphify_artifact
+}
+
 // ---------------------------------------------------------------------------
 // Cross-project summary
 // ---------------------------------------------------------------------------
@@ -1576,6 +2019,7 @@ struct ProjectData {
     name: String,
     graph: CodeGraph,
     metrics: Vec<graphify_core::metrics::NodeMetrics>,
+    community_count: usize,
     cycles: Vec<Cycle>,
 }
 
@@ -1610,6 +2054,7 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
                 "name": p.name,
                 "nodes": node_count,
                 "edges": edge_count,
+                "communities": p.community_count,
                 "cycles": cycle_count,
                 "top_hotspot": top_hotspot,
             })
@@ -1773,7 +2218,12 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
 // watch command
 // ---------------------------------------------------------------------------
 
-fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, format_override: Option<&str>) {
+fn cmd_watch(
+    config_path: &Path,
+    output_override: Option<&Path>,
+    force: bool,
+    format_override: Option<&str>,
+) {
     use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
     use watch::{determine_affected_projects, WatchFilter};
 
@@ -1788,7 +2238,8 @@ fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, fo
     }
 
     // Collect all language strings and excludes for the watch filter.
-    let all_langs: Vec<String> = cfg.project
+    let all_langs: Vec<String> = cfg
+        .project
         .iter()
         .flat_map(|p| p.lang.clone())
         .collect::<std::collections::HashSet<_>>()
@@ -1800,7 +2251,8 @@ fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, fo
     let filter = WatchFilter::new(&all_langs, &exclude_dirs, &canonical_out);
 
     // Collect project repo paths for affected-project detection.
-    let project_repos: Vec<PathBuf> = cfg.project
+    let project_repos: Vec<PathBuf> = cfg
+        .project
         .iter()
         .map(|p| {
             let repo = PathBuf::from(&p.repo);
@@ -1813,17 +2265,20 @@ fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, fo
     for project in &cfg.project {
         let proj_out = out_dir.join(&project.name);
         std::fs::create_dir_all(&proj_out).expect("create output directory");
-        let _ = run_pipeline_for_project(project, &cfg.settings, &proj_out, &weights, &formats, force);
+        let _ =
+            run_pipeline_for_project(project, &cfg.settings, &proj_out, &weights, &formats, force);
         eprintln!("[{}] Ready.", project.name);
     }
 
     // Setup file watcher.
     let (tx, rx) = std::sync::mpsc::channel();
-    let mut debouncer = new_debouncer(std::time::Duration::from_millis(300), tx)
-        .expect("create file watcher");
+    let mut debouncer =
+        new_debouncer(std::time::Duration::from_millis(300), tx).expect("create file watcher");
 
     for repo in &project_repos {
-        debouncer.watcher().watch(repo, notify::RecursiveMode::Recursive)
+        debouncer
+            .watcher()
+            .watch(repo, notify::RecursiveMode::Recursive)
             .unwrap_or_else(|e| {
                 eprintln!("Error: cannot watch {:?}: {e}", repo);
                 std::process::exit(1);
@@ -1831,7 +2286,10 @@ fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, fo
     }
 
     eprintln!();
-    eprintln!("Watching {} project(s). Press Ctrl+C to stop.", cfg.project.len());
+    eprintln!(
+        "Watching {} project(s). Press Ctrl+C to stop.",
+        cfg.project.len()
+    );
     for (i, repo) in project_repos.iter().enumerate() {
         eprintln!("  [{}] {}", cfg.project[i].name, repo.display());
     }
@@ -1858,14 +2316,22 @@ fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, fo
                 }
 
                 let start = std::time::Instant::now();
-                eprintln!("--- Rebuild triggered ({} file(s) changed) ---", changed_paths.len());
+                eprintln!(
+                    "--- Rebuild triggered ({} file(s) changed) ---",
+                    changed_paths.len()
+                );
 
                 for &idx in &affected {
                     let project = &cfg.project[idx];
                     let proj_out = out_dir.join(&project.name);
                     std::fs::create_dir_all(&proj_out).expect("create output directory");
                     let _ = run_pipeline_for_project(
-                        project, &cfg.settings, &proj_out, &weights, &formats, false,
+                        project,
+                        &cfg.settings,
+                        &proj_out,
+                        &weights,
+                        &formats,
+                        false,
                     );
                     eprintln!("[{}] Rebuilt.", project.name);
                 }
@@ -1881,5 +2347,86 @@ fn cmd_watch(config_path: &Path, output_override: Option<&Path>, force: bool, fo
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use graphify_core::types::{Language, Node};
+
+    fn sample_graph() -> CodeGraph {
+        let mut graph = CodeGraph::new();
+        graph.add_node(Node::module("a", "a.ts", Language::TypeScript, 1, true));
+        graph.add_node(Node::module("b", "b.ts", Language::TypeScript, 1, true));
+        graph
+    }
+
+    fn metric(id: &str, score: f64) -> graphify_core::metrics::NodeMetrics {
+        graphify_core::metrics::NodeMetrics {
+            id: id.to_string(),
+            betweenness: 0.0,
+            pagerank: 0.0,
+            in_degree: 0,
+            out_degree: 0,
+            in_cycle: false,
+            score,
+            community_id: 0,
+        }
+    }
+
+    #[test]
+    fn evaluate_quality_gates_without_limits_passes() {
+        let graph = sample_graph();
+        let result = evaluate_quality_gates(
+            "demo",
+            &graph,
+            &[metric("a", 0.4), metric("b", 0.7)],
+            &[],
+            &[],
+            &CheckLimits::default(),
+        );
+
+        assert!(result.ok, "expected no limits to pass");
+        assert!(result.violations.is_empty(), "expected no violations");
+        assert_eq!(result.summary.max_hotspot_id.as_deref(), Some("b"));
+        assert!((result.summary.max_hotspot_score - 0.7).abs() < 1e-9);
+    }
+
+    #[test]
+    fn evaluate_quality_gates_selects_highest_hotspot_score() {
+        let graph = sample_graph();
+        let result = evaluate_quality_gates(
+            "demo",
+            &graph,
+            &[metric("a", 0.91), metric("b", 0.65)],
+            &[],
+            &[],
+            &CheckLimits::default(),
+        );
+
+        assert_eq!(result.summary.max_hotspot_id.as_deref(), Some("a"));
+        assert!((result.summary.max_hotspot_score - 0.91).abs() < 1e-9);
+    }
+
+    #[test]
+    fn evaluate_quality_gates_accumulates_multiple_violations() {
+        let graph = sample_graph();
+        let result = evaluate_quality_gates(
+            "demo",
+            &graph,
+            &[metric("a", 0.91)],
+            &[],
+            &[vec!["a".to_string(), "b".to_string()]],
+            &CheckLimits {
+                max_cycles: Some(0),
+                max_hotspot_score: Some(0.8),
+            },
+        );
+
+        assert!(!result.ok, "expected gate failure");
+        assert_eq!(result.violations.len(), 2, "expected two violations");
+        assert_eq!(result.violations[0].kind, "max_cycles");
+        assert_eq!(result.violations[1].kind, "max_hotspot_score");
     }
 }

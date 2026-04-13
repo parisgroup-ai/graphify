@@ -277,18 +277,34 @@ fn compute_hotspot_diff(
         }
     }
 
-    rising.sort_by(|a, b| b.delta.partial_cmp(&a.delta).unwrap_or(std::cmp::Ordering::Equal));
-    falling.sort_by(|a, b| a.delta.partial_cmp(&b.delta).unwrap_or(std::cmp::Ordering::Equal));
+    rising.sort_by(|a, b| {
+        b.delta
+            .partial_cmp(&a.delta)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    falling.sort_by(|a, b| {
+        a.delta
+            .partial_cmp(&b.delta)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let top_n = 20;
     let before_top: Vec<&str> = {
         let mut sorted: Vec<&NodeSnapshot> = before.nodes.iter().collect();
-        sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         sorted.iter().take(top_n).map(|n| n.id.as_str()).collect()
     };
     let after_top: Vec<&str> = {
         let mut sorted: Vec<&NodeSnapshot> = after.nodes.iter().collect();
-        sorted.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         sorted.iter().take(top_n).map(|n| n.id.as_str()).collect()
     };
 
@@ -308,7 +324,11 @@ fn compute_hotspot_diff(
             }
         })
         .collect();
-    new_hotspots.sort_by(|a, b| b.after.partial_cmp(&a.after).unwrap_or(std::cmp::Ordering::Equal));
+    new_hotspots.sort_by(|a, b| {
+        b.after
+            .partial_cmp(&a.after)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut removed_hotspots: Vec<ScoreChange> = before_top_set
         .difference(&after_top_set)
@@ -337,10 +357,7 @@ fn compute_hotspot_diff(
     }
 }
 
-fn compute_community_diff(
-    before: &AnalysisSnapshot,
-    after: &AnalysisSnapshot,
-) -> CommunityDiff {
+fn compute_community_diff(before: &AnalysisSnapshot, after: &AnalysisSnapshot) -> CommunityDiff {
     let before_comm: HashMap<&str, usize> = before
         .nodes
         .iter()
@@ -377,9 +394,7 @@ fn compute_community_diff(
                 .iter()
                 .filter(|m| after_set.contains(*m))
                 .count();
-            if overlap > best_overlap
-                || (overlap == best_overlap && before_id == after_id)
-            {
+            if overlap > best_overlap || (overlap == best_overlap && before_id == after_id) {
                 best_overlap = overlap;
                 best_id = before_id;
             }
@@ -515,7 +530,10 @@ mod tests {
     fn diff_identical_snapshots_all_zeros() {
         let a = make_snapshot(
             vec![node("x", 0.5, 2, 3, 0)],
-            vec![CommunitySnapshot { id: 0, members: vec!["x".into()] }],
+            vec![CommunitySnapshot {
+                id: 0,
+                members: vec!["x".into()],
+            }],
             vec![],
             3,
         );
@@ -531,13 +549,19 @@ mod tests {
     fn diff_detects_added_and_removed_nodes() {
         let before = make_snapshot(
             vec![node("a", 0.5, 2, 1, 0), node("b", 0.3, 1, 0, 0)],
-            vec![CommunitySnapshot { id: 0, members: vec!["a".into(), "b".into()] }],
+            vec![CommunitySnapshot {
+                id: 0,
+                members: vec!["a".into(), "b".into()],
+            }],
             vec![],
             3,
         );
         let after = make_snapshot(
             vec![node("a", 0.5, 2, 1, 0), node("c", 0.2, 0, 1, 0)],
-            vec![CommunitySnapshot { id: 0, members: vec!["a".into(), "c".into()] }],
+            vec![CommunitySnapshot {
+                id: 0,
+                members: vec!["a".into(), "c".into()],
+            }],
             vec![],
             3,
         );
@@ -586,19 +610,13 @@ mod tests {
     #[test]
     fn diff_detects_rising_and_falling_hotspots() {
         let before = make_snapshot(
-            vec![
-                node("a", 0.80, 5, 3, 0),
-                node("b", 0.20, 1, 1, 0),
-            ],
+            vec![node("a", 0.80, 5, 3, 0), node("b", 0.20, 1, 1, 0)],
             vec![],
             vec![],
             6,
         );
         let after = make_snapshot(
-            vec![
-                node("a", 0.50, 5, 3, 0),
-                node("b", 0.60, 1, 1, 0),
-            ],
+            vec![node("a", 0.50, 5, 3, 0), node("b", 0.60, 1, 1, 0)],
             vec![],
             vec![],
             6,
@@ -638,8 +656,14 @@ mod tests {
                 node("c", 0.2, 1, 0, 1),
             ],
             vec![
-                CommunitySnapshot { id: 0, members: vec!["a".into(), "b".into()] },
-                CommunitySnapshot { id: 1, members: vec!["c".into()] },
+                CommunitySnapshot {
+                    id: 0,
+                    members: vec!["a".into(), "b".into()],
+                },
+                CommunitySnapshot {
+                    id: 1,
+                    members: vec!["c".into()],
+                },
             ],
             vec![],
             4,
@@ -651,8 +675,14 @@ mod tests {
                 node("c", 0.2, 1, 0, 1),
             ],
             vec![
-                CommunitySnapshot { id: 0, members: vec!["a".into()] },
-                CommunitySnapshot { id: 1, members: vec!["b".into(), "c".into()] },
+                CommunitySnapshot {
+                    id: 0,
+                    members: vec!["a".into()],
+                },
+                CommunitySnapshot {
+                    id: 1,
+                    members: vec!["b".into(), "c".into()],
+                },
             ],
             vec![],
             4,
@@ -670,7 +700,10 @@ mod tests {
         let before = make_snapshot(vec![], vec![], vec![], 0);
         let after = make_snapshot(
             vec![node("a", 0.5, 2, 1, 0)],
-            vec![CommunitySnapshot { id: 0, members: vec!["a".into()] }],
+            vec![CommunitySnapshot {
+                id: 0,
+                members: vec!["a".into()],
+            }],
             vec![],
             2,
         );
@@ -684,7 +717,10 @@ mod tests {
     fn diff_empty_after_snapshot() {
         let before = make_snapshot(
             vec![node("a", 0.5, 2, 1, 0)],
-            vec![CommunitySnapshot { id: 0, members: vec!["a".into()] }],
+            vec![CommunitySnapshot {
+                id: 0,
+                members: vec!["a".into()],
+            }],
             vec![],
             2,
         );

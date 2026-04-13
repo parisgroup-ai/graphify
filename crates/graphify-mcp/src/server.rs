@@ -186,8 +186,10 @@ fn parse_node_kind(s: &str) -> Option<graphify_core::types::NodeKind> {
     match s.to_lowercase().as_str() {
         "module" | "mod" => Some(graphify_core::types::NodeKind::Module),
         "function" | "func" | "fn" => Some(graphify_core::types::NodeKind::Function),
-        "class" => Some(graphify_core::types::NodeKind::Class),
+        "class" | "struct" => Some(graphify_core::types::NodeKind::Class),
         "method" => Some(graphify_core::types::NodeKind::Method),
+        "trait" | "interface" => Some(graphify_core::types::NodeKind::Trait),
+        "enum" => Some(graphify_core::types::NodeKind::Enum),
         _ => None,
     }
 }

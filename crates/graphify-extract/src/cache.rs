@@ -98,12 +98,19 @@ impl ExtractionCache {
         let file = CacheFile {
             version: CACHE_VERSION,
             local_prefix: self.local_prefix.clone(),
-            entries: self.entries.iter().map(|(k, v)| {
-                (k.clone(), CacheEntry {
-                    sha256: v.sha256.clone(),
-                    result: v.result.clone(),
+            entries: self
+                .entries
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        k.clone(),
+                        CacheEntry {
+                            sha256: v.sha256.clone(),
+                            result: v.result.clone(),
+                        },
+                    )
                 })
-            }).collect(),
+                .collect(),
         };
         let json = serde_json::to_string_pretty(&file).expect("serialize cache");
         std::fs::write(path, json).expect("write cache file");
@@ -175,11 +182,7 @@ mod tests {
                 1,
                 true,
             )],
-            edges: vec![(
-                "app.main".to_string(),
-                "os".to_string(),
-                Edge::imports(1),
-            )],
+            edges: vec![("app.main".to_string(), "os".to_string(), Edge::imports(1))],
         }
     }
 
@@ -229,7 +232,11 @@ mod tests {
         let cache_path = dir.path().join(".graphify-cache.json");
 
         let mut cache = ExtractionCache::new("app");
-        cache.insert("app/main.py".to_string(), "hash1".to_string(), make_result());
+        cache.insert(
+            "app/main.py".to_string(),
+            "hash1".to_string(),
+            make_result(),
+        );
 
         cache.save(&cache_path);
         assert!(cache_path.exists());
@@ -270,7 +277,11 @@ mod tests {
         let cache_path = dir.path().join(".graphify-cache.json");
 
         let mut cache = ExtractionCache::new("app");
-        cache.insert("app/main.py".to_string(), "hash1".to_string(), make_result());
+        cache.insert(
+            "app/main.py".to_string(),
+            "hash1".to_string(),
+            make_result(),
+        );
         cache.save(&cache_path);
 
         // Load with a different prefix.
@@ -305,7 +316,7 @@ mod tests {
 
     #[test]
     fn integration_cache_with_python_extraction() {
-        use crate::{PythonExtractor, LanguageExtractor};
+        use crate::{LanguageExtractor, PythonExtractor};
 
         // Set up temp dirs.
         let src_dir = tempfile::tempdir().unwrap();
