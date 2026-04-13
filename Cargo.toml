@@ -5,6 +5,7 @@ members = [
     "crates/graphify-extract",
     "crates/graphify-report",
     "crates/graphify-cli",
+    "crates/graphify-mcp",
     ".",
 ]
 
