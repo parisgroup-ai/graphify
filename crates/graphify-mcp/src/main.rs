@@ -35,11 +35,12 @@ struct Config {
 }
 
 #[derive(Deserialize, Default)]
-#[allow(dead_code)]
 struct Settings {
+    #[allow(dead_code)]
     output: Option<String>,
     weights: Option<Vec<f64>>,
     exclude: Option<Vec<String>>,
+    #[allow(dead_code)]
     format: Option<Vec<String>>,
 }
 
@@ -134,7 +135,7 @@ async fn main() {
     );
 
     // Create MCP server and run on stdio.
-    let server = GraphifyServer::new(engines, default_project, project_names);
+    let server = GraphifyServer::new(engines, default_project);
 
     let transport = rmcp::transport::io::stdio();
     let service = rmcp::serve_server(server, transport)

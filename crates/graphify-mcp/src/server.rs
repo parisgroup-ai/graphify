@@ -17,20 +17,14 @@ use graphify_core::query::{QueryEngine, SearchFilters, SortField};
 pub struct GraphifyServer {
     pub engines: Arc<HashMap<String, QueryEngine>>,
     pub default_project: String,
-    pub project_names: Vec<String>,
 }
 
 impl GraphifyServer {
     /// Creates a new server with the given query engines.
-    pub fn new(
-        engines: HashMap<String, QueryEngine>,
-        default_project: String,
-        project_names: Vec<String>,
-    ) -> Self {
+    pub fn new(engines: HashMap<String, QueryEngine>, default_project: String) -> Self {
         Self {
             engines: Arc::new(engines),
             default_project,
-            project_names,
         }
     }
 
@@ -41,9 +35,11 @@ impl GraphifyServer {
     pub fn resolve_engine(&self, project: Option<&str>) -> Result<&QueryEngine, String> {
         let name = project.unwrap_or(&self.default_project);
         self.engines.get(name).ok_or_else(|| {
+            let available: Vec<&str> = self.engines.keys().map(|k| k.as_str()).collect();
             format!(
-                "Project '{}' not found. Available: {:?}",
-                name, self.project_names
+                "Project '{}' not found. Available: {}",
+                name,
+                available.join(", ")
             )
         })
     }
@@ -161,7 +157,7 @@ pub struct SuggestParams {
 pub struct TransitiveDepsParams {
     /// Node ID to find transitive dependents for.
     pub node_id: String,
-    /// Maximum depth for transitive search (default: 10).
+    /// Maximum depth for transitive search (default: 5).
     pub max_depth: Option<usize>,
     /// Project name. Uses the default project if omitted.
     pub project: Option<String>,
