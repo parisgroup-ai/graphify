@@ -806,7 +806,7 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
     // Resolve edges and add them.
     for (src_id, raw_target, edge) in all_raw_edges {
         let is_package = package_modules.contains(src_id.as_str());
-        let (resolved_target, _is_local) = resolver.resolve(&raw_target, &src_id, is_package);
+        let (resolved_target, _is_local, _confidence) = resolver.resolve(&raw_target, &src_id, is_package);
         graph.add_edge(&src_id, &resolved_target, edge);
     }
 

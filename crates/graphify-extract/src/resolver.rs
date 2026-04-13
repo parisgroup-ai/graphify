@@ -135,22 +135,28 @@ impl ModuleResolver {
     // -----------------------------------------------------------------------
 
     /// Resolve a raw import string `raw` found in module `from_module` to a
-    /// canonical dot-notation identifier, and determine whether it is local.
+    /// canonical dot-notation identifier, determine whether it is local, and
+    /// return a confidence score for the resolution.
     ///
-    /// Returns `(resolved_id, is_local)`.
-    pub fn resolve(&self, raw: &str, from_module: &str, is_package: bool) -> (String, bool) {
+    /// Confidence scores:
+    /// - `1.0` — direct module name (exact match or unknown external)
+    /// - `0.9` — Python relative import or TS relative import (heuristic)
+    /// - `0.85` — TypeScript path alias (depends on tsconfig config)
+    ///
+    /// Returns `(resolved_id, is_local, confidence)`.
+    pub fn resolve(&self, raw: &str, from_module: &str, is_package: bool) -> (String, bool, f64) {
         // 1. Python relative imports (start with one or more dots).
         if raw.starts_with('.') && !raw.starts_with("./") && !raw.starts_with("../") {
             let resolved = resolve_python_relative(raw, from_module, is_package);
             let is_local = self.known_modules.contains_key(&resolved);
-            return (resolved, is_local);
+            return (resolved, is_local, 0.9);
         }
 
         // 2. TypeScript path aliases (e.g. `@/lib/api`).
         for (alias_pat, target_pat) in &self.ts_aliases {
             if let Some(resolved) = apply_ts_alias(raw, alias_pat, target_pat) {
                 let is_local = self.known_modules.contains_key(&resolved);
-                return (resolved, is_local);
+                return (resolved, is_local, 0.85);
             }
         }
 
@@ -158,12 +164,12 @@ impl ModuleResolver {
         if raw.starts_with("./") || raw.starts_with("../") {
             let resolved = resolve_ts_relative(raw, from_module);
             let is_local = self.known_modules.contains_key(&resolved);
-            return (resolved, is_local);
+            return (resolved, is_local, 0.9);
         }
 
         // 4. Direct module name — check against known modules.
         let is_local = self.known_modules.contains_key(raw);
-        (raw.to_owned(), is_local)
+        (raw.to_owned(), is_local, 1.0)
     }
 }
 
@@ -437,7 +443,7 @@ mod tests {
     #[test]
     fn resolve_direct_known_module() {
         let r = make_resolver();
-        let (id, is_local) = r.resolve("app.services.llm", "app.main", false);
+        let (id, is_local, _) = r.resolve("app.services.llm", "app.main", false);
         assert_eq!(id, "app.services.llm");
         assert!(is_local, "registered module should be local");
     }
@@ -445,7 +451,7 @@ mod tests {
     #[test]
     fn resolve_direct_unknown_module() {
         let r = make_resolver();
-        let (id, is_local) = r.resolve("os", "app.main", false);
+        let (id, is_local, _) = r.resolve("os", "app.main", false);
         assert_eq!(id, "os");
         assert!(!is_local, "'os' is not a local module");
     }
@@ -458,7 +464,7 @@ mod tests {
     fn resolve_python_relative_single_dot() {
         // `.utils` from `app.services.llm` → `app.services.utils`
         let r = make_resolver();
-        let (id, _) = r.resolve(".utils", "app.services.llm", false);
+        let (id, _, _) = r.resolve(".utils", "app.services.llm", false);
         assert_eq!(id, "app.services.utils");
     }
 
@@ -466,7 +472,7 @@ mod tests {
     fn resolve_python_relative_double_dot() {
         // `..models` from `app.services.llm` → `app.models`
         let r = make_resolver();
-        let (id, _) = r.resolve("..models", "app.services.llm", false);
+        let (id, _, _) = r.resolve("..models", "app.services.llm", false);
         assert_eq!(id, "app.models");
     }
 
@@ -476,7 +482,7 @@ mod tests {
         // Register it so it's local.
         let mut r = make_resolver();
         r.register_module("app.services.models");
-        let (id, is_local) = r.resolve(".models", "app.services.llm", false);
+        let (id, is_local, _) = r.resolve(".models", "app.services.llm", false);
         assert_eq!(id, "app.services.models");
         assert!(is_local);
     }
@@ -485,7 +491,7 @@ mod tests {
     fn resolve_python_relative_bare_dot() {
         // `.` (bare relative) from `app.services.llm` → `app.services`
         let r = make_resolver();
-        let (id, _) = r.resolve(".", "app.services.llm", false);
+        let (id, _, _) = r.resolve(".", "app.services.llm", false);
         assert_eq!(id, "app.services");
     }
 
@@ -499,7 +505,7 @@ mod tests {
         let mut r = make_resolver();
         r.register_module("app.errors");
         r.register_module("app.errors.llm");
-        let (id, _) = r.resolve(".llm", "app.errors", true);
+        let (id, _, _) = r.resolve(".llm", "app.errors", true);
         assert_eq!(id, "app.errors.llm");
     }
 
@@ -507,7 +513,7 @@ mod tests {
     fn resolve_python_relative_from_init_double_dot() {
         // `..models` from `app.errors` (__init__.py) → `app.models`
         let r = make_resolver();
-        let (id, _) = r.resolve("..models", "app.errors", true);
+        let (id, _, _) = r.resolve("..models", "app.errors", true);
         assert_eq!(id, "app.models");
     }
 
@@ -515,7 +521,7 @@ mod tests {
     fn resolve_python_relative_from_init_bare_dot() {
         // `.` from `app.errors` (__init__.py) → `app.errors`
         let r = make_resolver();
-        let (id, _) = r.resolve(".", "app.errors", true);
+        let (id, _, _) = r.resolve(".", "app.errors", true);
         assert_eq!(id, "app.errors");
     }
 
@@ -527,7 +533,7 @@ mod tests {
         r.register_module("app.errors");
         r.register_module("app.errors.llm");
         r.register_module("app.llm");
-        let (id, _) = r.resolve(".llm", "app.errors", true);
+        let (id, _, _) = r.resolve(".llm", "app.errors", true);
         assert_eq!(id, "app.errors.llm", "BUG-001: must NOT resolve to app.llm");
     }
 
@@ -540,7 +546,7 @@ mod tests {
         // `@/lib/api` with alias `@/*` → `src/*` → `src.lib.api`
         let mut r = make_resolver();
         r.ts_aliases.push(("@/*".to_owned(), "src/*".to_owned()));
-        let (id, is_local) = r.resolve("@/lib/api", "src.index", false);
+        let (id, is_local, _) = r.resolve("@/lib/api", "src.index", false);
         assert_eq!(id, "src.lib.api");
         assert!(is_local, "src.lib.api is registered as local");
     }
@@ -550,7 +556,7 @@ mod tests {
         // Alias resolves to something not registered → is_local=false.
         let mut r = make_resolver();
         r.ts_aliases.push(("@/*".to_owned(), "src/*".to_owned()));
-        let (id, is_local) = r.resolve("@/unknown/module", "src.index", false);
+        let (id, is_local, _) = r.resolve("@/unknown/module", "src.index", false);
         assert_eq!(id, "src.unknown.module");
         assert!(!is_local);
     }
@@ -566,7 +572,7 @@ mod tests {
         let mut r = make_resolver();
         r.ts_aliases
             .push(("@repo/*".to_owned(), "../../packages/*".to_owned()));
-        let (id, is_local) = r.resolve("@repo/validators", "src.index", false);
+        let (id, is_local, _) = r.resolve("@repo/validators", "src.index", false);
         assert_eq!(
             id, "@repo/validators",
             "BUG-007: workspace alias must preserve original import name"
@@ -580,7 +586,7 @@ mod tests {
         let mut r = make_resolver();
         r.ts_aliases
             .push(("@repo/*".to_owned(), "../../packages/*".to_owned()));
-        let (id, is_local) = r.resolve("@repo/validators/mentorship", "src.index", false);
+        let (id, is_local, _) = r.resolve("@repo/validators/mentorship", "src.index", false);
         assert_eq!(id, "@repo/validators/mentorship");
         assert!(!is_local);
     }
@@ -593,7 +599,7 @@ mod tests {
             "@repo/validators".to_owned(),
             "../../packages/validators/src".to_owned(),
         ));
-        let (id, is_local) = r.resolve("@repo/validators", "src.index", false);
+        let (id, is_local, _) = r.resolve("@repo/validators", "src.index", false);
         assert_eq!(id, "@repo/validators");
         assert!(!is_local);
     }
@@ -604,7 +610,7 @@ mod tests {
         let mut r = make_resolver();
         r.ts_aliases.push(("@/*".to_owned(), "./src/*".to_owned()));
         r.register_module("src.lib.api");
-        let (id, is_local) = r.resolve("@/lib/api", "src.index", false);
+        let (id, is_local, _) = r.resolve("@/lib/api", "src.index", false);
         assert_eq!(id, "src.lib.api");
         assert!(is_local);
     }
@@ -617,7 +623,7 @@ mod tests {
     fn resolve_ts_relative_same_dir() {
         // `./services/user` from `src.index` → `src.services.user`
         let r = make_resolver();
-        let (id, is_local) = r.resolve("./services/user", "src.index", false);
+        let (id, is_local, _) = r.resolve("./services/user", "src.index", false);
         assert_eq!(id, "src.services.user");
         assert!(is_local, "src.services.user is registered");
     }
@@ -626,7 +632,7 @@ mod tests {
     fn resolve_ts_relative_parent() {
         // `../lib/api` from `src.services.user` → `src.lib.api`
         let r = make_resolver();
-        let (id, is_local) = r.resolve("../lib/api", "src.services.user", false);
+        let (id, is_local, _) = r.resolve("../lib/api", "src.services.user", false);
         assert_eq!(id, "src.lib.api");
         assert!(is_local, "src.lib.api is registered");
     }
@@ -668,5 +674,54 @@ mod tests {
             "expected @lib/* → src/lib/* alias, got: {:?}",
             r.ts_aliases
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Confidence scores
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_direct_known_returns_confidence_1() {
+        let r = make_resolver();
+        let (_, _, confidence) = r.resolve("app.services.llm", "app.main", false);
+        assert_eq!(confidence, 1.0);
+    }
+
+    #[test]
+    fn resolve_direct_unknown_returns_confidence_1() {
+        let r = make_resolver();
+        let (_, _, confidence) = r.resolve("os", "app.main", false);
+        assert_eq!(confidence, 1.0);
+    }
+
+    #[test]
+    fn resolve_python_relative_returns_confidence_09() {
+        let r = make_resolver();
+        let (_, _, confidence) = r.resolve(".utils", "app.services.llm", false);
+        assert!((confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resolve_ts_alias_returns_confidence_085() {
+        let mut r = make_resolver();
+        r.ts_aliases.push(("@/*".to_owned(), "src/*".to_owned()));
+        let (_, _, confidence) = r.resolve("@/lib/api", "src.index", false);
+        assert!((confidence - 0.85).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resolve_ts_relative_returns_confidence_09() {
+        let r = make_resolver();
+        let (_, _, confidence) = r.resolve("./services/user", "src.index", false);
+        assert!((confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resolve_ts_workspace_alias_returns_confidence_085() {
+        let mut r = make_resolver();
+        r.ts_aliases
+            .push(("@repo/*".to_owned(), "../../packages/*".to_owned()));
+        let (_, _, confidence) = r.resolve("@repo/validators", "src.index", false);
+        assert!((confidence - 0.85).abs() < f64::EPSILON);
     }
 }
