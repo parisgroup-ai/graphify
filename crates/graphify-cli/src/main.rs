@@ -231,6 +231,25 @@ enum Commands {
         #[arg(long)]
         project: Option<String>,
     },
+
+    /// Watch source files and auto-rebuild on changes
+    Watch {
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Output directory (overrides config setting)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Force full rebuild on first run, ignoring extraction cache
+        #[arg(long)]
+        force: bool,
+
+        /// Output formats: json,csv,md,html,neo4j,graphml,obsidian (comma-separated)
+        #[arg(long)]
+        format: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -599,6 +618,10 @@ fn main() {
 
         Commands::Shell { config, project } => {
             cmd_shell(&config, project.as_deref());
+        }
+
+        Commands::Watch { config, output, force, format } => {
+            cmd_watch(&config, output.as_deref(), force, format.as_deref());
         }
     }
 }
@@ -1542,4 +1565,13 @@ fn write_summary(projects: &[ProjectData], out_dir: &Path) {
     let text = serde_json::to_string_pretty(&summary).expect("serialize summary");
     std::fs::write(&path, text).expect("write graphify-summary.json");
     println!("Summary written to {}", path.display());
+}
+
+// ---------------------------------------------------------------------------
+// watch command
+// ---------------------------------------------------------------------------
+
+fn cmd_watch(_config_path: &Path, _output_override: Option<&Path>, _force: bool, _format_override: Option<&str>) {
+    eprintln!("Watch mode not yet implemented");
+    std::process::exit(1);
 }

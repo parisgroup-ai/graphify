@@ -6,12 +6,14 @@ use std::path::{Path, PathBuf};
 /// 1. File extension matches configured languages (.py, .ts, .tsx)
 /// 2. Path is not inside an excluded directory
 /// 3. Path is not inside the output directory
+#[allow(dead_code)]
 pub struct WatchFilter {
     extensions: Vec<String>,
     exclude_dirs: Vec<String>,
     output_dir: PathBuf,
 }
 
+#[allow(dead_code)]
 impl WatchFilter {
     pub fn new(
         languages: &[String],
