@@ -764,12 +764,13 @@ fn run_extract(
     }
 
     // Load extraction cache (unless --force or no cache dir).
-    let cache = if force || cache_dir.is_none() {
-        ExtractionCache::new(local_prefix)
-    } else {
-        let cache_path = cache_dir.unwrap().join(".graphify-cache.json");
-        ExtractionCache::load(&cache_path, local_prefix)
-            .unwrap_or_else(|| ExtractionCache::new(local_prefix))
+    let cache = match (force, cache_dir) {
+        (false, Some(dir)) => {
+            let cache_path = dir.join(".graphify-cache.json");
+            ExtractionCache::load(&cache_path, local_prefix)
+                .unwrap_or_else(|| ExtractionCache::new(local_prefix))
+        }
+        _ => ExtractionCache::new(local_prefix),
     };
 
     let mut stats = CacheStats {

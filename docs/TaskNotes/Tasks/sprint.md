@@ -27,7 +27,7 @@ updated: 2026-04-12
 | FEAT-002 | **open** | normal   | 8h     | Architectural drift detection                        |
 | FEAT-003 | **open** | low      | 16h    | New language support (Go, Rust)                      |
 | FEAT-004 | **done** | normal   | 4h     | CI quality gates                                     |
-| FEAT-005 | **open** | high     | 16h    | Incremental builds with SHA256 cache                 |
+| FEAT-005 | **done** | high     | 16h    | Incremental builds with SHA256 cache                 |
 | FEAT-006 | **done** | high     | 16h    | Graph query interface (query, path, explain)         |
 | FEAT-007 | **done** | normal   | 16h    | MCP server for graph queries                         |
 | FEAT-008 | **done** | normal   | 8h     | Edge confidence scoring                              |
@@ -44,3 +44,4 @@ updated: 2026-04-12
 - [[FEAT-001-interactive-html-visualization]] - Implemented: self-contained HTML with D3.js force graph, SVG/Canvas auto-switch, full explorer (2026-04-12)
 - [[FEAT-007-mcp-server]] - Implemented: MCP server (rmcp over stdio) with 9 tools, per-project support, 15 tests (2026-04-12)
 - [[FEAT-008-confidence-scoring]] - Implemented: ConfidenceKind enum (Extracted/Inferred/Ambiguous), confidence scoring on edges, resolver confidence, pipeline downgrade, all report outputs, query filtering, MCP integration, 24 new tests (2026-04-12)
+- [[FEAT-005-incremental-builds]] - Implemented: SHA256-based extraction cache, per-file ExtractionResult caching, --force flag, cache stats output, 16 new tests (2026-04-12)

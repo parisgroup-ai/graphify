@@ -109,6 +109,7 @@ For each [[project]]:
 | `crates/graphify-extract/src/python.rs` | Python extractor (imports, defs, calls) |
 | `crates/graphify-extract/src/typescript.rs` | TypeScript extractor (imports, exports, require, calls) |
 | `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative w/ `is_package`, TS path aliases) |
+| `crates/graphify-extract/src/cache.rs` | ExtractionCache — SHA256-based per-file extraction cache |
 | `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion + `is_package` detection |
 | `crates/graphify-report/src/html.rs` | Interactive HTML visualization (D3.js force graph, self-contained) |
 | `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline |
@@ -146,7 +147,11 @@ For each [[project]]:
 - Resolver confidence: direct=1.0, Python relative=0.9, TS alias=0.85, TS relative=0.9
 - Non-local edge downgrade: min(confidence, 0.5) → Ambiguous
 - Edge merge keeps max confidence of all observations
-- Tests: 220 unit + integration tests (`cargo test --workspace`)
+- Extraction cache: `.graphify-cache.json` in each project's output directory, keyed by SHA256 of file contents
+- Cache is on by default; `--force` flag bypasses it (full rebuild, fresh cache saved)
+- Cache invalidation: version mismatch or `local_prefix` change → full discard
+- Query commands (query, explain, path, shell) don't use cache — always fresh extraction
+- Tests: 236 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
