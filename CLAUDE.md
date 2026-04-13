@@ -46,7 +46,7 @@ Multi-project analysis via `graphify.toml`:
 output = "./report"
 weights = [0.4, 0.2, 0.2, 0.2]  # betweenness, pagerank, in_degree, in_cycle
 exclude = ["__pycache__", "node_modules", ".git", "dist", "tests", "__tests__", ".next"]
-format = ["json", "csv", "md", "html"]
+format = ["json", "csv", "md", "html"]  # also: neo4j, graphml, obsidian
 
 [[project]]
 name = "ana-service"
@@ -63,7 +63,7 @@ Cargo workspace with 5 crates:
 |---|---|---|
 | `graphify-core` | Graph model, metrics, community detection, cycles | petgraph, serde, rand |
 | `graphify-extract` | tree-sitter AST parsing, file discovery, module resolution | tree-sitter, tree-sitter-python, tree-sitter-typescript, rayon |
-| `graphify-report` | JSON, CSV, Markdown, HTML output generation | serde_json, csv |
+| `graphify-report` | JSON, CSV, Markdown, HTML, Neo4j Cypher, GraphML, Obsidian output generation | serde_json, csv |
 | `graphify-cli` | CLI (clap), config parsing, pipeline orchestration | clap, toml, rayon |
 | `graphify-mcp` | MCP server exposing graph queries to AI assistants | rmcp, tokio, clap |
 
@@ -93,7 +93,10 @@ For each [[project]]:
         ├── analysis.json (metrics + communities + cycles)
         ├── graph_nodes.csv / graph_edges.csv
         ├── architecture_report.md
-        └── architecture_graph.html
+        ├── architecture_graph.html
+        ├── graph.cypher (Neo4j import script)
+        ├── graph.graphml (GraphML XML)
+        └── obsidian_vault/ (Obsidian markdown notes)
 ```
 
 ### Key modules
@@ -112,6 +115,9 @@ For each [[project]]:
 | `crates/graphify-extract/src/cache.rs` | ExtractionCache — SHA256-based per-file extraction cache |
 | `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion + `is_package` detection |
 | `crates/graphify-report/src/html.rs` | Interactive HTML visualization (D3.js force graph, self-contained) |
+| `crates/graphify-report/src/neo4j.rs` | Neo4j Cypher import script (CREATE nodes, CREATE relationships) |
+| `crates/graphify-report/src/graphml.rs` | GraphML XML export (compatible with yEd, Gephi) |
+| `crates/graphify-report/src/obsidian.rs` | Obsidian vault export (one .md per node with [[wikilinks]]) |
 | `crates/graphify-cli/src/main.rs` | CLI, config parsing, pipeline |
 | `crates/graphify-mcp/src/main.rs` | MCP server entry point, config parsing, extraction pipeline |
 | `crates/graphify-mcp/src/server.rs` | GraphifyServer struct, 9 MCP tool handlers, ServerHandler impl |
@@ -151,7 +157,7 @@ For each [[project]]:
 - Cache is on by default; `--force` flag bypasses it (full rebuild, fresh cache saved)
 - Cache invalidation: version mismatch or `local_prefix` change → full discard
 - Query commands (query, explain, path, shell) don't use cache — always fresh extraction
-- Tests: 236 unit + integration tests (`cargo test --workspace`)
+- Tests: 249 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 

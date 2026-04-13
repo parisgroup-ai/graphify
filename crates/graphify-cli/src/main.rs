@@ -19,8 +19,8 @@ use graphify_extract::{
     TypeScriptExtractor,
 };
 use graphify_report::{
-    write_analysis_json, write_edges_csv, write_graph_json, write_html, write_nodes_csv,
-    write_report, Cycle,
+    write_analysis_json, write_cypher, write_edges_csv, write_graph_json, write_graphml, write_html,
+    write_nodes_csv, write_obsidian_vault, write_report, Cycle,
 };
 
 // ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ enum Commands {
         #[arg(long)]
         weights: Option<String>,
 
-        /// Output formats: json,csv,md (comma-separated)
+        /// Output formats: json,csv,md,html,neo4j,graphml,obsidian (comma-separated)
         #[arg(long)]
         format: Option<String>,
 
@@ -612,7 +612,7 @@ fn cmd_init() {
 output = "./report"
 # weights = [0.4, 0.2, 0.2, 0.2]   # betweenness, pagerank, in_degree, in_cycle
 # exclude = []                       # extra directories to skip
-# format = ["json", "csv", "md", "html"]    # output formats
+# format = ["json", "csv", "md", "html"]    # output formats (also: neo4j, graphml, obsidian)
 
 [[project]]
 name = "my-project"
@@ -1316,6 +1316,21 @@ fn write_all_outputs(
                     communities,
                     cycles,
                     &out_dir.join("architecture_graph.html"),
+                );
+            }
+            "neo4j" | "cypher" => {
+                write_cypher(graph, &out_dir.join("graph.cypher"));
+            }
+            "graphml" => {
+                write_graphml(graph, &out_dir.join("graph.graphml"));
+            }
+            "obsidian" => {
+                write_obsidian_vault(
+                    graph,
+                    metrics,
+                    communities,
+                    cycles,
+                    &out_dir.join("obsidian_vault"),
                 );
             }
             other => {
