@@ -81,6 +81,10 @@ impl CodeGraph {
         // Check for an existing edge of the same kind between src → tgt.
         if let Some(existing_idx) = self.find_edge(src, tgt, &edge.kind) {
             self.graph[existing_idx].weight += 1;
+            if edge.confidence > self.graph[existing_idx].confidence {
+                self.graph[existing_idx].confidence = edge.confidence;
+                self.graph[existing_idx].confidence_kind = edge.confidence_kind;
+            }
         } else {
             self.graph.add_edge(src, tgt, edge);
         }
@@ -545,5 +549,59 @@ mod tests {
         let g = CodeGraph::default();
         assert_eq!(g.node_count(), 0);
         assert_eq!(g.edge_count(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Edge confidence merge
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn edge_merge_keeps_max_confidence() {
+        use crate::types::ConfidenceKind;
+
+        let mut g = CodeGraph::new();
+        g.add_node(python_module("a", true));
+        g.add_node(python_module("b", true));
+
+        g.add_edge(
+            "a",
+            "b",
+            Edge::imports(1).with_confidence(0.5, ConfidenceKind::Ambiguous),
+        );
+        g.add_edge(
+            "a",
+            "b",
+            Edge::imports(2).with_confidence(0.9, ConfidenceKind::Inferred),
+        );
+
+        assert_eq!(g.edge_count(), 1, "should merge into single edge");
+
+        let edges = g.edges();
+        let (_, _, edge) = edges.iter().find(|(s, t, _)| *s == "a" && *t == "b").unwrap();
+        assert_eq!(edge.weight, 2);
+        assert_eq!(edge.confidence, 0.9);
+        assert_eq!(edge.confidence_kind, ConfidenceKind::Inferred);
+    }
+
+    #[test]
+    fn edge_merge_keeps_existing_when_higher() {
+        use crate::types::ConfidenceKind;
+
+        let mut g = CodeGraph::new();
+        g.add_node(python_module("x", true));
+        g.add_node(python_module("y", true));
+
+        g.add_edge("x", "y", Edge::calls(1)); // 1.0, Extracted
+        g.add_edge(
+            "x",
+            "y",
+            Edge::calls(2).with_confidence(0.7, ConfidenceKind::Inferred),
+        );
+
+        let edges = g.edges();
+        let (_, _, edge) = edges.iter().find(|(s, t, _)| *s == "x" && *t == "y").unwrap();
+        assert_eq!(edge.weight, 2);
+        assert_eq!(edge.confidence, 1.0);
+        assert_eq!(edge.confidence_kind, ConfidenceKind::Extracted);
     }
 }
