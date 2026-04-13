@@ -13,14 +13,16 @@ use graphify_core::{
     query::{QueryEngine, SearchFilters, SortField},
     types::Language,
 };
+use graphify_core::diff::{AnalysisSnapshot, compute_diff};
 use graphify_extract::{
     cache::{sha256_hex, CacheStats, ExtractionCache},
     walker::discover_files, ExtractionResult, LanguageExtractor, PythonExtractor,
     TypeScriptExtractor,
 };
 use graphify_report::{
-    write_analysis_json, write_cypher, write_edges_csv, write_graph_json, write_graphml, write_html,
-    write_nodes_csv, write_obsidian_vault, write_report, Cycle,
+    write_analysis_json, write_cypher, write_diff_json, write_diff_markdown, write_edges_csv,
+    write_graph_json, write_graphml, write_html, write_nodes_csv, write_obsidian_vault,
+    write_report, Cycle,
 };
 
 mod watch;
@@ -249,6 +251,37 @@ enum Commands {
         /// Output formats: json,csv,md,html,neo4j,graphml,obsidian (comma-separated)
         #[arg(long)]
         format: Option<String>,
+    },
+
+    /// Compare two analysis snapshots to detect architectural drift
+    Diff {
+        /// Path to the "before" analysis.json (file-vs-file mode)
+        #[arg(long)]
+        before: Option<PathBuf>,
+
+        /// Path to the "after" analysis.json (file-vs-file mode)
+        #[arg(long)]
+        after: Option<PathBuf>,
+
+        /// Path to a baseline analysis.json (baseline-vs-live mode)
+        #[arg(long)]
+        baseline: Option<PathBuf>,
+
+        /// Path to graphify.toml (for live extraction in baseline mode)
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// Project name (for baseline mode with multi-project configs)
+        #[arg(long)]
+        project: Option<String>,
+
+        /// Output directory for drift report files (default: current directory)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Minimum score delta to report as significant (default: 0.05)
+        #[arg(long, default_value = "0.05")]
+        threshold: f64,
     },
 }
 
@@ -587,6 +620,26 @@ fn main() {
         Commands::Watch { config, output, force, format } => {
             cmd_watch(&config, output.as_deref(), force, format.as_deref());
         }
+
+        Commands::Diff {
+            before,
+            after,
+            baseline,
+            config,
+            project,
+            output,
+            threshold,
+        } => {
+            cmd_diff(
+                before.as_deref(),
+                after.as_deref(),
+                baseline.as_deref(),
+                config.as_deref(),
+                project.as_deref(),
+                output.as_deref(),
+                threshold,
+            );
+        }
     }
 }
 
@@ -617,6 +670,154 @@ local_prefix = "app"
     }
     std::fs::write(dest, template).expect("write graphify.toml");
     println!("Created graphify.toml — edit it to point at your repo.");
+}
+
+// ---------------------------------------------------------------------------
+// diff command
+// ---------------------------------------------------------------------------
+
+fn cmd_diff(
+    before: Option<&Path>,
+    after: Option<&Path>,
+    baseline: Option<&Path>,
+    config: Option<&Path>,
+    project: Option<&str>,
+    output: Option<&Path>,
+    threshold: f64,
+) {
+    let (before_snapshot, after_snapshot) = match (before, after, baseline, config) {
+        // File-vs-file mode
+        (Some(before_path), Some(after_path), None, None) => {
+            let b = load_snapshot(before_path);
+            let a = load_snapshot(after_path);
+            (b, a)
+        }
+        // Baseline-vs-live mode
+        (None, None, Some(baseline_path), Some(config_path)) => {
+            let b = load_snapshot(baseline_path);
+            let cfg = load_config(config_path);
+            let projects = filter_projects(&cfg, project);
+            let project_cfg = projects[0];
+            let w = resolve_weights(&cfg, None);
+            let (graph, _, _stats) = run_extract(project_cfg, &cfg.settings, None, false);
+            let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
+            assign_community_ids(&mut metrics, &communities);
+            // Build an AnalysisSnapshot from live data.
+            let total_nodes = metrics.len();
+            let total_edges = graph.edge_count();
+            let total_communities = communities.len();
+            let total_cycles = cycles_simple.len();
+            let a = AnalysisSnapshot {
+                nodes: metrics
+                    .iter()
+                    .map(|m| graphify_core::diff::NodeSnapshot {
+                        id: m.id.clone(),
+                        betweenness: m.betweenness,
+                        pagerank: m.pagerank,
+                        in_degree: m.in_degree,
+                        out_degree: m.out_degree,
+                        in_cycle: m.in_cycle,
+                        score: m.score,
+                        community_id: m.community_id,
+                    })
+                    .collect(),
+                communities: communities
+                    .iter()
+                    .map(|c| graphify_core::diff::CommunitySnapshot {
+                        id: c.id,
+                        members: c.members.clone(),
+                    })
+                    .collect(),
+                cycles: cycles_simple,
+                summary: graphify_core::diff::SummarySnapshot {
+                    total_nodes,
+                    total_edges,
+                    total_communities,
+                    total_cycles,
+                },
+            };
+            (b, a)
+        }
+        _ => {
+            eprintln!(
+                "Error: use either --before + --after (file mode) or --baseline + --config (live mode)"
+            );
+            std::process::exit(1);
+        }
+    };
+
+    let report = compute_diff(&before_snapshot, &after_snapshot, threshold);
+
+    let out_dir = output.unwrap_or(Path::new("."));
+    std::fs::create_dir_all(out_dir).expect("create output directory");
+
+    write_diff_json(&report, &out_dir.join("drift-report.json"));
+    write_diff_markdown(&report, &out_dir.join("drift-report.md"));
+
+    // Print summary to stdout.
+    println!("Architectural Drift Report");
+    println!(
+        "  Nodes:       {} → {} ({:+})",
+        report.summary_delta.nodes.before,
+        report.summary_delta.nodes.after,
+        report.summary_delta.nodes.change
+    );
+    println!(
+        "  Edges:       {} → {} ({:+})",
+        report.summary_delta.edges.before,
+        report.summary_delta.edges.after,
+        report.summary_delta.edges.change
+    );
+    println!(
+        "  Communities: {} → {} ({:+})",
+        report.summary_delta.communities.before,
+        report.summary_delta.communities.after,
+        report.summary_delta.communities.change
+    );
+    println!(
+        "  Cycles:      {} → {} ({:+})",
+        report.summary_delta.cycles.before,
+        report.summary_delta.cycles.after,
+        report.summary_delta.cycles.change
+    );
+    if !report.edges.added_nodes.is_empty() {
+        println!("  New nodes:   {}", report.edges.added_nodes.len());
+    }
+    if !report.edges.removed_nodes.is_empty() {
+        println!("  Removed:     {}", report.edges.removed_nodes.len());
+    }
+    if !report.hotspots.rising.is_empty() || !report.hotspots.falling.is_empty() {
+        println!(
+            "  Hotspots:    {} rising, {} falling",
+            report.hotspots.rising.len(),
+            report.hotspots.falling.len()
+        );
+    }
+    if !report.communities.moved_nodes.is_empty() {
+        println!(
+            "  Community:   {} moved, {} stable",
+            report.communities.moved_nodes.len(),
+            report.communities.stable_count
+        );
+    }
+    println!("Written to {}", out_dir.display());
+}
+
+fn load_snapshot(path: &Path) -> AnalysisSnapshot {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Cannot read {:?}: {e}", path);
+            std::process::exit(1);
+        }
+    };
+    match serde_json::from_str::<AnalysisSnapshot>(&text) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Invalid analysis JSON {:?}: {e}", path);
+            std::process::exit(1);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
