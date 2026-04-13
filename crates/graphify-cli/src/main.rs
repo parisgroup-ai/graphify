@@ -14,6 +14,7 @@ use graphify_core::{
     types::Language,
 };
 use graphify_extract::{
+    cache::{sha256_hex, CacheStats, ExtractionCache},
     walker::discover_files, ExtractionResult, LanguageExtractor, PythonExtractor,
     TypeScriptExtractor,
 };
@@ -240,13 +241,14 @@ fn main() {
     match cli.command {
         Commands::Init => cmd_init(),
 
-        Commands::Extract { config, output, force: _force } => {
+        Commands::Extract { config, output, force } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             for project in &cfg.project {
-                let (graph, _excludes) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
+                let (graph, _excludes, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
+                print_cache_stats(&project.name, &stats);
                 write_graph_json(&graph, &proj_out.join("graph.json"));
                 println!(
                     "[{}] Extracted {} nodes, {} edges → {}",
@@ -262,15 +264,16 @@ fn main() {
             config,
             output,
             weights,
-            force: _force,
+            force,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
             for project in &cfg.project {
-                let (graph, _) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
+                let (graph, _, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
+                print_cache_stats(&project.name, &stats);
                 let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
@@ -298,7 +301,7 @@ fn main() {
             output,
             weights,
             format,
-            force: _force,
+            force,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
@@ -306,9 +309,10 @@ fn main() {
             let formats = resolve_formats(&cfg, format.as_deref());
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
-                let (graph, _) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
+                let (graph, _, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
+                print_cache_stats(&project.name, &stats);
                 let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
@@ -338,16 +342,17 @@ fn main() {
             }
         }
 
-        Commands::Run { config, output, force: _force } => {
+        Commands::Run { config, output, force } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, None);
             let formats = resolve_formats(&cfg, None);
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
-                let (graph, _) = run_extract(project, &cfg.settings);
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
+                let (graph, _, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
+                print_cache_stats(&project.name, &stats);
                 let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
@@ -716,7 +721,12 @@ fn parse_languages(lang_strs: &[String]) -> Vec<Language> {
 // Extraction pipeline
 // ---------------------------------------------------------------------------
 
-fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<String>) {
+fn run_extract(
+    project: &ProjectConfig,
+    settings: &Settings,
+    cache_dir: Option<&Path>,
+    force: bool,
+) -> (CodeGraph, Vec<String>, CacheStats) {
     let repo_path = PathBuf::from(&project.repo);
     let languages = parse_languages(&project.lang);
     let local_prefix = project.local_prefix.as_deref().unwrap_or("");
@@ -753,6 +763,20 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
         }
     }
 
+    // Load extraction cache (unless --force or no cache dir).
+    let cache = if force || cache_dir.is_none() {
+        ExtractionCache::new(local_prefix)
+    } else {
+        let cache_path = cache_dir.unwrap().join(".graphify-cache.json");
+        ExtractionCache::load(&cache_path, local_prefix)
+            .unwrap_or_else(|| ExtractionCache::new(local_prefix))
+    };
+
+    let mut stats = CacheStats {
+        forced: force,
+        ..Default::default()
+    };
+
     // Build extractors.
     let python_extractor = PythonExtractor::new();
     let typescript_extractor = TypeScriptExtractor::new();
@@ -771,8 +795,10 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
         }
     }
 
-    // Extract each file in parallel via rayon, then collect results.
-    let results: Vec<ExtractionResult> = files
+    let repo_path_ref = &repo_path;
+
+    // Extract each file in parallel: read → hash → cache check → parse on miss.
+    let extraction_with_meta: Vec<(String, String, ExtractionResult, bool)> = files
         .par_iter()
         .filter_map(|file| {
             let source = match std::fs::read(&file.path) {
@@ -783,14 +809,48 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
                 }
             };
 
+            let rel_path = file
+                .path
+                .strip_prefix(repo_path_ref)
+                .unwrap_or(&file.path)
+                .to_string_lossy()
+                .to_string();
+
+            let hash = sha256_hex(&source);
+
+            // Cache hit: reuse previous extraction.
+            if let Some(cached) = cache.lookup(&rel_path, &hash) {
+                return Some((rel_path, hash, cached.clone(), true));
+            }
+
+            // Cache miss: parse with tree-sitter.
             let extractor: &dyn LanguageExtractor = match file.language {
                 Language::Python => &python_extractor,
                 Language::TypeScript => &typescript_extractor,
             };
 
-            Some(extractor.extract_file(&file.path, &source, &file.module_name))
+            let result = extractor.extract_file(&file.path, &source, &file.module_name);
+            Some((rel_path, hash, result, false))
         })
         .collect();
+
+    // Build new cache from extraction results and count stats.
+    let mut new_cache = ExtractionCache::new(local_prefix);
+    let mut results: Vec<ExtractionResult> = Vec::with_capacity(extraction_with_meta.len());
+
+    for (rel_path, hash, result, was_hit) in extraction_with_meta {
+        if was_hit {
+            stats.hits += 1;
+        } else {
+            stats.misses += 1;
+        }
+        new_cache.insert(rel_path, hash, result.clone());
+        results.push(result);
+    }
+
+    // Count evictions: old cache entries whose paths aren't in the current discovered file set.
+    let current_paths: HashSet<String> = new_cache.paths().cloned().collect();
+    stats.evicted = cache.paths().filter(|p| !current_paths.contains(*p)).count();
 
     // Merge results sequentially into graph.
     let mut all_nodes = Vec::new();
@@ -850,7 +910,13 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
         graph.add_edge(&src_id, &resolved_target, edge);
     }
 
-    (graph, extra_owned)
+    // Save updated cache.
+    if let Some(dir) = cache_dir {
+        std::fs::create_dir_all(dir).ok();
+        new_cache.save(&dir.join(".graphify-cache.json"));
+    }
+
+    (graph, extra_owned, stats)
 }
 
 // ---------------------------------------------------------------------------
@@ -887,7 +953,7 @@ fn run_analyze(graph: &CodeGraph, weights: &ScoringWeights) -> AnalysisResult {
 // ---------------------------------------------------------------------------
 
 fn build_query_engine(project: &ProjectConfig, settings: &Settings) -> QueryEngine {
-    let (graph, _) = run_extract(project, settings);
+    let (graph, _, _stats) = run_extract(project, settings, None, false);
     let w = ScoringWeights::default();
     let (mut metrics, communities, _cycles_simple) = run_analyze(&graph, &w);
     assign_community_ids(&mut metrics, &communities);
@@ -1163,6 +1229,21 @@ fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
     }
 
     println!();
+}
+
+// ---------------------------------------------------------------------------
+// Cache stats helper
+// ---------------------------------------------------------------------------
+
+fn print_cache_stats(project_name: &str, stats: &CacheStats) {
+    if stats.forced {
+        eprintln!("[{}] Cache: forced full rebuild", project_name);
+    } else if stats.hits > 0 || stats.evicted > 0 {
+        eprintln!(
+            "[{}] Cache: {} hits, {} misses, {} evicted",
+            project_name, stats.hits, stats.misses, stats.evicted
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
