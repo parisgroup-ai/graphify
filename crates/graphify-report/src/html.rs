@@ -39,6 +39,8 @@ struct HtmlEdgeData {
     target: String,
     kind: String,
     weight: u32,
+    confidence: f64,
+    confidence_kind: String,
 }
 
 #[derive(Serialize)]
@@ -185,6 +187,8 @@ fn build_data(
             target: tgt.to_string(),
             kind: format!("{:?}", e.kind),
             weight: e.weight,
+            confidence: e.confidence,
+            confidence_kind: format!("{:?}", e.confidence_kind),
         })
         .collect();
 
