@@ -369,7 +369,8 @@ fn extract_calls_recursive(
                     result.edges.push((
                         module_name.to_owned(),
                         callee.to_owned(),
-                        Edge::calls(line),
+                        Edge::calls(line)
+                            .with_confidence(0.7, graphify_core::types::ConfidenceKind::Inferred),
                     ));
                 }
             }
@@ -677,6 +678,53 @@ mod tests {
             "obj.method() should be skipped, got {:?}",
             calls
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Extensions
+    // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Confidence
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bare_call_sites_have_inferred_confidence() {
+        use graphify_core::types::ConfidenceKind;
+        let result = extract("createUser(data);\n");
+        let call_edge = result
+            .edges
+            .iter()
+            .find(|(_, t, e)| e.kind == EdgeKind::Calls && t == "createUser")
+            .expect("should have Calls edge to createUser");
+        assert_eq!(call_edge.2.confidence, 0.7);
+        assert_eq!(call_edge.2.confidence_kind, ConfidenceKind::Inferred);
+    }
+
+    #[test]
+    fn import_edges_have_extracted_confidence() {
+        use graphify_core::types::ConfidenceKind;
+        let result = extract("import { api } from '@/lib/api';\n");
+        let import_edge = result
+            .edges
+            .iter()
+            .find(|(_, _, e)| e.kind == EdgeKind::Imports)
+            .expect("should have Imports edge");
+        assert_eq!(import_edge.2.confidence, 1.0);
+        assert_eq!(import_edge.2.confidence_kind, ConfidenceKind::Extracted);
+    }
+
+    #[test]
+    fn defines_edges_have_extracted_confidence() {
+        use graphify_core::types::ConfidenceKind;
+        let result = extract("export function createUser() {}\n");
+        let def_edge = result
+            .edges
+            .iter()
+            .find(|(_, _, e)| e.kind == EdgeKind::Defines)
+            .expect("should have Defines edge");
+        assert_eq!(def_edge.2.confidence, 1.0);
+        assert_eq!(def_edge.2.confidence_kind, ConfidenceKind::Extracted);
     }
 
     // -----------------------------------------------------------------------

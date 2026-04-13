@@ -27,6 +27,8 @@ struct LinkRecord<'a> {
     kind: String,
     weight: u32,
     line: usize,
+    confidence: f64,
+    confidence_kind: String,
 }
 
 #[derive(Serialize)]
@@ -64,6 +66,8 @@ pub fn write_graph_json(graph: &CodeGraph, path: &Path) {
             kind: format!("{:?}", edge.kind),
             weight: edge.weight,
             line: edge.line,
+            confidence: edge.confidence,
+            confidence_kind: format!("{:?}", edge.confidence_kind),
         })
         .collect();
 
@@ -111,11 +115,23 @@ struct Summary {
 }
 
 #[derive(Serialize)]
+struct ConfidenceSummary {
+    extracted_count: usize,
+    extracted_pct: f64,
+    inferred_count: usize,
+    inferred_pct: f64,
+    ambiguous_count: usize,
+    ambiguous_pct: f64,
+    mean_confidence: f64,
+}
+
+#[derive(Serialize)]
 struct AnalysisJson<'a> {
     nodes: Vec<MetricsRecord<'a>>,
     communities: Vec<CommunityRecord<'a>>,
     cycles: &'a [Cycle],
     summary: Summary,
+    confidence_summary: ConfidenceSummary,
 }
 
 /// Writes the analysis results to `path` in JSON format.
@@ -126,7 +142,7 @@ pub fn write_analysis_json(
     metrics: &[NodeMetrics],
     communities: &[Community],
     cycles: &[Cycle],
-    total_edges: usize,
+    graph: &CodeGraph,
     path: &Path,
 ) {
     let nodes: Vec<MetricsRecord<'_>> = metrics
@@ -166,10 +182,49 @@ pub fn write_analysis_json(
 
     let summary = Summary {
         total_nodes: metrics.len(),
-        total_edges,
+        total_edges: graph.edge_count(),
         total_communities: communities.len(),
         total_cycles: cycles.len(),
         top_hotspots,
+    };
+
+    // Compute confidence summary from graph edges.
+    let all_edges = graph.edges();
+    let total_edge_count = all_edges.len();
+    let mut extracted = 0usize;
+    let mut inferred = 0usize;
+    let mut ambiguous = 0usize;
+    let mut confidence_sum = 0.0f64;
+
+    for (_, _, edge) in &all_edges {
+        match edge.confidence_kind {
+            graphify_core::types::ConfidenceKind::Extracted => extracted += 1,
+            graphify_core::types::ConfidenceKind::Inferred => inferred += 1,
+            graphify_core::types::ConfidenceKind::Ambiguous => ambiguous += 1,
+        }
+        confidence_sum += edge.confidence;
+    }
+
+    let pct = |count: usize| -> f64 {
+        if total_edge_count > 0 {
+            (count as f64 / total_edge_count as f64) * 100.0
+        } else {
+            0.0
+        }
+    };
+
+    let confidence_summary = ConfidenceSummary {
+        extracted_count: extracted,
+        extracted_pct: pct(extracted),
+        inferred_count: inferred,
+        inferred_pct: pct(inferred),
+        ambiguous_count: ambiguous,
+        ambiguous_pct: pct(ambiguous),
+        mean_confidence: if total_edge_count > 0 {
+            confidence_sum / total_edge_count as f64
+        } else {
+            0.0
+        },
     };
 
     let payload = AnalysisJson {
@@ -177,6 +232,7 @@ pub fn write_analysis_json(
         communities: communities_rec,
         cycles,
         summary,
+        confidence_summary,
     };
 
     let json = serde_json::to_string_pretty(&payload).expect("serialize analysis JSON");
@@ -261,6 +317,7 @@ mod tests {
     fn write_analysis_json_summary_fields() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("analysis.json");
+        let graph = make_graph();
         let metrics = make_metrics();
         let communities = vec![Community {
             id: 0,
@@ -268,7 +325,7 @@ mod tests {
         }];
         let cycles: Vec<Cycle> = vec![vec!["app.main".to_string(), "app.utils".to_string()]];
 
-        write_analysis_json(&metrics, &communities, &cycles, 42, &path);
+        write_analysis_json(&metrics, &communities, &cycles, &graph, &path);
 
         assert!(path.exists(), "analysis.json should be created");
         let content = std::fs::read_to_string(&path).unwrap();
@@ -277,5 +334,51 @@ mod tests {
         assert_eq!(value["summary"]["total_communities"], 1);
         assert_eq!(value["summary"]["total_cycles"], 1);
         assert!(value["summary"]["top_hotspots"].as_array().unwrap().len() > 0);
+    }
+
+    #[test]
+    fn write_graph_json_includes_confidence_fields() {
+        use graphify_core::types::ConfidenceKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graph.json");
+
+        let mut g = CodeGraph::new();
+        g.add_node(Node::module("a", "a.py", Language::Python, 1, true));
+        g.add_node(Node::module("b", "b.py", Language::Python, 1, true));
+        g.add_edge(
+            "a",
+            "b",
+            Edge::imports(3).with_confidence(0.85, ConfidenceKind::Inferred),
+        );
+
+        write_graph_json(&g, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let link = &value["links"][0];
+        assert_eq!(link["confidence"], 0.85);
+        assert_eq!(link["confidence_kind"], "Inferred");
+    }
+
+    #[test]
+    fn write_analysis_json_includes_confidence_summary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let graph = make_graph();
+        let metrics = make_metrics();
+        let communities = vec![Community {
+            id: 0,
+            members: vec!["app.main".to_string(), "app.utils".to_string()],
+        }];
+        let cycles: Vec<Cycle> = vec![];
+
+        write_analysis_json(&metrics, &communities, &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(value["confidence_summary"].is_object());
+        assert!(value["confidence_summary"]["extracted_count"].is_number());
+        assert!(value["confidence_summary"]["mean_confidence"].is_number());
     }
 }

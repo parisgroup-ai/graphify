@@ -300,9 +300,12 @@ fn extract_calls_recursive(
                 let callee = func_child.utf8_text(source).unwrap_or("").to_owned();
                 if !callee.is_empty() {
                     let line = node.start_position().row + 1;
-                    result
-                        .edges
-                        .push((module_name.to_owned(), callee, Edge::calls(line)));
+                    result.edges.push((
+                        module_name.to_owned(),
+                        callee,
+                        Edge::calls(line)
+                            .with_confidence(0.7, graphify_core::types::ConfidenceKind::Inferred),
+                    ));
                 }
             }
             // If func_child.kind() == "attribute", it's a method call — skip.
@@ -563,6 +566,53 @@ mod tests {
             call_targets.contains(&"configure"),
             "expected Calls edge to 'configure'"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Extensions
+    // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Confidence
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bare_call_sites_have_inferred_confidence() {
+        use graphify_core::types::ConfidenceKind;
+        let result = extract("def foo():\n    bar()\n");
+        let call_edge = result
+            .edges
+            .iter()
+            .find(|(_, t, e)| e.kind == EdgeKind::Calls && t == "bar")
+            .expect("should have Calls edge to bar");
+        assert_eq!(call_edge.2.confidence, 0.7);
+        assert_eq!(call_edge.2.confidence_kind, ConfidenceKind::Inferred);
+    }
+
+    #[test]
+    fn import_edges_have_extracted_confidence() {
+        use graphify_core::types::ConfidenceKind;
+        let result = extract("import os\n");
+        let import_edge = result
+            .edges
+            .iter()
+            .find(|(_, _, e)| e.kind == EdgeKind::Imports)
+            .expect("should have Imports edge");
+        assert_eq!(import_edge.2.confidence, 1.0);
+        assert_eq!(import_edge.2.confidence_kind, ConfidenceKind::Extracted);
+    }
+
+    #[test]
+    fn defines_edges_have_extracted_confidence() {
+        use graphify_core::types::ConfidenceKind;
+        let result = extract("def my_func():\n    pass\n");
+        let def_edge = result
+            .edges
+            .iter()
+            .find(|(_, _, e)| e.kind == EdgeKind::Defines)
+            .expect("should have Defines edge");
+        assert_eq!(def_edge.2.confidence, 1.0);
+        assert_eq!(def_edge.2.confidence_kind, ConfidenceKind::Extracted);
     }
 
     // -----------------------------------------------------------------------
