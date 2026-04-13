@@ -86,6 +86,8 @@ pub struct SearchParams {
     pub sort: Option<String>,
     /// Only return local (in-project) nodes.
     pub local_only: Option<bool>,
+    /// Minimum confidence threshold for edge filtering (0.0-1.0).
+    pub min_confidence: Option<f64>,
     /// Project name. Uses the default project if omitted.
     pub project: Option<String>,
 }
@@ -233,7 +235,7 @@ impl GraphifyServer {
                     kind: params.kind.as_deref().and_then(parse_node_kind),
                     sort_by: sort_field,
                     local_only: params.local_only.unwrap_or(false),
-                    min_confidence: None,
+                    min_confidence: params.min_confidence,
                 };
                 let results = engine.search(&params.pattern, &filters);
                 Ok(CallToolResult::success(vec![Content::text(to_json(
