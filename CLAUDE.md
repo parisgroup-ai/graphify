@@ -100,7 +100,7 @@ For each [[project]]:
 
 | File | Role |
 |---|---|
-| `crates/graphify-core/src/types.rs` | Node, Edge, Language, NodeKind, EdgeKind |
+| `crates/graphify-core/src/types.rs` | Node, Edge, Language, NodeKind, EdgeKind, ConfidenceKind |
 | `crates/graphify-core/src/graph.rs` | CodeGraph — petgraph wrapper with dedup + weight increment |
 | `crates/graphify-core/src/metrics.rs` | Betweenness, PageRank, unified scoring |
 | `crates/graphify-core/src/community.rs` | Louvain + Label Propagation |
@@ -141,7 +141,12 @@ For each [[project]]:
 - MCP server config is duplicated from CLI (small, stable structs — extract if a third consumer appears)
 - MCP extraction is eager on startup; all diagnostic output on stderr (stdout reserved for JSON-RPC)
 - MCP server wraps `QueryEngine` in `Arc` (ServerHandler requires Clone)
-- Tests: 196 unit + integration tests (`cargo test --workspace`)
+- Edge confidence: `confidence: f64` (0.0–1.0) + `confidence_kind: ConfidenceKind` (Extracted/Inferred/Ambiguous)
+- Bare call sites: confidence 0.7/Inferred (unqualified callee)
+- Resolver confidence: direct=1.0, Python relative=0.9, TS alias=0.85, TS relative=0.9
+- Non-local edge downgrade: min(confidence, 0.5) → Ambiguous
+- Edge merge keeps max confidence of all observations
+- Tests: 220 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
@@ -167,6 +172,8 @@ git push origin main --tags            # triggers CI release
 - **Spec**: `docs/superpowers/specs/2026-04-12-graphify-rust-rewrite-design.md`
 - **Plan**: `docs/superpowers/plans/2026-04-12-graphify-rust-rewrite.md`
 - **BUG-001 design**: `docs/plans/2026-04-12-bug-001-python-relative-import-design.md`
+- **FEAT-008 spec**: `docs/superpowers/specs/2026-04-12-feat-008-confidence-scoring-design.md`
+- **FEAT-008 plan**: `docs/superpowers/plans/2026-04-12-feat-008-confidence-scoring.md`
 
 ## Task tracking
 

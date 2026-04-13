@@ -1,6 +1,7 @@
 use std::fmt::Write as FmtWrite;
 use std::path::Path;
 
+use graphify_core::graph::CodeGraph;
 use graphify_core::metrics::NodeMetrics;
 
 use crate::{Community, Cycle};
@@ -9,7 +10,7 @@ use crate::{Community, Cycle};
 ///
 /// Sections:
 /// - Title
-/// - Summary (node count, community count, circular dep count)
+/// - Summary (node count, community count, circular dep count, confidence breakdown)
 /// - Top Hotspots table (top 20 by score)
 /// - Communities
 /// - Circular Dependencies (omitted when `cycles` is empty)
@@ -21,6 +22,7 @@ pub fn write_report(
     metrics: &[NodeMetrics],
     communities: &[Community],
     cycles: &[Cycle],
+    graph: &CodeGraph,
     path: &Path,
 ) {
     let mut buf = String::new();
@@ -37,6 +39,42 @@ pub fn write_report(
     writeln!(buf, "| Total nodes | {} |", metrics.len()).unwrap();
     writeln!(buf, "| Communities | {} |", communities.len()).unwrap();
     writeln!(buf, "| Circular dependencies | {} |", cycles.len()).unwrap();
+
+    // Confidence breakdown
+    let all_edges = graph.edges();
+    let total = all_edges.len();
+    if total > 0 {
+        let extracted = all_edges
+            .iter()
+            .filter(|(_, _, e)| {
+                matches!(
+                    e.confidence_kind,
+                    graphify_core::types::ConfidenceKind::Extracted
+                )
+            })
+            .count();
+        let inferred = all_edges
+            .iter()
+            .filter(|(_, _, e)| {
+                matches!(
+                    e.confidence_kind,
+                    graphify_core::types::ConfidenceKind::Inferred
+                )
+            })
+            .count();
+        let ambiguous = total - extracted - inferred;
+        let mean: f64 = all_edges.iter().map(|(_, _, e)| e.confidence).sum::<f64>() / total as f64;
+        writeln!(
+            buf,
+            "| Confidence | {:.1}% extracted, {:.1}% inferred, {:.1}% ambiguous (mean: {:.2}) |",
+            extracted as f64 / total as f64 * 100.0,
+            inferred as f64 / total as f64 * 100.0,
+            ambiguous as f64 / total as f64 * 100.0,
+            mean,
+        )
+        .unwrap();
+    }
+
     writeln!(buf).unwrap();
 
     // Top Hotspots table
@@ -110,6 +148,7 @@ pub fn write_report(
 mod tests {
     use super::*;
     use graphify_core::metrics::NodeMetrics;
+    use graphify_core::types::{Edge, Language, Node};
 
     fn make_metrics() -> Vec<NodeMetrics> {
         vec![
@@ -143,6 +182,26 @@ mod tests {
         }]
     }
 
+    fn make_graph() -> CodeGraph {
+        let mut g = CodeGraph::new();
+        g.add_node(Node::module(
+            "app.main",
+            "app/main.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        g.add_node(Node::module(
+            "app.utils",
+            "app/utils.py",
+            Language::Python,
+            1,
+            true,
+        ));
+        g.add_edge("app.main", "app.utils", Edge::imports(3));
+        g
+    }
+
     #[test]
     fn write_report_contains_title_and_hotspots() {
         let dir = tempfile::tempdir().unwrap();
@@ -150,8 +209,9 @@ mod tests {
         let metrics = make_metrics();
         let communities = make_communities();
         let cycles: Vec<Cycle> = vec![vec!["app.main".to_string(), "app.utils".to_string()]];
+        let graph = make_graph();
 
-        write_report("my-project", &metrics, &communities, &cycles, &path);
+        write_report("my-project", &metrics, &communities, &cycles, &graph, &path);
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("# Architecture Report: my-project"));
@@ -167,10 +227,40 @@ mod tests {
         let metrics = make_metrics();
         let communities = make_communities();
         let cycles: Vec<Cycle> = vec![];
+        let graph = make_graph();
 
-        write_report("my-project", &metrics, &communities, &cycles, &path);
+        write_report("my-project", &metrics, &communities, &cycles, &graph, &path);
 
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(!content.contains("## Circular Dependencies"));
+    }
+
+    #[test]
+    fn write_report_confidence_breakdown() {
+        use graphify_core::types::ConfidenceKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report_conf.md");
+        let metrics = make_metrics();
+        let communities = make_communities();
+        let cycles: Vec<Cycle> = vec![];
+
+        let mut graph = CodeGraph::new();
+        graph.add_node(Node::module("a", "a.py", Language::Python, 1, true));
+        graph.add_node(Node::module("b", "b.py", Language::Python, 1, true));
+        graph.add_node(Node::module("c", "c.py", Language::Python, 1, true));
+        graph.add_edge("a", "b", Edge::imports(1));
+        graph.add_edge(
+            "a",
+            "c",
+            Edge::imports(2).with_confidence(0.7, ConfidenceKind::Inferred),
+        );
+
+        write_report("test", &metrics, &communities, &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("Confidence"));
+        assert!(content.contains("extracted"));
+        assert!(content.contains("inferred"));
     }
 }

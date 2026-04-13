@@ -577,7 +577,10 @@ mod tests {
         assert_eq!(g.edge_count(), 1, "should merge into single edge");
 
         let edges = g.edges();
-        let (_, _, edge) = edges.iter().find(|(s, t, _)| *s == "a" && *t == "b").unwrap();
+        let (_, _, edge) = edges
+            .iter()
+            .find(|(s, t, _)| *s == "a" && *t == "b")
+            .unwrap();
         assert_eq!(edge.weight, 2);
         assert_eq!(edge.confidence, 0.9);
         assert_eq!(edge.confidence_kind, ConfidenceKind::Inferred);
@@ -599,7 +602,10 @@ mod tests {
         );
 
         let edges = g.edges();
-        let (_, _, edge) = edges.iter().find(|(s, t, _)| *s == "x" && *t == "y").unwrap();
+        let (_, _, edge) = edges
+            .iter()
+            .find(|(s, t, _)| *s == "x" && *t == "y")
+            .unwrap();
         assert_eq!(edge.weight, 2);
         assert_eq!(edge.confidence, 1.0);
         assert_eq!(edge.confidence_kind, ConfidenceKind::Extracted);

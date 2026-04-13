@@ -71,14 +71,22 @@ pub fn write_nodes_csv(metrics: &[NodeMetrics], graph: &CodeGraph, path: &Path) 
 
 /// Writes graph edges to a CSV file.
 ///
-/// Header: `source,target,kind,weight,line`
+/// Header: `source,target,kind,weight,line,confidence,confidence_kind`
 ///
 /// # Panics
 /// Panics if file I/O or CSV serialization fails.
 pub fn write_edges_csv(graph: &CodeGraph, path: &Path) {
     let mut wtr = csv::Writer::from_path(path).expect("open edges CSV for writing");
-    wtr.write_record(["source", "target", "kind", "weight", "line"])
-        .expect("write edges CSV header");
+    wtr.write_record([
+        "source",
+        "target",
+        "kind",
+        "weight",
+        "line",
+        "confidence",
+        "confidence_kind",
+    ])
+    .expect("write edges CSV header");
 
     for (src, tgt, edge) in graph.edges() {
         wtr.write_record([
@@ -87,6 +95,8 @@ pub fn write_edges_csv(graph: &CodeGraph, path: &Path) {
             &format!("{:?}", edge.kind),
             &edge.weight.to_string(),
             &edge.line.to_string(),
+            &format!("{:.2}", edge.confidence),
+            &format!("{:?}", edge.confidence_kind),
         ])
         .expect("write edges CSV row");
     }
@@ -172,10 +182,41 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
 
-        assert_eq!(lines[0], "source,target,kind,weight,line");
+        assert_eq!(
+            lines[0],
+            "source,target,kind,weight,line,confidence,confidence_kind"
+        );
         assert!(lines.len() >= 2, "should have at least one edge row");
         // The edge is app.main → app.utils, Imports kind
         assert!(lines[1].contains("app.main") || lines[1].contains("app.utils"));
         assert!(lines[1].contains("Imports"));
+    }
+
+    #[test]
+    fn write_edges_csv_includes_confidence_columns() {
+        use graphify_core::types::ConfidenceKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("edges.csv");
+
+        let mut g = CodeGraph::new();
+        g.add_node(Node::module("a", "a.py", Language::Python, 1, true));
+        g.add_node(Node::module("b", "b.py", Language::Python, 1, true));
+        g.add_edge(
+            "a",
+            "b",
+            Edge::imports(3).with_confidence(0.85, ConfidenceKind::Inferred),
+        );
+
+        write_edges_csv(&g, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            lines[0],
+            "source,target,kind,weight,line,confidence,confidence_kind"
+        );
+        assert!(lines[1].contains("0.85"));
+        assert!(lines[1].contains("Inferred"));
     }
 }

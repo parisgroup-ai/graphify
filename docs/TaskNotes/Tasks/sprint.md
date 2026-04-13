@@ -30,7 +30,7 @@ updated: 2026-04-12
 | FEAT-005 | **open** | high     | 16h    | Incremental builds with SHA256 cache                 |
 | FEAT-006 | **done** | high     | 16h    | Graph query interface (query, path, explain)         |
 | FEAT-007 | **done** | normal   | 16h    | MCP server for graph queries                         |
-| FEAT-008 | **open** | normal   | 8h     | Edge confidence scoring                              |
+| FEAT-008 | **done** | normal   | 8h     | Edge confidence scoring                              |
 | FEAT-009 | **open** | low      | 12h    | Additional export formats (Neo4j, GraphML, Obsidian) |
 | FEAT-010 | **open** | low      | 8h     | Watch mode for auto-rebuild                          |
 
@@ -43,3 +43,4 @@ updated: 2026-04-12
 - [[BUG-005-csv-nodes-missing-columns]] - Already implemented: CSV includes kind, file_path, language (confirmed 2026-04-12)
 - [[FEAT-001-interactive-html-visualization]] - Implemented: self-contained HTML with D3.js force graph, SVG/Canvas auto-switch, full explorer (2026-04-12)
 - [[FEAT-007-mcp-server]] - Implemented: MCP server (rmcp over stdio) with 9 tools, per-project support, 15 tests (2026-04-12)
+- [[FEAT-008-confidence-scoring]] - Implemented: ConfidenceKind enum (Extracted/Inferred/Ambiguous), confidence scoring on edges, resolver confidence, pipeline downgrade, all report outputs, query filtering, MCP integration, 24 new tests (2026-04-12)

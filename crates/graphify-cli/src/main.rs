@@ -826,10 +826,7 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> (CodeGraph, Vec<
         // Step 3: Downgrade edges to non-local targets.
         if !is_local {
             let capped = edge.confidence.min(0.5);
-            edge = edge.with_confidence(
-                capped,
-                graphify_core::types::ConfidenceKind::Ambiguous,
-            );
+            edge = edge.with_confidence(capped, graphify_core::types::ConfidenceKind::Ambiguous);
         }
 
         graph.add_edge(&src_id, &resolved_target, edge);
