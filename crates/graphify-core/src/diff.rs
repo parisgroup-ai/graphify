@@ -66,7 +66,7 @@ pub struct SummaryDelta {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct Delta<T: Serialize> {
+pub struct Delta<T> {
     pub before: T,
     pub after: T,
     pub change: i64,
@@ -377,7 +377,9 @@ fn compute_community_diff(
                 .iter()
                 .filter(|m| after_set.contains(*m))
                 .count();
-            if overlap > best_overlap {
+            if overlap > best_overlap
+                || (overlap == best_overlap && before_id == after_id)
+            {
                 best_overlap = overlap;
                 best_id = before_id;
             }
