@@ -88,6 +88,7 @@ Policy selectors support:
 | `graphify diff` | Detect architectural drift between snapshots |
 | `graphify trend` | Aggregate historical trends from stored snapshots |
 | `graphify check` | Validate CI quality gates and declarative policy rules |
+| `graphify pr-summary` | Render a PR-ready Markdown summary of architectural change |
 | `graphify watch` | Auto-rebuild on file changes (300ms debounce) |
 | `graphify shell` | Interactive graph exploration REPL |
 
@@ -120,6 +121,7 @@ Each project produces a subdirectory under the configured output path:
 | `obsidian_vault/` | Markdown | Obsidian vault with one `.md` per node and `[[wikilinks]]` |
 | `drift-report.json` | JSON | Drift detection results (via `graphify diff`) |
 | `drift-report.md` | Markdown | Drift detection report |
+| `check-report.json` | JSON | Unified check result (rules + contract drift); written by `graphify check` |
 | `history/*.json` | JSON | Per-run historical snapshots used by `graphify trend` |
 | `trend-report.json` | JSON | Aggregated trend report across stored snapshots |
 | `trend-report.md` | Markdown | Human-readable architecture trend report |
@@ -258,6 +260,21 @@ except_from = ["group:app", "group:bootstrap"]
 ```
 
 `graphify check --json` now returns both limit violations and policy violations. Policy entries include `type = "policy"`, `rule`, `source_node`, `target_node`, `source_project`, and `target_project`.
+
+### Render a PR summary for GitHub Actions
+
+After `graphify run` + `graphify diff` + `graphify check` populate the project output directory, append a concise Markdown summary to the GitHub Actions job summary:
+
+```yaml
+- run: graphify run --config graphify.toml
+- run: graphify diff --baseline ./baseline/analysis.json --config graphify.toml --project my-app
+- run: graphify check --config graphify.toml || true
+- run: graphify pr-summary ./report/my-app >> "$GITHUB_STEP_SUMMARY"
+```
+
+`graphify pr-summary <DIR>` is a pure renderer: it reads existing JSON artifacts (`analysis.json` required; `drift-report.json` and `check-report.json` optional) and prints Markdown to stdout. Exit code is 0 regardless of findings — gate with `graphify check` separately if you want CI to fail on violations.
+
+Output is optimized for solo-dev + AI-authored PR review: each finding carries an inline `graphify explain` / `graphify path` hint so the next investigation step is one copy-paste away.
 
 ## MCP Server
 
