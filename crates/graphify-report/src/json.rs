@@ -309,8 +309,8 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         let value: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert_eq!(value["directed"], true);
-        assert!(value["nodes"].as_array().unwrap().len() > 0);
-        assert!(value["links"].as_array().unwrap().len() > 0);
+        assert!(!value["nodes"].as_array().unwrap().is_empty());
+        assert!(!value["links"].as_array().unwrap().is_empty());
     }
 
     #[test]
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(value["summary"]["total_nodes"], 2);
         assert_eq!(value["summary"]["total_communities"], 1);
         assert_eq!(value["summary"]["total_cycles"], 1);
-        assert!(value["summary"]["top_hotspots"].as_array().unwrap().len() > 0);
+        assert!(!value["summary"]["top_hotspots"].as_array().unwrap().is_empty());
     }
 
     #[test]
