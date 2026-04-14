@@ -22,7 +22,7 @@ The command is a **pure renderer** over existing JSON artifacts. It does not re-
 - Input: a single project's Graphify output directory
 - Reads `analysis.json` (required) plus `drift-report.json` and `check-report.json` (each optional)
 - Output: Markdown to stdout; warnings to stderr
-- Exit 0 on successful render (regardless of findings); exit 2 on usage or required-input errors
+- Exit 0 on successful render (regardless of findings); exit 1 on usage or required-input errors (chosen to match existing `cmd_diff`/`cmd_trend` convention throughout the CLI; deviates from the Unix "exit 2 for usage" norm but keeps graphify's CLI exit codes uniform)
 - Graceful degradation when optional inputs are missing or malformed
 - Fixed section order, fixed row caps (no configurability in v1)
 - Inline next-step CLI commands next to each finding (investigation shortcuts)
@@ -242,10 +242,10 @@ This matches how `graphify run` writes project output today.
 
 | Input state | Behavior | Exit |
 |---|---|---|
-| `<DIR>` does not exist | stderr: `graphify pr-summary: directory '<dir>' not found` | 2 |
-| `<DIR>/analysis.json` missing | stderr: `graphify pr-summary: missing analysis.json in '<dir>' (run 'graphify run' first)` | 2 |
-| `<DIR>/analysis.json` malformed | stderr: `graphify pr-summary: failed to parse analysis.json: <reason>` | 2 |
-| `<DIR>` is a multi-project root | stderr: `graphify pr-summary: '<dir>' is a multi-project output root — point at a single project subdirectory` | 2 |
+| `<DIR>` does not exist | stderr: `graphify pr-summary: directory '<dir>' not found` | 1 |
+| `<DIR>/analysis.json` missing | stderr: `graphify pr-summary: missing analysis.json in '<dir>' (run 'graphify run' first)` | 1 |
+| `<DIR>/analysis.json` malformed | stderr: `graphify pr-summary: failed to parse analysis.json: <reason>` | 1 |
+| `<DIR>` is a multi-project root | stderr: `graphify pr-summary: '<dir>' is a multi-project output root — point at a single project subdirectory` | 1 |
 | `drift-report.json` missing | Render header + stats line + hint line to run `graphify diff` | 0 |
 | `drift-report.json` present, all deltas empty | Render header + stats line + `_No architectural changes vs baseline._` | 0 |
 | `drift-report.json` malformed | stderr warning `(warning: failed to parse drift-report.json, skipping section)`; render as if missing | 0 |
