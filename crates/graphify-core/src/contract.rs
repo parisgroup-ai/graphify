@@ -321,12 +321,15 @@ pub fn compare_contracts(
     let mut violations = Vec::new();
 
     for (key, orm_field) in &orm_fields {
-        if !ts_fields.contains_key(key) {
-            violations.push(ContractViolation::ContractFieldMissingOnTs {
+        match ts_fields.get(key) {
+            None => violations.push(ContractViolation::ContractFieldMissingOnTs {
                 field: key.clone(),
                 orm_type: orm_field.type_ref.clone(),
                 orm_line: orm_field.line,
-            });
+            }),
+            Some(ts_field) => {
+                compare_shared_field(key, orm_field, ts_field, global, &mut violations);
+            }
         }
     }
     for (key, ts_field) in &ts_fields {
@@ -342,6 +345,79 @@ pub fn compare_contracts(
     ContractComparison {
         pair_name: orm.name.clone(),
         violations,
+    }
+}
+
+fn compare_shared_field(
+    key: &str,
+    orm: &Field,
+    ts: &Field,
+    global: &GlobalContractConfig,
+    out: &mut Vec<ContractViolation>,
+) {
+    if orm.nullable != ts.nullable {
+        out.push(ContractViolation::ContractNullabilityMismatch {
+            field: key.to_string(),
+            orm_nullable: orm.nullable,
+            ts_nullable: ts.nullable,
+            orm_line: orm.line,
+            ts_line: ts.line,
+        });
+    }
+
+    // Type check: apply type map overrides to ORM side if it's a Named/Unmapped token.
+    let orm_resolved = resolve_orm_type(&orm.type_ref, global);
+
+    match &orm_resolved {
+        FieldType::Unmapped { value } => {
+            out.push(ContractViolation::ContractUnmappedOrmType {
+                field: key.to_string(),
+                raw_type: value.clone(),
+                orm_line: orm.line,
+            });
+            // Skip type comparison for unmapped types.
+        }
+        _ => {
+            if !types_match(&orm_resolved, &ts.type_ref) {
+                out.push(ContractViolation::ContractTypeMismatch {
+                    field: key.to_string(),
+                    orm: orm_resolved,
+                    ts: ts.type_ref.clone(),
+                    orm_line: orm.line,
+                    ts_line: ts.line,
+                });
+            }
+        }
+    }
+}
+
+fn resolve_orm_type(ty: &FieldType, global: &GlobalContractConfig) -> FieldType {
+    match ty {
+        FieldType::Unmapped { value } => {
+            if let Some(override_ty) = global.type_map_overrides.get(value) {
+                override_ty.clone()
+            } else {
+                ty.clone()
+            }
+        }
+        _ => ty.clone(),
+    }
+}
+
+fn types_match(a: &FieldType, b: &FieldType) -> bool {
+    use FieldType::*;
+    match (a, b) {
+        (Primitive { value: PrimitiveType::Unknown }, _) => true,
+        (_, Primitive { value: PrimitiveType::Unknown }) => true,
+        (Primitive { value: x }, Primitive { value: y }) => x == y,
+        (Named { value: x }, Named { value: y }) => x == y,
+        (Array { value: x }, Array { value: y }) => types_match(x, y),
+        (Union { value: xs }, Union { value: ys }) => {
+            xs.len() == ys.len()
+                && xs.iter().zip(ys.iter()).all(|(p, q)| types_match(p, q))
+        }
+        (Unmapped { value: x }, Unmapped { value: y }) => x == y,
+        _ => false,
     }
 }
 
@@ -539,6 +615,76 @@ mod tests {
             ..PairConfig::default()
         };
         let cmp = compare_contracts(&orm, &ts, &pair, &GlobalContractConfig::default());
+        assert_eq!(cmp.violations, vec![]);
+    }
+
+    #[test]
+    fn per_field_reports_nullability_mismatch() {
+        let orm = ContractBuilder::orm("user")
+            .primitive("age", PrimitiveType::Number, false)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .primitive("age", PrimitiveType::Number, true)
+            .build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp.violations.len(), 1);
+        assert!(matches!(
+            cmp.violations[0],
+            ContractViolation::ContractNullabilityMismatch { orm_nullable: false, ts_nullable: true, .. }
+        ));
+    }
+
+    #[test]
+    fn per_field_reports_type_mismatch() {
+        let orm = ContractBuilder::orm("user")
+            .primitive("age", PrimitiveType::Number, false)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .primitive("age", PrimitiveType::String, false)
+            .build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp.violations.len(), 1);
+        assert!(matches!(cmp.violations[0], ContractViolation::ContractTypeMismatch { .. }));
+    }
+
+    #[test]
+    fn per_field_type_match_named_vs_named() {
+        let orm = ContractBuilder::orm("user")
+            .named("metadata", "UserMetadata", true)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .named("metadata", "UserMetadata", true)
+            .build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp.violations, vec![]);
+    }
+
+    #[test]
+    fn per_field_unmapped_orm_type_emits_warning_variant() {
+        let orm = ContractBuilder::orm("post")
+            .unmapped("tags", "tsvector")
+            .build();
+        let ts = ContractBuilder::ts("post")
+            .named("tags", "TsVector", true)
+            .build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp.violations.len(), 1);
+        assert!(matches!(cmp.violations[0], ContractViolation::ContractUnmappedOrmType { .. }));
+        assert_eq!(
+            cmp.violations[0].severity(GlobalContractConfig::default().unmapped_type_severity),
+            Severity::Warning
+        );
+    }
+
+    #[test]
+    fn per_field_unknown_primitive_matches_anything() {
+        let orm = ContractBuilder::orm("blob")
+            .primitive("payload", PrimitiveType::Unknown, true)
+            .build();
+        let ts = ContractBuilder::ts("blob")
+            .named("payload", "Record<string, unknown>", true)
+            .build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
         assert_eq!(cmp.violations, vec![]);
     }
 }
