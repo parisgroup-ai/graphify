@@ -1,3 +1,4 @@
+pub mod check_report;
 pub mod contract_json;
 pub mod contract_markdown;
 pub mod csv;
@@ -13,6 +14,10 @@ pub mod trend_json;
 pub mod trend_markdown;
 
 // Re-export the main write functions for convenience.
+pub use check_report::{
+    CheckLimits, CheckReport, CheckViolation, PolicyCheckSummary, ProjectCheckResult,
+    ProjectCheckSummary,
+};
 pub use contract_json::{
     build_contract_check_result, ContractCheckResult, ContractPairResult, ContractSideInfo,
     ViolationEntry,
