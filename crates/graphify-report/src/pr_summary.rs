@@ -76,7 +76,52 @@ fn render_drift_section(out: &mut String, drift: Option<&DiffReport>) {
     }
 
     render_cycle_rows(out, drift);
-    // Hotspot rows and community rows arrive in Tasks 8 and 9.
+    render_hotspot_rows(out, drift);
+    // Community rows arrive in Task 9.
+}
+
+fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
+    const MAX_ROWS: usize = 5;
+
+    if !drift.hotspots.rising.is_empty() {
+        out.push_str(&format!(
+            "- **Escalated hotspots ({})**\n",
+            drift.hotspots.rising.len()
+        ));
+        for change in drift.hotspots.rising.iter().take(MAX_ROWS) {
+            out.push_str(&format!(
+                "  - `{}` ({:.2} → {:.2})  `→ graphify explain {}`\n",
+                change.id, change.before, change.after, change.id
+            ));
+        }
+        if drift.hotspots.rising.len() > MAX_ROWS {
+            let extra = drift.hotspots.rising.len() - MAX_ROWS;
+            out.push_str(&format!(
+                "  _…and {} more (see drift-report.md)_\n",
+                extra
+            ));
+        }
+    }
+
+    if !drift.hotspots.new_hotspots.is_empty() {
+        out.push_str(&format!(
+            "- **New hotspots ({})**\n",
+            drift.hotspots.new_hotspots.len()
+        ));
+        for change in drift.hotspots.new_hotspots.iter().take(MAX_ROWS) {
+            out.push_str(&format!(
+                "  - `{}` (score {:.2})  `→ graphify explain {}`\n",
+                change.id, change.after, change.id
+            ));
+        }
+        if drift.hotspots.new_hotspots.len() > MAX_ROWS {
+            let extra = drift.hotspots.new_hotspots.len() - MAX_ROWS;
+            out.push_str(&format!(
+                "  _…and {} more (see drift-report.md)_\n",
+                extra
+            ));
+        }
+    }
 }
 
 fn render_cycle_rows(out: &mut String, drift: &DiffReport) {
@@ -257,5 +302,76 @@ mod tests {
         let out = render("my-app", &a, Some(&d), None);
         assert!(!out.contains("**New cycle**"));
         assert!(!out.contains("**Broken cycle**"));
+    }
+
+    fn drift_with_hotspots(rising: Vec<(&str, f64, f64)>, new_hotspots: Vec<(&str, f64)>) -> DiffReport {
+        use graphify_core::diff::{CommunityDiff, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, ScoreChange, SummaryDelta};
+        DiffReport {
+            summary_delta: SummaryDelta {
+                nodes: Delta { before: 0, after: 0, change: 0 },
+                edges: Delta { before: 0, after: 0, change: 0 },
+                communities: Delta { before: 0, after: 0, change: 0 },
+                cycles: Delta { before: 0, after: 0, change: 0 },
+            },
+            edges: EdgeDiff { added_nodes: vec![], removed_nodes: vec![], degree_changes: vec![] },
+            cycles: CycleDiff { introduced: vec![], resolved: vec![] },
+            hotspots: HotspotDiff {
+                rising: rising.into_iter().map(|(id, before, after)| ScoreChange {
+                    id: id.into(), before, after, delta: after - before,
+                }).collect(),
+                falling: vec![],
+                new_hotspots: new_hotspots.into_iter().map(|(id, after)| ScoreChange {
+                    id: id.into(), before: 0.0, after, delta: after,
+                }).collect(),
+                removed_hotspots: vec![],
+            },
+            communities: CommunityDiff { moved_nodes: vec![], stable_count: 0 },
+        }
+    }
+
+    #[test]
+    fn renders_escalated_hotspots_with_explain_hint() {
+        let a = minimal_analysis();
+        let d = drift_with_hotspots(
+            vec![("app.services.auth", 0.71, 0.83), ("app.api.routes", 0.48, 0.52)],
+            vec![],
+        );
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("**Escalated hotspots (2)**"));
+        assert!(out.contains("`app.services.auth`"));
+        assert!(out.contains("0.71"));
+        assert!(out.contains("0.83"));
+        assert!(out.contains("`→ graphify explain app.services.auth`"));
+        assert!(out.contains("`app.api.routes`"));
+    }
+
+    #[test]
+    fn renders_new_hotspots_with_explain_hint() {
+        let a = minimal_analysis();
+        let d = drift_with_hotspots(
+            vec![],
+            vec![("app.core.new_mod", 0.66)],
+        );
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("**New hotspots (1)**"));
+        assert!(out.contains("`app.core.new_mod`"));
+        assert!(out.contains("score 0.66"));
+        assert!(out.contains("`→ graphify explain app.core.new_mod`"));
+    }
+
+    #[test]
+    fn caps_escalated_hotspots_at_5_rows_with_more_hint() {
+        let a = minimal_analysis();
+        let rising: Vec<(&str, f64, f64)> = (0..7)
+            .map(|i| (Box::leak(format!("app.mod_{}", i).into_boxed_str()) as &str, 0.5, 0.7))
+            .collect();
+        let d = drift_with_hotspots(rising, vec![]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("**Escalated hotspots (7)**"));
+        // First 5 shown, then "…and 2 more"
+        assert!(out.contains("app.mod_0"));
+        assert!(out.contains("app.mod_4"));
+        assert!(!out.contains("app.mod_5")); // 6th and 7th hidden
+        assert!(out.contains("_…and 2 more"));
     }
 }
