@@ -538,4 +538,33 @@ export interface UserDto {
         assert_eq!(user.fields.len(), 1);
         assert_eq!(user.fields[0].name, "id");
     }
+
+    #[test]
+    fn flattens_inline_intersections() {
+        let src = r#"
+export type UserDto = {
+  id: string;
+} & {
+  email: string;
+};
+"#;
+        let c = extract_ts_contract(src, "UserDto").expect("ok");
+        assert_eq!(c.fields.len(), 2);
+        assert!(c.fields.iter().any(|f| f.name == "id"));
+        assert!(c.fields.iter().any(|f| f.name == "email"));
+    }
+
+    #[test]
+    fn intersection_later_inline_object_wins_on_conflict() {
+        let src = r#"
+export type UserDto = {
+  id: string;
+} & {
+  id: number;
+};
+"#;
+        let c = extract_ts_contract(src, "UserDto").expect("ok");
+        let id = c.fields.iter().find(|f| f.name == "id").unwrap();
+        assert!(matches!(id.type_ref, FieldType::Primitive { value: PrimitiveType::Number }));
+    }
 }
