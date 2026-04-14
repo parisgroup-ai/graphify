@@ -1,0 +1,10 @@
+[settings]
+output = "./report"
+exclude = ["__pycache__", "node_modules", ".git"]
+format = ["json", "csv", "md"]
+
+[[project]]
+name = "sample"
+repo = "."
+lang = ["python"]
+local_prefix = "app"

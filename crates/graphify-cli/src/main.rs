@@ -226,6 +226,11 @@ enum Commands {
         #[arg(long, default_value = "graphify.toml")]
         config: PathBuf,
 
+        /// Output directory (overrides config setting) — `check-report.json`
+        /// is written under `<output>/<project>/` for every project
+        #[arg(long)]
+        output: Option<PathBuf>,
+
         /// Maximum allowed cycle count
         #[arg(long)]
         max_cycles: Option<usize>,
@@ -562,6 +567,7 @@ fn main() {
 
         Commands::Check {
             config,
+            output,
             max_cycles,
             max_hotspot_score,
             project,
@@ -573,6 +579,7 @@ fn main() {
         } => {
             cmd_check(
                 &config,
+                output.as_deref(),
                 project.as_deref(),
                 force,
                 CheckLimits {
@@ -1745,8 +1752,10 @@ fn print_check_report(report: &CheckReport) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_check(
     config_path: &Path,
+    output_override: Option<&Path>,
     project_filter: Option<&str>,
     force: bool,
     limits: CheckLimits,
@@ -1756,6 +1765,7 @@ fn cmd_check(
 ) {
     let cfg = load_config(config_path);
     let projects = filter_projects(&cfg, project_filter);
+    let out_dir = resolve_output(&cfg, output_override);
     let mut analyzed_projects = Vec::new();
 
     for project in &projects {
@@ -1833,8 +1843,36 @@ fn cmd_check(
     );
 
     let report = build_check_report(results, contracts);
+
+    // Write the unified check-report.json to every project's output directory
+    // alongside analysis.json / drift-report.json. Each project dir receives a
+    // copy of the full report so downstream consumers (e.g. `pr-summary`) can
+    // read it from any single project directory. Additive: the stdout behavior
+    // under --json below is preserved.
+    let serialized =
+        serde_json::to_string_pretty(&report).expect("serialize CheckReport as JSON");
+    for project_result in &report.projects {
+        let proj_out = out_dir.join(&project_result.name);
+        if let Err(err) = std::fs::create_dir_all(&proj_out) {
+            eprintln!(
+                "warning: failed to create output directory {}: {}",
+                proj_out.display(),
+                err
+            );
+            continue;
+        }
+        let path = proj_out.join("check-report.json");
+        if let Err(err) = std::fs::write(&path, &serialized) {
+            eprintln!(
+                "warning: failed to write check-report.json to {}: {}",
+                path.display(),
+                err
+            );
+        }
+    }
+
     if json {
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        println!("{}", serialized);
     } else {
         print_check_report(&report);
         if let Some(contracts) = &report.contracts {
