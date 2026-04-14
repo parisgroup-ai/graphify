@@ -265,6 +265,149 @@ impl ContractBuilder {
 }
 
 // ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+pub struct PairConfig {
+    pub ignore_orm: Vec<String>,
+    pub ignore_ts: Vec<String>,
+    pub field_aliases: Vec<FieldAlias>,
+    pub relation_aliases: Vec<FieldAlias>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldAlias {
+    pub orm: String,
+    pub ts: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct GlobalContractConfig {
+    pub case_rule: CaseRule,
+    pub type_map_overrides: std::collections::HashMap<String, FieldType>,
+    pub unmapped_type_severity: Severity,
+}
+
+impl Default for GlobalContractConfig {
+    fn default() -> Self {
+        Self {
+            case_rule: CaseRule::SnakeCamel,
+            type_map_overrides: std::collections::HashMap::new(),
+            unmapped_type_severity: Severity::Warning,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseRule {
+    SnakeCamel,
+    Exact,
+}
+
+// ---------------------------------------------------------------------------
+// Comparison entry point
+// ---------------------------------------------------------------------------
+
+pub fn compare_contracts(
+    orm: &Contract,
+    ts: &Contract,
+    pair: &PairConfig,
+    global: &GlobalContractConfig,
+) -> ContractComparison {
+    let orm_fields = project_fields(&orm.fields, &pair.ignore_orm, AlignmentSide::Orm, pair, global);
+    let ts_fields = project_fields(&ts.fields, &pair.ignore_ts, AlignmentSide::Ts, pair, global);
+
+    let mut violations = Vec::new();
+
+    for (key, orm_field) in &orm_fields {
+        if !ts_fields.contains_key(key) {
+            violations.push(ContractViolation::ContractFieldMissingOnTs {
+                field: key.clone(),
+                orm_type: orm_field.type_ref.clone(),
+                orm_line: orm_field.line,
+            });
+        }
+    }
+    for (key, ts_field) in &ts_fields {
+        if !orm_fields.contains_key(key) {
+            violations.push(ContractViolation::ContractFieldMissingOnOrm {
+                field: key.clone(),
+                ts_type: ts_field.type_ref.clone(),
+                ts_line: ts_field.line,
+            });
+        }
+    }
+
+    ContractComparison {
+        pair_name: orm.name.clone(),
+        violations,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum AlignmentSide {
+    Orm,
+    Ts,
+}
+
+fn project_fields(
+    fields: &[Field],
+    ignore: &[String],
+    side: AlignmentSide,
+    pair: &PairConfig,
+    global: &GlobalContractConfig,
+) -> std::collections::BTreeMap<String, Field> {
+    let ignore_set: std::collections::HashSet<&str> = ignore.iter().map(String::as_str).collect();
+    let mut out = std::collections::BTreeMap::new();
+    for f in fields {
+        if ignore_set.contains(f.raw_name.as_str()) || ignore_set.contains(f.name.as_str()) {
+            continue;
+        }
+        let key = alignment_key(f, side, pair, global);
+        out.insert(key, f.clone());
+    }
+    out
+}
+
+fn alignment_key(
+    field: &Field,
+    side: AlignmentSide,
+    pair: &PairConfig,
+    global: &GlobalContractConfig,
+) -> String {
+    for alias in &pair.field_aliases {
+        match side {
+            AlignmentSide::Orm if alias.orm == field.raw_name => return alias.ts.clone(),
+            AlignmentSide::Ts if alias.ts == field.raw_name => return alias.ts.clone(),
+            _ => {}
+        }
+    }
+    match global.case_rule {
+        CaseRule::Exact => field.raw_name.clone(),
+        CaseRule::SnakeCamel => snake_to_camel(&field.raw_name),
+    }
+}
+
+fn snake_to_camel(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut upper_next = false;
+    for ch in input.chars() {
+        if ch == '_' {
+            upper_next = true;
+            continue;
+        }
+        if upper_next {
+            out.extend(ch.to_uppercase());
+            upper_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -321,5 +464,81 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let parsed: Contract = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, original);
+    }
+
+    fn default_config() -> (PairConfig, GlobalContractConfig) {
+        (PairConfig::default(), GlobalContractConfig::default())
+    }
+
+    #[test]
+    fn alignment_detects_field_missing_on_ts() {
+        let orm = ContractBuilder::orm("user")
+            .primitive("id", PrimitiveType::String, false)
+            .primitive("phone", PrimitiveType::String, false)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .primitive("id", PrimitiveType::String, false)
+            .build();
+        let (pair, global) = default_config();
+        let cmp = compare_contracts(&orm, &ts, &pair, &global);
+        assert_eq!(cmp.violations.len(), 1);
+        assert!(matches!(
+            cmp.violations[0],
+            ContractViolation::ContractFieldMissingOnTs { ref field, .. } if field == "phone"
+        ));
+    }
+
+    #[test]
+    fn alignment_detects_field_missing_on_orm() {
+        let orm = ContractBuilder::orm("user")
+            .primitive("id", PrimitiveType::String, false)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .primitive("id", PrimitiveType::String, false)
+            .primitive("nickname", PrimitiveType::String, true)
+            .build();
+        let (pair, global) = default_config();
+        let cmp = compare_contracts(&orm, &ts, &pair, &global);
+        assert_eq!(cmp.violations.len(), 1);
+        assert!(matches!(
+            cmp.violations[0],
+            ContractViolation::ContractFieldMissingOnOrm { ref field, .. } if field == "nickname"
+        ));
+    }
+
+    #[test]
+    fn alignment_respects_ignore_list() {
+        let orm = ContractBuilder::orm("user")
+            .primitive("id", PrimitiveType::String, false)
+            .primitive("internal_audit_id", PrimitiveType::String, true)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .primitive("id", PrimitiveType::String, false)
+            .build();
+        let pair = PairConfig {
+            ignore_orm: vec!["internal_audit_id".into()],
+            ..PairConfig::default()
+        };
+        let cmp = compare_contracts(&orm, &ts, &pair, &GlobalContractConfig::default());
+        assert_eq!(cmp.violations.len(), 0);
+    }
+
+    #[test]
+    fn alignment_applies_field_alias() {
+        let orm = ContractBuilder::orm("user")
+            .raw_primitive("legacyRoleCode", "legacy_role_code", PrimitiveType::String, false)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .primitive("roleCode", PrimitiveType::String, false)
+            .build();
+        let pair = PairConfig {
+            field_aliases: vec![FieldAlias {
+                orm: "legacy_role_code".into(),
+                ts: "roleCode".into(),
+            }],
+            ..PairConfig::default()
+        };
+        let cmp = compare_contracts(&orm, &ts, &pair, &GlobalContractConfig::default());
+        assert_eq!(cmp.violations, vec![]);
     }
 }
