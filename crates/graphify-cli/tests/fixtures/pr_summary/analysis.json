@@ -1,0 +1,53 @@
+{
+  "nodes": [
+    {
+      "id": "app.core",
+      "betweenness": 0.4,
+      "pagerank": 0.2,
+      "in_degree": 3,
+      "out_degree": 1,
+      "in_cycle": true,
+      "score": 0.72,
+      "community_id": 0
+    },
+    {
+      "id": "app.services.auth",
+      "betweenness": 0.25,
+      "pagerank": 0.15,
+      "in_degree": 2,
+      "out_degree": 2,
+      "in_cycle": true,
+      "score": 0.55,
+      "community_id": 1
+    },
+    {
+      "id": "app.repositories.user",
+      "betweenness": 0.18,
+      "pagerank": 0.12,
+      "in_degree": 2,
+      "out_degree": 1,
+      "in_cycle": true,
+      "score": 0.45,
+      "community_id": 1
+    }
+  ],
+  "communities": [
+    {
+      "id": 0,
+      "members": ["app.core"]
+    },
+    {
+      "id": 1,
+      "members": ["app.services.auth", "app.repositories.user"]
+    }
+  ],
+  "cycles": [
+    ["app.services.auth", "app.repositories.user"]
+  ],
+  "summary": {
+    "total_nodes": 10,
+    "total_edges": 18,
+    "total_communities": 2,
+    "total_cycles": 1
+  }
+}

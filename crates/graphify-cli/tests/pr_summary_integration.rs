@@ -104,3 +104,44 @@ fn pr_summary_warns_and_continues_on_malformed_drift_report() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("failed to parse drift-report.json"));
 }
+
+#[test]
+fn pr_summary_end_to_end_against_realistic_fixture() {
+    let fixture = std::path::Path::new("tests/fixtures/pr_summary");
+    assert!(fixture.join("analysis.json").exists(), "fixture setup");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_graphify"))
+        .args(["pr-summary", fixture.to_str().unwrap()])
+        .output()
+        .expect("run pr-summary");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Header + stats present
+    assert!(stdout.contains("### Graphify — Architecture Delta for"));
+    assert!(stdout.contains("nodes"));
+    assert!(stdout.contains("edges"));
+
+    // Drift section with at least one finding
+    assert!(stdout.contains("#### Drift in this PR"));
+    assert!(
+        stdout.contains("**New cycle**")
+            || stdout.contains("**Escalated hotspots")
+            || stdout.contains("**New hotspots**"),
+        "expected at least one drift finding; got:\n{}",
+        stdout
+    );
+
+    // Outstanding issues section with rules + contract
+    assert!(stdout.contains("#### Outstanding issues"));
+    assert!(stdout.contains("**Rules violations"));
+    assert!(stdout.contains("**Contract drift"));
+
+    // Footer
+    assert!(stdout.contains("graphify pr-summary <dir>"));
+}

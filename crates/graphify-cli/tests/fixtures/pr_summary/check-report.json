@@ -1,0 +1,71 @@
+{
+  "ok": false,
+  "violations": 2,
+  "projects": [
+    {
+      "name": "my-app",
+      "ok": false,
+      "summary": {
+        "nodes": 10,
+        "edges": 18,
+        "communities": 2,
+        "cycles": 1,
+        "max_hotspot_score": 0.72,
+        "max_hotspot_id": "app.core"
+      },
+      "limits": {
+        "max_cycles": 0,
+        "max_hotspot_score": 0.5
+      },
+      "policy_summary": {
+        "rules_evaluated": 1,
+        "policy_violations": 1
+      },
+      "violations": [
+        {
+          "type": "policy",
+          "kind": "policy_rule",
+          "rule": "no_cross_layer_imports",
+          "source_node": "app.api.routes",
+          "target_node": "app.repositories.user",
+          "source_project": "my-app",
+          "target_project": "my-app",
+          "source_selectors": ["api.*"],
+          "target_selectors": ["repositories.*"]
+        }
+      ]
+    }
+  ],
+  "contracts": {
+    "ok": false,
+    "error_count": 1,
+    "warning_count": 0,
+    "pairs": [
+      {
+        "name": "users_pair",
+        "orm": {
+          "file": "db/schema/users.ts",
+          "symbol": "users",
+          "line": 5
+        },
+        "ts": {
+          "file": "types/user.ts",
+          "symbol": "User",
+          "line": 3
+        },
+        "violations": [
+          {
+            "severity": "error",
+            "kind": "contract_field_missing_on_ts",
+            "field": "created_at",
+            "orm_type": {
+              "kind": "primitive",
+              "value": "Date"
+            },
+            "orm_line": 10
+          }
+        ]
+      }
+    ]
+  }
+}

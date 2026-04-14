@@ -1,0 +1,58 @@
+{
+  "summary_delta": {
+    "nodes": {
+      "before": 8,
+      "after": 10,
+      "change": 2
+    },
+    "edges": {
+      "before": 15,
+      "after": 18,
+      "change": 3
+    },
+    "communities": {
+      "before": 1,
+      "after": 2,
+      "change": 1
+    },
+    "cycles": {
+      "before": 0,
+      "after": 1,
+      "change": 1
+    }
+  },
+  "edges": {
+    "added_nodes": [],
+    "removed_nodes": [],
+    "degree_changes": []
+  },
+  "cycles": {
+    "introduced": [
+      ["app.services.auth", "app.repositories.user"]
+    ],
+    "resolved": []
+  },
+  "hotspots": {
+    "rising": [
+      {
+        "id": "app.core",
+        "before": 0.50,
+        "after": 0.72,
+        "delta": 0.22
+      }
+    ],
+    "falling": [],
+    "new_hotspots": [],
+    "removed_hotspots": []
+  },
+  "communities": {
+    "moved_nodes": [
+      {
+        "id": "app.services.auth",
+        "from_community": 0,
+        "to_community": 1
+      }
+    ],
+    "stable_count": 1
+  }
+}
