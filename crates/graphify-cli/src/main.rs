@@ -2999,6 +2999,24 @@ fn run_pr_summary(dir: &std::path::Path) {
 
     let analysis_path = dir.join("analysis.json");
     if !analysis_path.exists() {
+        // Detect a multi-project root: no analysis.json here but at least one subdir has its own.
+        if dir.is_dir() {
+            let any_child_has_analysis = std::fs::read_dir(dir)
+                .ok()
+                .map(|iter| {
+                    iter.filter_map(Result::ok).any(|entry| {
+                        entry.path().is_dir() && entry.path().join("analysis.json").exists()
+                    })
+                })
+                .unwrap_or(false);
+            if any_child_has_analysis {
+                eprintln!(
+                    "graphify pr-summary: '{}' is a multi-project output root — point at a single project subdirectory",
+                    dir.display()
+                );
+                std::process::exit(1);
+            }
+        }
         eprintln!(
             "graphify pr-summary: missing analysis.json in '{}' (run 'graphify run' first)",
             dir.display()
