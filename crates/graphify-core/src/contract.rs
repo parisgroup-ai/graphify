@@ -373,6 +373,23 @@ pub fn compare_contracts(
         }
     }
 
+    violations.sort_by(|a, b| {
+        fn sort_key(v: &ContractViolation) -> (usize, u8) {
+            let (line, rank) = match v {
+                ContractViolation::ContractFieldMissingOnTs { orm_line, .. } => (*orm_line, 0),
+                ContractViolation::ContractFieldMissingOnOrm { ts_line, .. } => (*ts_line, 1),
+                ContractViolation::ContractNullabilityMismatch { orm_line, .. } => (*orm_line, 2),
+                ContractViolation::ContractTypeMismatch { orm_line, .. } => (*orm_line, 3),
+                ContractViolation::ContractUnmappedOrmType { orm_line, .. } => (*orm_line, 4),
+                ContractViolation::ContractRelationMissingOnTs { orm_line, .. } => (*orm_line, 5),
+                ContractViolation::ContractRelationMissingOnOrm { ts_line, .. } => (*ts_line, 6),
+                ContractViolation::ContractCardinalityMismatch { orm_line, .. } => (*orm_line, 7),
+            };
+            (line, rank)
+        }
+        sort_key(a).cmp(&sort_key(b))
+    });
+
     ContractComparison {
         pair_name: orm.name.clone(),
         violations,
@@ -792,5 +809,28 @@ mod tests {
             .build();
         let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
         assert_eq!(cmp.violations, vec![]);
+    }
+
+    #[test]
+    fn violations_are_deterministically_ordered() {
+        // Two identical runs should produce identical violation sequences.
+        let orm = ContractBuilder::orm("user")
+            .primitive("id", PrimitiveType::String, false)
+            .primitive("name", PrimitiveType::String, false)
+            .primitive("age", PrimitiveType::Number, false)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .primitive("age", PrimitiveType::String, true) // type + nullability drift
+            .primitive("email", PrimitiveType::String, false) // missing on orm
+            .build();
+
+        let cmp_a = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp_b = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp_a.violations, cmp_b.violations);
+        // First violation must be the earliest-line issue on the ORM side.
+        assert!(matches!(
+            cmp_a.violations[0],
+            ContractViolation::ContractFieldMissingOnTs { ref field, .. } if field == "id"
+        ));
     }
 }
