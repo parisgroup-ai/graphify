@@ -342,6 +342,37 @@ pub fn compare_contracts(
         }
     }
 
+    let orm_relations = project_relations(&orm.relations, pair, AlignmentSide::Orm, global);
+    let ts_relations = project_relations(&ts.relations, pair, AlignmentSide::Ts, global);
+
+    for (key, orm_rel) in &orm_relations {
+        match ts_relations.get(key) {
+            None => violations.push(ContractViolation::ContractRelationMissingOnTs {
+                relation: key.clone(),
+                orm_line: orm_rel.line,
+            }),
+            Some(ts_rel) => {
+                if orm_rel.cardinality != ts_rel.cardinality {
+                    violations.push(ContractViolation::ContractCardinalityMismatch {
+                        relation: key.clone(),
+                        orm: orm_rel.cardinality,
+                        ts: ts_rel.cardinality,
+                        orm_line: orm_rel.line,
+                        ts_line: ts_rel.line,
+                    });
+                }
+            }
+        }
+    }
+    for (key, ts_rel) in &ts_relations {
+        if !orm_relations.contains_key(key) {
+            violations.push(ContractViolation::ContractRelationMissingOnOrm {
+                relation: key.clone(),
+                ts_line: ts_rel.line,
+            });
+        }
+    }
+
     ContractComparison {
         pair_name: orm.name.clone(),
         violations,
@@ -462,6 +493,39 @@ fn alignment_key(
     match global.case_rule {
         CaseRule::Exact => field.raw_name.clone(),
         CaseRule::SnakeCamel => snake_to_camel(&field.raw_name),
+    }
+}
+
+fn project_relations(
+    relations: &[Relation],
+    pair: &PairConfig,
+    side: AlignmentSide,
+    global: &GlobalContractConfig,
+) -> std::collections::BTreeMap<String, Relation> {
+    let mut out = std::collections::BTreeMap::new();
+    for r in relations {
+        let key = relation_alignment_key(r, side, pair, global);
+        out.insert(key, r.clone());
+    }
+    out
+}
+
+fn relation_alignment_key(
+    rel: &Relation,
+    side: AlignmentSide,
+    pair: &PairConfig,
+    global: &GlobalContractConfig,
+) -> String {
+    for alias in &pair.relation_aliases {
+        match side {
+            AlignmentSide::Orm if alias.orm == rel.raw_name => return alias.ts.clone(),
+            AlignmentSide::Ts if alias.ts == rel.raw_name => return alias.ts.clone(),
+            _ => {}
+        }
+    }
+    match global.case_rule {
+        CaseRule::Exact => rel.raw_name.clone(),
+        CaseRule::SnakeCamel => snake_to_camel(&rel.raw_name),
     }
 }
 
@@ -683,6 +747,48 @@ mod tests {
             .build();
         let ts = ContractBuilder::ts("blob")
             .named("payload", "Record<string, unknown>", true)
+            .build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp.violations, vec![]);
+    }
+
+    #[test]
+    fn relation_missing_on_ts() {
+        let orm = ContractBuilder::orm("user")
+            .relation("posts", Cardinality::Many, "post", true)
+            .build();
+        let ts = ContractBuilder::ts("user").build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp.violations.len(), 1);
+        assert!(matches!(
+            cmp.violations[0],
+            ContractViolation::ContractRelationMissingOnTs { ref relation, .. } if relation == "posts"
+        ));
+    }
+
+    #[test]
+    fn relation_cardinality_mismatch() {
+        let orm = ContractBuilder::orm("user")
+            .relation("author", Cardinality::One, "user", true)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .relation("author", Cardinality::Many, "user", true)
+            .build();
+        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        assert_eq!(cmp.violations.len(), 1);
+        assert!(matches!(
+            cmp.violations[0],
+            ContractViolation::ContractCardinalityMismatch { orm: Cardinality::One, ts: Cardinality::Many, .. }
+        ));
+    }
+
+    #[test]
+    fn relation_target_contract_not_compared() {
+        let orm = ContractBuilder::orm("user")
+            .relation("profile", Cardinality::One, "profile", true)
+            .build();
+        let ts = ContractBuilder::ts("user")
+            .relation("profile", Cardinality::One, "profile_summary", true)
             .build();
         let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
         assert_eq!(cmp.violations, vec![]);
