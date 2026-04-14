@@ -65,15 +65,20 @@ fn render_stats_line(out: &mut String, analysis: &AnalysisSnapshot, drift: Optio
 }
 
 fn render_drift_section(out: &mut String, drift: Option<&DiffReport>) {
-    let Some(drift) = drift else { return; };
-    // Collect any-finding flag
+    out.push_str("#### Drift in this PR\n\n");
+    let Some(drift) = drift else {
+        out.push_str(
+            "_No drift baseline — run `graphify diff --baseline <path> --config graphify.toml` to populate._\n\n",
+        );
+        return;
+    };
+
     let has_any_drift = !drift.cycles.introduced.is_empty()
         || !drift.cycles.resolved.is_empty()
         || !drift.hotspots.rising.is_empty()
         || !drift.hotspots.new_hotspots.is_empty()
         || !drift.communities.moved_nodes.is_empty();
 
-    out.push_str("#### Drift in this PR\n\n");
     if !has_any_drift {
         out.push_str("_No architectural changes vs baseline._\n\n");
         return;
@@ -82,6 +87,7 @@ fn render_drift_section(out: &mut String, drift: Option<&DiffReport>) {
     render_cycle_rows(out, drift);
     render_hotspot_rows(out, drift);
     render_community_shift_row(out, drift);
+    out.push('\n');
 }
 
 fn render_community_shift_row(out: &mut String, drift: &DiffReport) {
@@ -446,5 +452,16 @@ mod tests {
         // Bullet headers should not appear when there is nothing
         assert!(!out.contains("**New cycle**"));
         assert!(!out.contains("**Escalated hotspots"));
+    }
+
+    #[test]
+    fn renders_missing_drift_hint_when_drift_is_none() {
+        let a = minimal_analysis();
+        let out = render("my-app", &a, None, None);
+        assert!(out.contains("#### Drift in this PR"));
+        assert!(out.contains("_No drift baseline"));
+        assert!(out.contains("graphify diff"));
+        // No empty bullets / section-complete message
+        assert!(!out.contains("_No architectural changes vs baseline._"));
     }
 }
