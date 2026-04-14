@@ -48,7 +48,7 @@ pub struct SummarySnapshot {
 // Output: DiffReport
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffReport {
     pub summary_delta: SummaryDelta,
     pub edges: EdgeDiff,
@@ -57,7 +57,7 @@ pub struct DiffReport {
     pub communities: CommunityDiff,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryDelta {
     pub nodes: Delta<usize>,
     pub edges: Delta<usize>,
@@ -65,34 +65,34 @@ pub struct SummaryDelta {
     pub cycles: Delta<usize>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Delta<T> {
     pub before: T,
     pub after: T,
     pub change: i64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EdgeDiff {
     pub added_nodes: Vec<String>,
     pub removed_nodes: Vec<String>,
     pub degree_changes: Vec<DegreeChange>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DegreeChange {
     pub id: String,
     pub in_degree: Delta<usize>,
     pub out_degree: Delta<usize>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CycleDiff {
     pub introduced: Vec<Vec<String>>,
     pub resolved: Vec<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotspotDiff {
     pub rising: Vec<ScoreChange>,
     pub falling: Vec<ScoreChange>,
@@ -100,7 +100,7 @@ pub struct HotspotDiff {
     pub removed_hotspots: Vec<ScoreChange>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoreChange {
     pub id: String,
     pub before: f64,
@@ -108,13 +108,13 @@ pub struct ScoreChange {
     pub delta: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityDiff {
     pub moved_nodes: Vec<CommunityMove>,
     pub stable_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommunityMove {
     pub id: String,
     pub from_community: usize,
@@ -729,5 +729,63 @@ mod tests {
         assert_eq!(report.summary_delta.nodes.change, -1);
         assert!(report.edges.added_nodes.is_empty());
         assert_eq!(report.edges.removed_nodes, vec!["a"]);
+    }
+
+    #[test]
+    fn diff_report_roundtrips_json() {
+        use crate::diff::{
+            CommunityDiff, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, SummaryDelta,
+        };
+
+        let report = DiffReport {
+            summary_delta: SummaryDelta {
+                nodes: Delta {
+                    before: 10,
+                    after: 12,
+                    change: 2,
+                },
+                edges: Delta {
+                    before: 20,
+                    after: 25,
+                    change: 5,
+                },
+                communities: Delta {
+                    before: 3,
+                    after: 3,
+                    change: 0,
+                },
+                cycles: Delta {
+                    before: 0,
+                    after: 1,
+                    change: 1,
+                },
+            },
+            edges: EdgeDiff {
+                added_nodes: vec!["a".into()],
+                removed_nodes: vec![],
+                degree_changes: vec![],
+            },
+            cycles: CycleDiff {
+                introduced: vec![vec!["a".into(), "b".into()]],
+                resolved: vec![],
+            },
+            hotspots: HotspotDiff {
+                rising: vec![],
+                falling: vec![],
+                new_hotspots: vec![],
+                removed_hotspots: vec![],
+            },
+            communities: CommunityDiff {
+                moved_nodes: vec![],
+                stable_count: 3,
+            },
+        };
+
+        let json = serde_json::to_string(&report).expect("serialize");
+        let back: DiffReport = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(back.summary_delta.nodes.change, 2);
+        assert_eq!(back.cycles.introduced.len(), 1);
+        assert_eq!(back.edges.added_nodes, vec!["a".to_string()]);
     }
 }
