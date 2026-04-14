@@ -401,6 +401,12 @@ enum Commands {
         threshold: f64,
     },
 
+    /// Render a PR-ready Markdown summary from a project's Graphify output directory.
+    PrSummary {
+        /// Path to a single project's Graphify output directory (for example ./report/my-app).
+        dir: PathBuf,
+    },
+
     /// Aggregate historical architecture trends from stored snapshots
     Trend {
         /// Path to graphify.toml config
@@ -846,6 +852,10 @@ fn main() {
             json,
         } => {
             cmd_trend(&config, project.as_deref(), output.as_deref(), limit, json);
+        }
+
+        Commands::PrSummary { dir } => {
+            run_pr_summary(&dir);
         }
     }
 }
@@ -2963,12 +2973,87 @@ fn cmd_watch(
     }
 }
 
-#[allow(dead_code)] // consumed by Task 14 `graphify pr-summary` dispatch
 fn resolve_project_name(dir: &std::path::Path) -> String {
     dir.file_name()
         .and_then(|os| os.to_str())
         .unwrap_or("unknown")
         .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// pr-summary command
+// ---------------------------------------------------------------------------
+
+fn run_pr_summary(dir: &std::path::Path) {
+    use graphify_core::diff::{AnalysisSnapshot, DiffReport};
+    use graphify_report::check_report::CheckReport;
+    use graphify_report::pr_summary;
+
+    if !dir.exists() {
+        eprintln!(
+            "graphify pr-summary: directory '{}' not found",
+            dir.display()
+        );
+        std::process::exit(1);
+    }
+
+    let analysis_path = dir.join("analysis.json");
+    if !analysis_path.exists() {
+        eprintln!(
+            "graphify pr-summary: missing analysis.json in '{}' (run 'graphify run' first)",
+            dir.display()
+        );
+        std::process::exit(1);
+    }
+    let analysis_text = match std::fs::read_to_string(&analysis_path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!(
+                "graphify pr-summary: failed to read analysis.json: {}",
+                e
+            );
+            std::process::exit(1);
+        }
+    };
+    let analysis: AnalysisSnapshot = match serde_json::from_str(&analysis_text) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "graphify pr-summary: failed to parse analysis.json: {}",
+                e
+            );
+            std::process::exit(1);
+        }
+    };
+
+    let drift = load_optional_json::<DiffReport>(&dir.join("drift-report.json"), "drift-report.json");
+    let check = load_optional_json::<CheckReport>(&dir.join("check-report.json"), "check-report.json");
+
+    let project_name = resolve_project_name(dir);
+    let output = pr_summary::render(&project_name, &analysis, drift.as_ref(), check.as_ref());
+    print!("{}", output);
+}
+
+fn load_optional_json<T: for<'de> serde::Deserialize<'de>>(
+    path: &std::path::Path,
+    label: &str,
+) -> Option<T> {
+    if !path.exists() {
+        return None;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => match serde_json::from_str::<T>(&text) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("warning: failed to parse {}, skipping section: {}", label, e);
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("warning: failed to read {}, skipping section: {}", label, e);
+            None
+        }
+    }
 }
 
 #[cfg(test)]
