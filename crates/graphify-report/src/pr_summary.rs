@@ -579,6 +579,61 @@ mod tests {
     }
 
     #[test]
+    fn renders_rules_violations_limit_variants_with_and_without_node_id() {
+        use crate::check_report::{
+            CheckLimits, CheckReport, CheckViolation, PolicyCheckSummary, ProjectCheckResult,
+            ProjectCheckSummary,
+        };
+
+        let a = minimal_analysis();
+        let c = CheckReport {
+            ok: false,
+            violations: 2,
+            projects: vec![ProjectCheckResult {
+                name: "my-app".into(),
+                ok: false,
+                summary: ProjectCheckSummary {
+                    nodes: 0, edges: 0, communities: 0, cycles: 0,
+                    max_hotspot_score: 0.0, max_hotspot_id: None,
+                },
+                limits: CheckLimits::default(),
+                policy_summary: PolicyCheckSummary { rules_evaluated: 0, policy_violations: 0 },
+                violations: vec![
+                    // Limit with node_id (e.g. max_hotspot_score)
+                    CheckViolation::Limit {
+                        kind: "max_hotspot_score".into(),
+                        actual: serde_json::json!(0.9),
+                        expected_max: serde_json::json!(0.5),
+                        node_id: Some("app.core".into()),
+                    },
+                    // Limit without node_id (e.g. max_cycles)
+                    CheckViolation::Limit {
+                        kind: "max_cycles".into(),
+                        actual: serde_json::json!(3),
+                        expected_max: serde_json::json!(0),
+                        node_id: None,
+                    },
+                ],
+            }],
+            contracts: None,
+        };
+
+        let out = render("my-app", &a, None, Some(&c));
+        assert!(out.contains("**Rules violations (2)**"));
+
+        // Limit with node_id: "- `<kind>` — `<n>`: <actual> > <expected>"
+        assert!(out.contains("`max_hotspot_score`"));
+        assert!(out.contains("`app.core`"));
+        assert!(out.contains("0.9 > 0.5"));
+
+        // Limit without node_id: "- `<kind>` — <actual> > <expected>"
+        assert!(out.contains("`max_cycles`"));
+        assert!(out.contains("3 > 0"));
+        // Guard against accidentally including an empty node_id slot
+        assert!(!out.contains("`max_cycles` — ``"));
+    }
+
+    #[test]
     fn omits_outstanding_section_when_check_is_none() {
         let a = minimal_analysis();
         let out = render("my-app", &a, None, None);
