@@ -2,6 +2,10 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## 0.5.0 — 2026-04-13
+
+- feat(cli): FEAT-016 contract drift detection between Drizzle ORM schemas and TS interface/type declarations, integrated into `graphify check`
+
 ## [0.4.1] - 2026-04-13
 
 ### Fixed

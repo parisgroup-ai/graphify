@@ -41,7 +41,7 @@ updated: 2026-04-13
 | FEAT-013 | **done** | high     | 16h    | Policy-driven architecture rules                      |
 | FEAT-014 | **done** | normal   | 12h    | Historical architecture trend tracking                |
 | FEAT-015 | **open** | normal   | 12h    | PR and editor integration for architecture feedback   |
-| FEAT-016 | **open** | high     | 16h    | Contract drift detection between ORM and TS types     |
+| FEAT-016 | **done** | high     | 16h    | Contract drift detection between ORM and TS types     |
 
 ## Done
 
@@ -66,3 +66,4 @@ updated: 2026-04-13
 - [[FEAT-012-recipe-based-cli-examples-for-monorepo-workflows]] - Implemented: README recipes for full refresh, query, explain, path, drift diff, and end-to-end monorepo investigation workflow (2026-04-13)
 - [[FEAT-013-policy-driven-architecture-rules]] - Implemented: declarative `policy.group` / `policy.rule` config, project/group selectors, partition-aware deny rules, `graphify check` human + JSON violations, README recipes, and reliable integration coverage (2026-04-13)
 - [[FEAT-014-historical-architecture-trend-tracking]] - Implemented: snapshot history store (`graphify-core/src/history.rs`), `graphify trend` CLI surface, JSON + Markdown trend reports, regression fixtures over metric changes (2026-04-13)
+- [[FEAT-016-contract-drift-detection-between-orm-and-typescript]] - Implemented: Drizzle-to-TS contract drift detection via `graphify check`, built-in type map + overrides, snake_case<->camelCase normalization, relation cardinality comparison, JSON + Markdown + human output, 6 integration + ~34 unit tests (2026-04-13)

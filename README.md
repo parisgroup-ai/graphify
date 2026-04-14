@@ -169,6 +169,55 @@ V1 trend reports include:
 - community churn between adjacent snapshots
 - JSON and Markdown outputs written next to the project report directory by default
 
+## Contract Drift (v0.5.0+)
+
+Detects structural drift between ORM schemas and TypeScript contract types across a monorepo — e.g. a Drizzle table in `packages/db` vs the DTO interface the API layer exports in `packages/api`. Graphify normalizes both sides into a shared `Contract` model, aligns fields (with snake_case <-> camelCase handling), and flags missing fields, type mismatches, nullability differences, and relation cardinality drift.
+
+Declare one or more `[[contract.pair]]` entries in `graphify.toml`:
+
+```toml
+[[project]]
+name = "db"
+repo = "./packages/db"
+lang = ["typescript"]
+
+[[project]]
+name = "api"
+repo = "./packages/api"
+lang = ["typescript"]
+
+[[contract.pair]]
+name = "user"
+orm  = { source = "drizzle", file = "packages/db/src/schema/user.ts", table = "users" }
+ts   = { file   = "packages/api/src/types/user.ts", export = "UserDto" }
+
+[[contract.pair]]
+name = "post"
+orm  = { source = "drizzle", file = "packages/db/src/schema/post.ts", table = "posts" }
+ts   = { file   = "packages/api/src/types/post.ts", export = "PostDto" }
+```
+
+Then run the standard gate command:
+
+```bash
+graphify check --config graphify.toml
+```
+
+The contract drift gate runs automatically when one or more `[[contract.pair]]` entries are declared. Opt-out with `--no-contracts`; promote warnings to hard failures with `--contracts-warnings-as-errors`. The gate is included in both human and `--json` output of `graphify check`.
+
+Supported in v1:
+- Drizzle ORM (Postgres, MySQL, SQLite variants) on the ORM side
+- TypeScript `interface` and `type` declarations on the TS side
+
+V1 limitations:
+- Prisma schemas are not yet supported
+- Zod schemas and tRPC router inputs/outputs are not supported
+- `target_contract` on the ORM side is accepted in config but not compared (advisory for now)
+- Relation nullability comparison is deferred
+- Pair-level `line` in JSON output is hardcoded to `1` (editor integration will address this in FEAT-015)
+
+See [`docs/TaskNotes/Tasks/FEAT-016-contract-drift-detection-between-orm-and-typescript.md`](docs/TaskNotes/Tasks/FEAT-016-contract-drift-detection-between-orm-and-typescript.md) for the full task record.
+
 ## Quality Gates (CI)
 
 Use `graphify check` in CI pipelines to enforce architectural constraints:
