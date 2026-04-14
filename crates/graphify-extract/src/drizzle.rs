@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use graphify_core::contract::{Contract, ContractSide, Field, FieldType, PrimitiveType};
+use graphify_core::contract::{
+    Cardinality, Contract, ContractSide, Field, FieldType, PrimitiveType, Relation,
+};
 use tree_sitter::{Node, Parser};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,15 +67,156 @@ pub fn extract_drizzle_contract_at(
 
     let _table_line = call_node.start_position().row + 1;
 
+    let decl_name_for_table: Option<String> = resolve_declared_name_for_call(tree.root_node(), bytes, call_node);
+
+    let mut relations = Vec::new();
+    if let Some(var_name) = decl_name_for_table.as_deref() {
+        scan_relations_block(tree.root_node(), bytes, var_name, &mut relations);
+    }
+
     Ok(Contract {
         name: table.to_string(),
         side: ContractSide::Orm,
         source_file,
         source_symbol: table.to_string(),
         fields,
-        relations: Vec::new(),
-        // NOTE: `table_line` not stored on Contract; pair-level line is tracked in CLI output layer.
+        relations,
     })
+}
+
+fn resolve_declared_name_for_call(
+    root: Node<'_>,
+    bytes: &[u8],
+    target_call: Node<'_>,
+) -> Option<String> {
+    let mut found = None;
+    let target_range = target_call.byte_range();
+    walk_table_bindings(root, bytes, &mut |decl_name, call_node, _call_name| {
+        if call_node.byte_range() == target_range {
+            found = Some(decl_name.to_string());
+        }
+    });
+    found
+}
+
+fn scan_relations_block(root: Node<'_>, bytes: &[u8], table_var: &str, out: &mut Vec<Relation>) {
+    walk_calls(root, &mut |call| {
+        let Some((_, name)) = callee_name_of(call, bytes) else {
+            return;
+        };
+        if name != "relations" {
+            return;
+        }
+        let Some(args) = call.child_by_field_name("arguments") else {
+            return;
+        };
+        let Some(first) = nth_argument(args, 0, bytes) else {
+            return;
+        };
+        if first.kind() != "identifier" || text_of(first, bytes) != table_var {
+            return;
+        }
+        let Some(second) = nth_argument(args, 1, bytes) else {
+            return;
+        };
+        // Arrow function: the body is the object returned.
+        let body = find_arrow_body_object(second);
+        if let Some(obj) = body {
+            let mut cursor = obj.walk();
+            for pair in obj.named_children(&mut cursor) {
+                if pair.kind() != "pair" {
+                    continue;
+                }
+                let Some(key_node) = pair.child_by_field_name("key") else {
+                    continue;
+                };
+                let Some(value_node) = pair.child_by_field_name("value") else {
+                    continue;
+                };
+                if value_node.kind() != "call_expression" {
+                    continue;
+                }
+                let Some((_, callee)) = callee_name_of(value_node, bytes) else {
+                    continue;
+                };
+                let cardinality = match callee {
+                    "one" => Cardinality::One,
+                    "many" => Cardinality::Many,
+                    _ => continue,
+                };
+                let rel_name = property_key_text(key_node, bytes).to_string();
+                let target = first_identifier_arg(value_node, bytes).unwrap_or_default();
+                let line = pair.start_position().row + 1;
+                out.push(Relation {
+                    name: rel_name.clone(),
+                    raw_name: rel_name,
+                    cardinality,
+                    target_contract: target,
+                    nullable: true,
+                    line,
+                });
+            }
+        }
+    });
+}
+
+fn walk_calls<'a, F>(node: Node<'a>, on_call: &mut F)
+where
+    F: FnMut(Node<'a>),
+{
+    if node.kind() == "call_expression" {
+        on_call(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_calls(child, on_call);
+    }
+}
+
+fn find_arrow_body_object<'a>(node: Node<'a>) -> Option<Node<'a>> {
+    if node.kind() != "arrow_function" {
+        return None;
+    }
+    let body = node.child_by_field_name("body")?;
+    match body.kind() {
+        "object" => Some(body),
+        "parenthesized_expression" => {
+            let mut cursor = body.walk();
+            for child in body.named_children(&mut cursor) {
+                if child.kind() == "object" {
+                    return Some(child);
+                }
+            }
+            None
+        }
+        "statement_block" => {
+            // `return { ... }` form
+            let mut cursor = body.walk();
+            for child in body.named_children(&mut cursor) {
+                if child.kind() == "return_statement" {
+                    let mut rc = child.walk();
+                    for grand in child.named_children(&mut rc) {
+                        if grand.kind() == "object" {
+                            return Some(grand);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn first_identifier_arg(call: Node<'_>, bytes: &[u8]) -> Option<String> {
+    let args = call.child_by_field_name("arguments")?;
+    let mut cursor = args.walk();
+    for child in args.named_children(&mut cursor) {
+        if child.kind() == "identifier" {
+            return Some(text_of(child, bytes).to_string());
+        }
+    }
+    None
 }
 
 fn walk_table_bindings<'a, F>(node: Node<'a>, bytes: &'a [u8], on_match: &mut F)
@@ -420,5 +563,29 @@ export const posts = pgTable('posts', { title: text('title').notNull() });
         let c = extract_drizzle_contract(src, "posts").expect("ok");
         assert_eq!(c.fields.len(), 1);
         assert_eq!(c.fields[0].name, "title");
+    }
+
+    #[test]
+    fn parses_relations_block() {
+        let src = r#"
+import { pgTable, uuid } from 'drizzle-orm/pg-core';
+import { relations } from 'drizzle-orm';
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey(),
+});
+export const usersRelations = relations(users, ({ one, many }) => ({
+  profile: one(profiles, { fields: [users.profileId], references: [profiles.id] }),
+  posts:   many(posts),
+}));
+"#;
+        let c = extract_drizzle_contract(src, "users").expect("ok");
+        assert_eq!(c.relations.len(), 2);
+        let profile = c.relations.iter().find(|r| r.name == "profile").unwrap();
+        assert_eq!(profile.cardinality, Cardinality::One);
+        assert_eq!(profile.target_contract, "profiles");
+        assert!(profile.nullable); // conservative default in v1
+        let posts = c.relations.iter().find(|r| r.name == "posts").unwrap();
+        assert_eq!(posts.cardinality, Cardinality::Many);
+        assert_eq!(posts.target_contract, "posts");
     }
 }
