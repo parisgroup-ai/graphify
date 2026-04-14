@@ -1,0 +1,22 @@
+[settings]
+output = "./report"
+
+[[project]]
+name = "db"
+repo = "./packages/db"
+lang = ["typescript"]
+
+[[project]]
+name = "api"
+repo = "./packages/api"
+lang = ["typescript"]
+
+[[contract.pair]]
+name = "user"
+orm  = { source = "drizzle", file = "packages/db/src/schema/user.ts", table = "users" }
+ts   = { file   = "packages/api/src/types/user.ts", export = "UserDto" }
+
+[[contract.pair]]
+name = "post"
+orm  = { source = "drizzle", file = "packages/db/src/schema/post.ts", table = "posts" }
+ts   = { file   = "packages/api/src/types/post.ts", export = "PostDto" }

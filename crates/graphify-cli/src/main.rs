@@ -6,6 +6,9 @@ use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use graphify_core::contract::{
+    CaseRule, FieldAlias, FieldType, GlobalContractConfig, PairConfig, PrimitiveType, Severity,
+};
 use graphify_core::diff::{compute_diff, AnalysisSnapshot};
 use graphify_core::{
     community::detect_communities,
@@ -43,6 +46,66 @@ struct Config {
     project: Vec<ProjectConfig>,
     #[serde(default)]
     policy: PolicyConfig,
+    #[serde(default)]
+    contract: ContractConfigRaw,
+}
+
+#[derive(Deserialize, Default)]
+struct ContractConfigRaw {
+    #[serde(default)]
+    type_map: std::collections::HashMap<String, String>,
+    #[serde(default = "default_case_rule")]
+    case_rule: String,
+    #[serde(default = "default_unmapped_severity")]
+    unmapped_type_severity: String,
+    #[serde(default, rename = "pair")]
+    pairs: Vec<PairConfigRaw>,
+}
+
+fn default_case_rule() -> String {
+    "snake_camel".into()
+}
+
+fn default_unmapped_severity() -> String {
+    "warning".into()
+}
+
+#[derive(Deserialize, Default)]
+struct PairConfigRaw {
+    name: String,
+    orm: PairEndpointRaw,
+    ts: PairEndpointRaw,
+    #[serde(default)]
+    field_alias: Vec<FieldAliasRaw>,
+    #[serde(default)]
+    relation_alias: Vec<FieldAliasRaw>,
+    #[serde(default)]
+    ignore: Option<IgnoreRaw>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct PairEndpointRaw {
+    #[serde(default)]
+    source: String, // "drizzle" (required for orm, ignored for ts)
+    file: String,
+    #[serde(default)]
+    table: String,
+    #[serde(default)]
+    export: String,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct FieldAliasRaw {
+    orm: String,
+    ts: String,
+}
+
+#[derive(Deserialize, Default, Clone)]
+struct IgnoreRaw {
+    #[serde(default)]
+    orm: Vec<String>,
+    #[serde(default)]
+    ts: Vec<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -178,6 +241,18 @@ enum Commands {
         /// Force full rebuild, ignoring extraction cache
         #[arg(long)]
         force: bool,
+
+        /// Run the contract drift gate (default: on if [[contract.pair]] is declared)
+        #[arg(long, default_value_t = false, conflicts_with = "no_contracts")]
+        contracts: bool,
+
+        /// Skip the contract drift gate even when pairs are configured
+        #[arg(long = "no-contracts", default_value_t = false)]
+        no_contracts: bool,
+
+        /// Treat contract warnings (UnmappedOrmType) as errors
+        #[arg(long, default_value_t = false)]
+        contracts_warnings_as_errors: bool,
     },
 
     /// Search nodes by pattern (glob matching on node IDs)
@@ -488,6 +563,9 @@ fn main() {
             project,
             json,
             force,
+            contracts,
+            no_contracts,
+            contracts_warnings_as_errors,
         } => {
             cmd_check(
                 &config,
@@ -498,6 +576,8 @@ fn main() {
                     max_hotspot_score,
                 },
                 json,
+                ContractsMode::from_flags(contracts, no_contracts),
+                contracts_warnings_as_errors,
             );
         }
 
@@ -1455,6 +1535,23 @@ struct CheckLimits {
     max_hotspot_score: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ContractsMode {
+    Auto,
+    On,
+    Off,
+}
+
+impl ContractsMode {
+    fn from_flags(contracts: bool, no_contracts: bool) -> Self {
+        match (contracts, no_contracts) {
+            (true, _) => ContractsMode::On,
+            (_, true) => ContractsMode::Off,
+            _ => ContractsMode::Auto,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct ProjectCheckSummary {
     nodes: usize,
@@ -1510,6 +1607,8 @@ struct CheckReport {
     ok: bool,
     violations: usize,
     projects: Vec<ProjectCheckResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    contracts: Option<graphify_report::ContractCheckResult>,
 }
 
 fn evaluate_quality_gates(
@@ -1519,10 +1618,12 @@ fn evaluate_quality_gates(
     cycles: &[Cycle],
     limits: &CheckLimits,
 ) -> (ProjectCheckSummary, Vec<CheckViolation>) {
+    // Deterministic tie-break: highest score wins; ties broken by smaller id.
     let top_hotspot = metrics.iter().max_by(|a, b| {
         a.score
             .partial_cmp(&b.score)
             .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.id.cmp(&a.id))
     });
 
     let summary = ProjectCheckSummary {
@@ -1595,13 +1696,21 @@ fn build_project_check_result(
     }
 }
 
-fn build_check_report(projects: Vec<ProjectCheckResult>) -> CheckReport {
-    let violations = projects.iter().map(|p| p.violations.len()).sum();
-    let ok = projects.iter().all(|p| p.ok);
+fn build_check_report(
+    projects: Vec<ProjectCheckResult>,
+    contracts: Option<graphify_report::ContractCheckResult>,
+) -> CheckReport {
+    let mut violations: usize = projects.iter().map(|p| p.violations.len()).sum();
+    if let Some(c) = &contracts {
+        violations += c.error_count;
+    }
+    let ok_projects = projects.iter().all(|p| p.ok);
+    let ok_contracts = contracts.as_ref().map(|c| c.ok).unwrap_or(true);
     CheckReport {
-        ok,
+        ok: ok_projects && ok_contracts,
         violations,
         projects,
+        contracts,
     }
 }
 
@@ -1703,6 +1812,8 @@ fn cmd_check(
     force: bool,
     limits: CheckLimits,
     json: bool,
+    contracts_mode: ContractsMode,
+    contracts_warnings_as_errors: bool,
 ) {
     let cfg = load_config(config_path);
     let projects = filter_projects(&cfg, project_filter);
@@ -1775,11 +1886,21 @@ fn cmd_check(
         ));
     }
 
-    let report = build_check_report(results);
+    let contracts = run_contract_gate(
+        &cfg,
+        config_path,
+        contracts_mode,
+        contracts_warnings_as_errors,
+    );
+
+    let report = build_check_report(results, contracts);
     if json {
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
     } else {
         print_check_report(&report);
+        if let Some(contracts) = &report.contracts {
+            print_contract_report(contracts);
+        }
     }
 
     if !report.ok {
@@ -1793,6 +1914,233 @@ struct CheckProjectData {
     metrics: Vec<graphify_core::metrics::NodeMetrics>,
     communities: Vec<graphify_core::community::Community>,
     cycles: Vec<Cycle>,
+}
+
+// ---------------------------------------------------------------------------
+// Contract drift gate
+// ---------------------------------------------------------------------------
+
+fn run_contract_gate(
+    cfg: &Config,
+    config_path: &Path,
+    mode: ContractsMode,
+    warnings_as_errors: bool,
+) -> Option<graphify_report::ContractCheckResult> {
+    let enabled = match mode {
+        ContractsMode::Off => false,
+        ContractsMode::On => true,
+        ContractsMode::Auto => !cfg.contract.pairs.is_empty(),
+    };
+    if !enabled {
+        return None;
+    }
+    if cfg.contract.pairs.is_empty() {
+        eprintln!("warning: --contracts requested but no [[contract.pair]] declared; skipping");
+        return None;
+    }
+
+    let global = build_global_contract_config(&cfg.contract, warnings_as_errors);
+    let workspace_root = config_path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let mut pair_results: Vec<graphify_report::ContractPairResult> = Vec::new();
+
+    for pair in &cfg.contract.pairs {
+        let pair_cfg = PairConfig {
+            ignore_orm: pair
+                .ignore
+                .as_ref()
+                .map(|i| i.orm.clone())
+                .unwrap_or_default(),
+            ignore_ts: pair
+                .ignore
+                .as_ref()
+                .map(|i| i.ts.clone())
+                .unwrap_or_default(),
+            field_aliases: pair
+                .field_alias
+                .iter()
+                .map(|a| FieldAlias {
+                    orm: a.orm.clone(),
+                    ts: a.ts.clone(),
+                })
+                .collect(),
+            relation_aliases: pair
+                .relation_alias
+                .iter()
+                .map(|a| FieldAlias {
+                    orm: a.orm.clone(),
+                    ts: a.ts.clone(),
+                })
+                .collect(),
+        };
+
+        let orm_path = workspace_root.join(&pair.orm.file);
+        let ts_path = workspace_root.join(&pair.ts.file);
+
+        let orm_source = std::fs::read_to_string(&orm_path).unwrap_or_else(|e| {
+            eprintln!(
+                "contract pair '{}': cannot read ORM file {:?}: {e}",
+                pair.name, orm_path
+            );
+            std::process::exit(1);
+        });
+        let ts_source = std::fs::read_to_string(&ts_path).unwrap_or_else(|e| {
+            eprintln!(
+                "contract pair '{}': cannot read TS file {:?}: {e}",
+                pair.name, ts_path
+            );
+            std::process::exit(1);
+        });
+
+        if pair.orm.source != "drizzle" {
+            eprintln!(
+                "contract pair '{}': orm.source '{}' not supported in v1 (use 'drizzle')",
+                pair.name, pair.orm.source
+            );
+            std::process::exit(1);
+        }
+
+        let orm_contract = graphify_extract::extract_drizzle_contract_at(
+            &orm_source,
+            &pair.orm.table,
+            orm_path.clone(),
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("contract pair '{}': Drizzle parse error: {e}", pair.name);
+            std::process::exit(1);
+        });
+
+        let ts_contract = graphify_extract::extract_ts_contract_at(
+            &ts_source,
+            &pair.ts.export,
+            ts_path.clone(),
+        )
+        .unwrap_or_else(|e| {
+            eprintln!("contract pair '{}': TS parse error: {e}", pair.name);
+            std::process::exit(1);
+        });
+
+        let cmp = graphify_core::contract::compare_contracts(
+            &orm_contract,
+            &ts_contract,
+            &pair_cfg,
+            &global,
+        );
+
+        let entries: Vec<graphify_report::ViolationEntry> = cmp
+            .violations
+            .into_iter()
+            .map(|v| graphify_report::ViolationEntry {
+                severity: v.severity(global.unmapped_type_severity),
+                violation: v,
+            })
+            .collect();
+
+        pair_results.push(graphify_report::ContractPairResult {
+            name: pair.name.clone(),
+            orm: graphify_report::ContractSideInfo {
+                file: orm_path,
+                symbol: pair.orm.table.clone(),
+                line: 1, // v1 limitation: pair-level line is hardcoded
+            },
+            ts: graphify_report::ContractSideInfo {
+                file: ts_path,
+                symbol: pair.ts.export.clone(),
+                line: 1,
+            },
+            violations: entries,
+        });
+    }
+
+    Some(graphify_report::build_contract_check_result(
+        pair_results,
+        global.unmapped_type_severity,
+    ))
+}
+
+fn build_global_contract_config(
+    cfg: &ContractConfigRaw,
+    warnings_as_errors: bool,
+) -> GlobalContractConfig {
+    let unmapped_severity = if warnings_as_errors {
+        Severity::Error
+    } else {
+        match cfg.unmapped_type_severity.as_str() {
+            "error" => Severity::Error,
+            _ => Severity::Warning,
+        }
+    };
+    let case_rule = match cfg.case_rule.as_str() {
+        "exact" => CaseRule::Exact,
+        _ => CaseRule::SnakeCamel,
+    };
+    let overrides = cfg
+        .type_map
+        .iter()
+        .map(|(k, v)| (k.clone(), parse_type_override(v)))
+        .collect();
+    GlobalContractConfig {
+        case_rule,
+        type_map_overrides: overrides,
+        unmapped_type_severity: unmapped_severity,
+    }
+}
+
+fn parse_type_override(spec: &str) -> FieldType {
+    match spec {
+        "string" => FieldType::Primitive {
+            value: PrimitiveType::String,
+        },
+        "number" => FieldType::Primitive {
+            value: PrimitiveType::Number,
+        },
+        "boolean" => FieldType::Primitive {
+            value: PrimitiveType::Boolean,
+        },
+        "date" => FieldType::Primitive {
+            value: PrimitiveType::Date,
+        },
+        "unknown" => FieldType::Primitive {
+            value: PrimitiveType::Unknown,
+        },
+        other => FieldType::Named {
+            value: other.to_string(),
+        },
+    }
+}
+
+fn print_contract_report(c: &graphify_report::ContractCheckResult) {
+    let status = if c.ok { "OK" } else { "FAILED" };
+    println!(
+        "[contracts] {} (errors={}, warnings={}, pairs={})",
+        status,
+        c.error_count,
+        c.warning_count,
+        c.pairs.len()
+    );
+    for pair in &c.pairs {
+        if pair.violations.is_empty() {
+            continue;
+        }
+        println!(
+            "  pair: {} ({}::{} <-> {}::{})",
+            pair.name,
+            pair.orm.file.display(),
+            pair.orm.symbol,
+            pair.ts.file.display(),
+            pair.ts.symbol,
+        );
+        for v in &pair.violations {
+            let sev = match v.severity {
+                Severity::Error => "error  ",
+                Severity::Warning => "warning",
+            };
+            println!("    {sev} {:?}", v.violation);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
