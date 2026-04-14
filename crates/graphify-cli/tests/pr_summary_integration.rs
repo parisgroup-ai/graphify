@@ -122,25 +122,41 @@ fn pr_summary_end_to_end_against_realistic_fixture() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Header + stats present
-    assert!(stdout.contains("### Graphify — Architecture Delta for"));
-    assert!(stdout.contains("nodes"));
-    assert!(stdout.contains("edges"));
+    // Header + project name (resolved from dir basename "pr_summary")
+    assert!(stdout.contains("### Graphify — Architecture Delta for `pr_summary`"));
 
-    // Drift section with at least one finding
+    // Stats line — drift was present, so delta form: "8 → 10 nodes (+2) · 15 → 18 edges (+3)"
+    assert!(stdout.contains("8 → 10 nodes (+2)"));
+    assert!(stdout.contains("15 → 18 edges (+3)"));
+
+    // Drift section — assert each finding individually
     assert!(stdout.contains("#### Drift in this PR"));
-    assert!(
-        stdout.contains("**New cycle**")
-            || stdout.contains("**Escalated hotspots")
-            || stdout.contains("**New hotspots**"),
-        "expected at least one drift finding; got:\n{}",
-        stdout
-    );
+    // New cycle from fixture: `app.services.auth` ↔ `app.repositories.user`
+    assert!(stdout.contains("**New cycle**"));
+    assert!(stdout.contains("`app.services.auth`"));
+    assert!(stdout.contains("`app.repositories.user`"));
+    assert!(stdout.contains("`→ graphify path app.services.auth app.repositories.user`"));
+    // Escalated hotspot from fixture: `app.core` 0.50 → 0.72
+    assert!(stdout.contains("**Escalated hotspots (1)**"));
+    assert!(stdout.contains("`app.core`"));
+    assert!(stdout.contains("0.50 → 0.72"));
+    assert!(stdout.contains("`→ graphify explain app.core`"));
+    // Community shift: 1 node moved (singular)
+    assert!(stdout.contains("**Community shift**"));
+    assert!(stdout.contains("1 node moved"));
 
-    // Outstanding issues section with rules + contract
+    // Outstanding issues — rules + contract subsections
     assert!(stdout.contains("#### Outstanding issues"));
-    assert!(stdout.contains("**Rules violations"));
-    assert!(stdout.contains("**Contract drift"));
+    assert!(stdout.contains("**Rules violations (1)**"));
+    assert!(stdout.contains("`no_cross_layer_imports`"));
+    assert!(stdout.contains("`app.api.routes`"));
+    assert!(stdout.contains("`app.repositories.user`"));
+    assert!(stdout.contains("**Contract drift (1)**"));
+    assert!(stdout.contains("`users_pair`"));
+    assert!(stdout.contains("`users`"));
+    assert!(stdout.contains("`User`"));
+    assert!(stdout.contains("`created_at`"));
+    assert!(stdout.contains("missing on TS side"));
 
     // Footer
     assert!(stdout.contains("graphify pr-summary <dir>"));
