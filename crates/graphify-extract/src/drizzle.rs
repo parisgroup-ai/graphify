@@ -117,8 +117,6 @@ fn callee_name_of<'a>(call: Node<'a>, bytes: &'a [u8]) -> Option<(Node<'a>, &'a 
 }
 
 fn is_schema_table_chain(call: Node<'_>, bytes: &[u8]) -> bool {
-    // Matches `pgSchema('auth').table(...)` — the call's `function` is a
-    // member_expression whose `.object` is itself a call_expression named `pgSchema`.
     let Some(func) = call.child_by_field_name("function") else {
         return false;
     };
@@ -134,12 +132,17 @@ fn is_schema_table_chain(call: Node<'_>, bytes: &[u8]) -> bool {
     let Some(object) = func.child_by_field_name("object") else {
         return false;
     };
-    if object.kind() != "call_expression" {
-        return false;
+    match object.kind() {
+        "call_expression" => callee_name_of(object, bytes)
+            .map(|(_, n)| n == "pgSchema" || n == "mysqlSchema" || n == "sqliteSchema")
+            .unwrap_or(false),
+        "identifier" => {
+            // Accept any identifier here — false-positives are harmless because the
+            // caller still filters by table-name string match.
+            true
+        }
+        _ => false,
     }
-    callee_name_of(object, bytes)
-        .map(|(_, n)| n == "pgSchema" || n == "mysqlSchema" || n == "sqliteSchema")
-        .unwrap_or(false)
 }
 
 fn nth_argument<'a>(args: Node<'a>, n: usize, _bytes: &'a [u8]) -> Option<Node<'a>> {
@@ -372,5 +375,50 @@ export const posts = pgTable('posts', {
         let c = extract_drizzle_contract(src, "posts").expect("ok");
         let f = c.fields.iter().find(|f| f.name == "tags").unwrap();
         assert!(matches!(&f.type_ref, FieldType::Unmapped { value } if value == "tsvector"));
+    }
+
+    #[test]
+    fn parses_dollar_type_override() {
+        let src = r#"
+import { pgTable, jsonb } from 'drizzle-orm/pg-core';
+export const users = pgTable('users', {
+  metadata: jsonb('metadata').$type<UserMetadata>().notNull(),
+});
+"#;
+        let c = extract_drizzle_contract(src, "users").expect("ok");
+        let f = c.fields.iter().find(|f| f.name == "metadata").unwrap();
+        assert_eq!(
+            f.type_ref,
+            FieldType::Named {
+                value: "UserMetadata".into()
+            }
+        );
+        assert!(!f.nullable);
+    }
+
+    #[test]
+    fn parses_pg_schema_chain() {
+        let src = r#"
+import { pgSchema, uuid, text } from 'drizzle-orm/pg-core';
+const auth = pgSchema('auth');
+export const users = auth.table('users', {
+  id:   uuid('id').primaryKey(),
+  name: text('name').notNull(),
+});
+"#;
+        let c = extract_drizzle_contract(src, "users").expect("ok");
+        assert_eq!(c.fields.len(), 2);
+    }
+
+    #[test]
+    fn multi_table_file_picks_by_name() {
+        let src = r#"
+import { pgTable, text } from 'drizzle-orm/pg-core';
+export const users = pgTable('users', { name: text('name').notNull() });
+export const posts = pgTable('posts', { title: text('title').notNull() });
+"#;
+        let c = extract_drizzle_contract(src, "posts").expect("ok");
+        assert_eq!(c.fields.len(), 1);
+        assert_eq!(c.fields[0].name, "title");
     }
 }
