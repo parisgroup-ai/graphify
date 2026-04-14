@@ -1,6 +1,7 @@
 ---
 uid: feat-013
-status: open
+status: done
+completed: 2026-04-13
 priority: high
 timeEstimate: 960
 tags:
@@ -47,13 +48,20 @@ Support rules such as:
 
 ## Subtasks
 
-- [ ] Define the minimum viable rule model and syntax
-- [ ] Decide which existing CLI surface owns rule evaluation
-- [ ] Implement rule matching against nodes, namespaces, and projects
-- [ ] Add violation reporting for human and JSON output
-- [ ] Cover rules with integration tests and fixtures
-- [ ] Document recommended rule recipes
+- [x] Define the minimum viable rule model and syntax
+- [x] Decide which existing CLI surface owns rule evaluation
+- [x] Implement rule matching against nodes, namespaces, and projects
+- [x] Add violation reporting for human and JSON output
+- [x] Cover rules with integration tests and fixtures
+- [x] Document recommended rule recipes
 
 ## Notes
 
 This should go through the brainstorming/spec flow before implementation. It is the most strategic feature because it turns Graphify from analysis into enforceable architecture governance.
+
+## Verification (2026-04-13)
+
+- Verified `graphify check` evaluates declarative policy rules on top of existing quality gates.
+- Verified README now documents `[[policy.group]]`, `[[policy.rule]]`, selectors, partitions, and CI usage examples.
+- Fixed the integration-test harness to build the current `graphify` binary before executing CLI assertions, eliminating stale-binary false negatives.
+- Verified with `cargo test` from the workspace root.

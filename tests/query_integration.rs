@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use tempfile::TempDir;
 
@@ -9,7 +10,30 @@ use tempfile::TempDir;
 
 /// Returns the path to `target/debug/graphify`.
 fn graphify_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/debug/graphify")
+    static GRAPHIFY_BIN: OnceLock<PathBuf> = OnceLock::new();
+
+    GRAPHIFY_BIN
+        .get_or_init(|| {
+            let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            let status = Command::new("cargo")
+                .current_dir(&workspace_root)
+                .arg("build")
+                .arg("-q")
+                .arg("-p")
+                .arg("graphify-cli")
+                .arg("--bin")
+                .arg("graphify")
+                .status()
+                .expect("build graphify binary for integration tests");
+
+            assert!(
+                status.success(),
+                "cargo build -p graphify-cli --bin graphify exited with non-zero status"
+            );
+
+            workspace_root.join("target/debug/graphify")
+        })
+        .clone()
 }
 
 /// Creates a TempDir with a graphify.toml pointing at the Python fixture.

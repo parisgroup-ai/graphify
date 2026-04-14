@@ -1,6 +1,7 @@
 ---
 uid: feat-014
-status: open
+status: done
+completed: 2026-04-13
 priority: normal
 timeEstimate: 720
 tags:
@@ -46,13 +47,23 @@ Expose time-series or snapshot history for metrics such as:
 
 ## Subtasks
 
-- [ ] Define which metrics are worth storing historically
-- [ ] Choose snapshot retention and file layout
-- [ ] Implement aggregation across snapshots
-- [ ] Expose trend summaries in CLI and reports
-- [ ] Add regression fixtures covering metric changes over time
-- [ ] Document the operational workflow for teams
+- [x] Define which metrics are worth storing historically
+- [x] Choose snapshot retention and file layout
+- [x] Implement aggregation across snapshots
+- [x] Expose trend summaries in CLI and reports
+- [x] Add regression fixtures covering metric changes over time
+- [x] Document the operational workflow for teams
 
 ## Notes
 
 This work should stay focused on practical trend questions rather than becoming a full observability product. It likely pairs well with drift detection and later with policy rule history.
+
+## Verification (2026-04-13)
+
+- Implemented `crates/graphify-core/src/history.rs` (611 lines) — `HistoryStore`, `TrendSummary`, per-metric aggregation across snapshots.
+- Added `graphify trend` CLI surface in `crates/graphify-cli/src/main.rs` with JSON + Markdown output.
+- Added `crates/graphify-report/src/trend_json.rs` + `crates/graphify-report/src/trend_markdown.rs` for trend output formatting.
+- Added regression coverage: `tests/history_trend_integration.rs` + `tests/trend_cli_integration.rs`.
+- README updated with historical trend tracking section.
+- Shipped in commit `8ac4215 feat(cli): add historical architecture trend tracking` on 2026-04-13.
+- Verified with `cargo test --workspace` from workspace root.
