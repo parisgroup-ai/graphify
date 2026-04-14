@@ -195,8 +195,75 @@ fn cycle_first_pair(cycle: &[String]) -> Option<(&str, &str)> {
     }
 }
 
-fn render_outstanding_section(_out: &mut String, _check: Option<&CheckReport>) {
-    // Task 11+ implements this.
+fn render_outstanding_section(out: &mut String, check: Option<&CheckReport>) {
+    let Some(check) = check else { return; };
+
+    let rule_count: usize = check.projects.iter().map(|p| p.violations.len()).sum();
+    let contract_count = check
+        .contracts
+        .as_ref()
+        .map(|c| c.pairs.iter().map(|p| p.violations.len()).sum::<usize>())
+        .unwrap_or(0);
+
+    if rule_count == 0 && contract_count == 0 {
+        return;
+    }
+
+    out.push_str("#### Outstanding issues\n\n");
+    render_rules_violations(out, check, rule_count);
+    // Contract subsection arrives in Task 12.
+}
+
+fn render_rules_violations(out: &mut String, check: &CheckReport, total_rule_count: usize) {
+    use crate::check_report::CheckViolation;
+
+    if total_rule_count == 0 {
+        return;
+    }
+
+    out.push_str(&format!(
+        "**Rules violations ({})** — `graphify check --config graphify.toml`\n",
+        total_rule_count
+    ));
+
+    let mut shown = 0usize;
+    'outer: for project in &check.projects {
+        for v in &project.violations {
+            if shown >= MAX_ROWS_PER_LIST {
+                break 'outer;
+            }
+            match v {
+                CheckViolation::Policy { rule, source_node, target_node, .. } => {
+                    out.push_str(&format!(
+                        "- `{}` — `{}` → `{}`\n",
+                        rule, source_node, target_node
+                    ));
+                }
+                CheckViolation::Limit { kind, actual, expected_max, node_id } => {
+                    match node_id {
+                        Some(n) => out.push_str(&format!(
+                            "- `{}` — `{}`: {} > {}\n",
+                            kind, n, actual, expected_max
+                        )),
+                        None => out.push_str(&format!(
+                            "- `{}` — {} > {}\n",
+                            kind, actual, expected_max
+                        )),
+                    }
+                }
+            }
+            shown += 1;
+        }
+    }
+
+    if total_rule_count > MAX_ROWS_PER_LIST {
+        let extra = total_rule_count - MAX_ROWS_PER_LIST;
+        out.push_str(&format!(
+            "_…and {} more (see check-report.json)_\n",
+            extra
+        ));
+    }
+    out.push('\n');
 }
 
 fn render_footer(out: &mut String) {
@@ -463,5 +530,70 @@ mod tests {
         assert!(out.contains("graphify diff"));
         // No empty bullets / section-complete message
         assert!(!out.contains("_No architectural changes vs baseline._"));
+    }
+
+    fn check_with_rule_violations(violations: Vec<(&str, &str, &str)>) -> CheckReport {
+        use crate::check_report::{
+            CheckLimits, CheckReport, CheckViolation, PolicyCheckSummary, ProjectCheckResult,
+            ProjectCheckSummary,
+        };
+        CheckReport {
+            ok: false,
+            violations: violations.len(),
+            projects: vec![ProjectCheckResult {
+                name: "my-app".into(),
+                ok: false,
+                summary: ProjectCheckSummary {
+                    nodes: 0, edges: 0, communities: 0, cycles: 0,
+                    max_hotspot_score: 0.0, max_hotspot_id: None,
+                },
+                limits: CheckLimits::default(),
+                policy_summary: PolicyCheckSummary { rules_evaluated: violations.len(), policy_violations: violations.len() },
+                violations: violations.into_iter().map(|(rule, src, tgt)| CheckViolation::Policy {
+                    kind: "policy_rule".into(),
+                    rule: rule.into(),
+                    source_node: src.into(),
+                    target_node: tgt.into(),
+                    source_project: "my-app".into(),
+                    target_project: "my-app".into(),
+                    source_selectors: vec![],
+                    target_selectors: vec![],
+                }).collect(),
+            }],
+            contracts: None,
+        }
+    }
+
+    #[test]
+    fn renders_rules_violations_subsection() {
+        let a = minimal_analysis();
+        let c = check_with_rule_violations(vec![
+            ("no_cross_layer_imports", "app.api.routes", "app.repositories.user"),
+        ]);
+        let out = render("my-app", &a, None, Some(&c));
+        assert!(out.contains("#### Outstanding issues"));
+        assert!(out.contains("**Rules violations (1)**"));
+        assert!(out.contains("`no_cross_layer_imports`"));
+        assert!(out.contains("`app.api.routes`"));
+        assert!(out.contains("`app.repositories.user`"));
+    }
+
+    #[test]
+    fn omits_outstanding_section_when_check_is_none() {
+        let a = minimal_analysis();
+        let out = render("my-app", &a, None, None);
+        assert!(!out.contains("#### Outstanding issues"));
+        assert!(!out.contains("**Rules violations"));
+    }
+
+    #[test]
+    fn omits_outstanding_section_when_no_violations() {
+        use crate::check_report::CheckReport;
+        let a = minimal_analysis();
+        let c = CheckReport {
+            ok: true, violations: 0, projects: vec![], contracts: None,
+        };
+        let out = render("my-app", &a, None, Some(&c));
+        assert!(!out.contains("#### Outstanding issues"));
     }
 }
