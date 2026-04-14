@@ -333,7 +333,10 @@ mod tests {
         assert_eq!(value["summary"]["total_nodes"], 2);
         assert_eq!(value["summary"]["total_communities"], 1);
         assert_eq!(value["summary"]["total_cycles"], 1);
-        assert!(!value["summary"]["top_hotspots"].as_array().unwrap().is_empty());
+        assert!(!value["summary"]["top_hotspots"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

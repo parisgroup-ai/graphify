@@ -1859,8 +1859,7 @@ fn cmd_check(
     // copy of the full report so downstream consumers (e.g. `pr-summary`) can
     // read it from any single project directory. Additive: the stdout behavior
     // under --json below is preserved.
-    let serialized =
-        serde_json::to_string_pretty(&report).expect("serialize CheckReport as JSON");
+    let serialized = serde_json::to_string_pretty(&report).expect("serialize CheckReport as JSON");
     for project_result in &report.projects {
         let proj_out = out_dir.join(&project_result.name);
         if let Err(err) = std::fs::create_dir_all(&proj_out) {
@@ -2000,15 +1999,12 @@ fn run_contract_gate(
             std::process::exit(1);
         });
 
-        let ts_contract = graphify_extract::extract_ts_contract_at(
-            &ts_source,
-            &pair.ts.export,
-            ts_path.clone(),
-        )
-        .unwrap_or_else(|e| {
-            eprintln!("contract pair '{}': TS parse error: {e}", pair.name);
-            std::process::exit(1);
-        });
+        let ts_contract =
+            graphify_extract::extract_ts_contract_at(&ts_source, &pair.ts.export, ts_path.clone())
+                .unwrap_or_else(|e| {
+                    eprintln!("contract pair '{}': TS parse error: {e}", pair.name);
+                    std::process::exit(1);
+                });
 
         let cmp = graphify_core::contract::compare_contracts(
             &orm_contract,
@@ -3026,26 +3022,22 @@ fn run_pr_summary(dir: &std::path::Path) {
     let analysis_text = match std::fs::read_to_string(&analysis_path) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!(
-                "graphify pr-summary: failed to read analysis.json: {}",
-                e
-            );
+            eprintln!("graphify pr-summary: failed to read analysis.json: {}", e);
             std::process::exit(1);
         }
     };
     let analysis: AnalysisSnapshot = match serde_json::from_str(&analysis_text) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!(
-                "graphify pr-summary: failed to parse analysis.json: {}",
-                e
-            );
+            eprintln!("graphify pr-summary: failed to parse analysis.json: {}", e);
             std::process::exit(1);
         }
     };
 
-    let drift = load_optional_json::<DiffReport>(&dir.join("drift-report.json"), "drift-report.json");
-    let check = load_optional_json::<CheckReport>(&dir.join("check-report.json"), "check-report.json");
+    let drift =
+        load_optional_json::<DiffReport>(&dir.join("drift-report.json"), "drift-report.json");
+    let check =
+        load_optional_json::<CheckReport>(&dir.join("check-report.json"), "check-report.json");
 
     let project_name = resolve_project_name(dir);
     let output = pr_summary::render(&project_name, &analysis, drift.as_ref(), check.as_ref());
@@ -3063,7 +3055,10 @@ fn load_optional_json<T: for<'de> serde::Deserialize<'de>>(
         Ok(text) => match serde_json::from_str::<T>(&text) {
             Ok(v) => Some(v),
             Err(e) => {
-                eprintln!("warning: failed to parse {}, skipping section: {}", label, e);
+                eprintln!(
+                    "warning: failed to parse {}, skipping section: {}",
+                    label, e
+                );
                 None
             }
         },
@@ -3093,7 +3088,10 @@ mod pr_summary_helper_tests {
     #[test]
     fn resolve_project_name_handles_trailing_slash() {
         // Path::file_name strips trailing components that are "." or root markers.
-        assert_eq!(resolve_project_name(Path::new("./report/my-app/")), "my-app");
+        assert_eq!(
+            resolve_project_name(Path::new("./report/my-app/")),
+            "my-app"
+        );
     }
 }
 

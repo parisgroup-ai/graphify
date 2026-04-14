@@ -315,7 +315,13 @@ pub fn compare_contracts(
     pair: &PairConfig,
     global: &GlobalContractConfig,
 ) -> ContractComparison {
-    let orm_fields = project_fields(&orm.fields, &pair.ignore_orm, AlignmentSide::Orm, pair, global);
+    let orm_fields = project_fields(
+        &orm.fields,
+        &pair.ignore_orm,
+        AlignmentSide::Orm,
+        pair,
+        global,
+    );
     let ts_fields = project_fields(&ts.fields, &pair.ignore_ts, AlignmentSide::Ts, pair, global);
 
     let mut violations = Vec::new();
@@ -455,14 +461,23 @@ fn resolve_orm_type(ty: &FieldType, global: &GlobalContractConfig) -> FieldType 
 fn types_match(a: &FieldType, b: &FieldType) -> bool {
     use FieldType::*;
     match (a, b) {
-        (Primitive { value: PrimitiveType::Unknown }, _) => true,
-        (_, Primitive { value: PrimitiveType::Unknown }) => true,
+        (
+            Primitive {
+                value: PrimitiveType::Unknown,
+            },
+            _,
+        ) => true,
+        (
+            _,
+            Primitive {
+                value: PrimitiveType::Unknown,
+            },
+        ) => true,
         (Primitive { value: x }, Primitive { value: y }) => x == y,
         (Named { value: x }, Named { value: y }) => x == y,
         (Array { value: x }, Array { value: y }) => types_match(x, y),
         (Union { value: xs }, Union { value: ys }) => {
-            xs.len() == ys.len()
-                && xs.iter().zip(ys.iter()).all(|(p, q)| types_match(p, q))
+            xs.len() == ys.len() && xs.iter().zip(ys.iter()).all(|(p, q)| types_match(p, q))
         }
         (Unmapped { value: x }, Unmapped { value: y }) => x == y,
         _ => false,
@@ -683,7 +698,12 @@ mod tests {
     #[test]
     fn alignment_applies_field_alias() {
         let orm = ContractBuilder::orm("user")
-            .raw_primitive("legacyRoleCode", "legacy_role_code", PrimitiveType::String, false)
+            .raw_primitive(
+                "legacyRoleCode",
+                "legacy_role_code",
+                PrimitiveType::String,
+                false,
+            )
             .build();
         let ts = ContractBuilder::ts("user")
             .primitive("roleCode", PrimitiveType::String, false)
@@ -707,11 +727,20 @@ mod tests {
         let ts = ContractBuilder::ts("user")
             .primitive("age", PrimitiveType::Number, true)
             .build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations.len(), 1);
         assert!(matches!(
             cmp.violations[0],
-            ContractViolation::ContractNullabilityMismatch { orm_nullable: false, ts_nullable: true, .. }
+            ContractViolation::ContractNullabilityMismatch {
+                orm_nullable: false,
+                ts_nullable: true,
+                ..
+            }
         ));
     }
 
@@ -723,9 +752,17 @@ mod tests {
         let ts = ContractBuilder::ts("user")
             .primitive("age", PrimitiveType::String, false)
             .build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations.len(), 1);
-        assert!(matches!(cmp.violations[0], ContractViolation::ContractTypeMismatch { .. }));
+        assert!(matches!(
+            cmp.violations[0],
+            ContractViolation::ContractTypeMismatch { .. }
+        ));
     }
 
     #[test]
@@ -736,7 +773,12 @@ mod tests {
         let ts = ContractBuilder::ts("user")
             .named("metadata", "UserMetadata", true)
             .build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations, vec![]);
     }
 
@@ -748,9 +790,17 @@ mod tests {
         let ts = ContractBuilder::ts("post")
             .named("tags", "TsVector", true)
             .build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations.len(), 1);
-        assert!(matches!(cmp.violations[0], ContractViolation::ContractUnmappedOrmType { .. }));
+        assert!(matches!(
+            cmp.violations[0],
+            ContractViolation::ContractUnmappedOrmType { .. }
+        ));
         assert_eq!(
             cmp.violations[0].severity(GlobalContractConfig::default().unmapped_type_severity),
             Severity::Warning
@@ -765,7 +815,12 @@ mod tests {
         let ts = ContractBuilder::ts("blob")
             .named("payload", "Record<string, unknown>", true)
             .build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations, vec![]);
     }
 
@@ -775,7 +830,12 @@ mod tests {
             .relation("posts", Cardinality::Many, "post", true)
             .build();
         let ts = ContractBuilder::ts("user").build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations.len(), 1);
         assert!(matches!(
             cmp.violations[0],
@@ -791,11 +851,20 @@ mod tests {
         let ts = ContractBuilder::ts("user")
             .relation("author", Cardinality::Many, "user", true)
             .build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations.len(), 1);
         assert!(matches!(
             cmp.violations[0],
-            ContractViolation::ContractCardinalityMismatch { orm: Cardinality::One, ts: Cardinality::Many, .. }
+            ContractViolation::ContractCardinalityMismatch {
+                orm: Cardinality::One,
+                ts: Cardinality::Many,
+                ..
+            }
         ));
     }
 
@@ -807,7 +876,12 @@ mod tests {
         let ts = ContractBuilder::ts("user")
             .relation("profile", Cardinality::One, "profile_summary", true)
             .build();
-        let cmp = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp.violations, vec![]);
     }
 
@@ -824,8 +898,18 @@ mod tests {
             .primitive("email", PrimitiveType::String, false) // missing on orm
             .build();
 
-        let cmp_a = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
-        let cmp_b = compare_contracts(&orm, &ts, &PairConfig::default(), &GlobalContractConfig::default());
+        let cmp_a = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
+        let cmp_b = compare_contracts(
+            &orm,
+            &ts,
+            &PairConfig::default(),
+            &GlobalContractConfig::default(),
+        );
         assert_eq!(cmp_a.violations, cmp_b.violations);
         // First violation must be the earliest-line issue on the ORM side.
         assert!(matches!(

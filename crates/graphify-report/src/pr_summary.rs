@@ -52,7 +52,12 @@ fn render_stats_line(out: &mut String, analysis: &AnalysisSnapshot, drift: Optio
             let ea = d.summary_delta.edges.after;
             out.push_str(&format!(
                 "{} → {} nodes ({:+}) · {} → {} edges ({:+})\n\n",
-                nb, na, na as i64 - nb as i64, eb, ea, ea as i64 - eb as i64,
+                nb,
+                na,
+                na as i64 - nb as i64,
+                eb,
+                ea,
+                ea as i64 - eb as i64,
             ));
         }
         None => {
@@ -120,10 +125,7 @@ fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
         }
         if drift.hotspots.rising.len() > MAX_ROWS_PER_LIST {
             let extra = drift.hotspots.rising.len() - MAX_ROWS_PER_LIST;
-            out.push_str(&format!(
-                "  _…and {} more (see drift-report.md)_\n",
-                extra
-            ));
+            out.push_str(&format!("  _…and {} more (see drift-report.md)_\n", extra));
         }
     }
 
@@ -140,10 +142,7 @@ fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
         }
         if drift.hotspots.new_hotspots.len() > MAX_ROWS_PER_LIST {
             let extra = drift.hotspots.new_hotspots.len() - MAX_ROWS_PER_LIST;
-            out.push_str(&format!(
-                "  _…and {} more (see drift-report.md)_\n",
-                extra
-            ));
+            out.push_str(&format!("  _…and {} more (see drift-report.md)_\n", extra));
         }
     }
 }
@@ -158,10 +157,7 @@ fn render_cycle_rows(out: &mut String, drift: &DiffReport) {
     }
     if drift.cycles.introduced.len() > MAX_ROWS_PER_LIST {
         let extra = drift.cycles.introduced.len() - MAX_ROWS_PER_LIST;
-        out.push_str(&format!(
-            "  _…and {} more (see drift-report.md)_\n",
-            extra
-        ));
+        out.push_str(&format!("  _…and {} more (see drift-report.md)_\n", extra));
     }
 
     for cycle in drift.cycles.resolved.iter().take(MAX_ROWS_PER_LIST) {
@@ -170,10 +166,7 @@ fn render_cycle_rows(out: &mut String, drift: &DiffReport) {
     }
     if drift.cycles.resolved.len() > MAX_ROWS_PER_LIST {
         let extra = drift.cycles.resolved.len() - MAX_ROWS_PER_LIST;
-        out.push_str(&format!(
-            "  _…and {} more (see drift-report.md)_\n",
-            extra
-        ));
+        out.push_str(&format!("  _…and {} more (see drift-report.md)_\n", extra));
     }
 }
 
@@ -196,7 +189,9 @@ fn cycle_first_pair(cycle: &[String]) -> Option<(&str, &str)> {
 }
 
 fn render_outstanding_section(out: &mut String, check: Option<&CheckReport>) {
-    let Some(check) = check else { return; };
+    let Some(check) = check else {
+        return;
+    };
 
     let rule_count: usize = check.projects.iter().map(|p| p.violations.len()).sum();
     let contract_count = check
@@ -233,24 +228,31 @@ fn render_rules_violations(out: &mut String, check: &CheckReport, total_rule_cou
                 break 'outer;
             }
             match v {
-                CheckViolation::Policy { rule, source_node, target_node, .. } => {
+                CheckViolation::Policy {
+                    rule,
+                    source_node,
+                    target_node,
+                    ..
+                } => {
                     out.push_str(&format!(
                         "- `{}` — `{}` → `{}`\n",
                         rule, source_node, target_node
                     ));
                 }
-                CheckViolation::Limit { kind, actual, expected_max, node_id } => {
-                    match node_id {
-                        Some(n) => out.push_str(&format!(
-                            "- `{}` — `{}`: {} > {}\n",
-                            kind, n, actual, expected_max
-                        )),
-                        None => out.push_str(&format!(
-                            "- `{}` — {} > {}\n",
-                            kind, actual, expected_max
-                        )),
+                CheckViolation::Limit {
+                    kind,
+                    actual,
+                    expected_max,
+                    node_id,
+                } => match node_id {
+                    Some(n) => out.push_str(&format!(
+                        "- `{}` — `{}`: {} > {}\n",
+                        kind, n, actual, expected_max
+                    )),
+                    None => {
+                        out.push_str(&format!("- `{}` — {} > {}\n", kind, actual, expected_max))
                     }
-                }
+                },
             }
             shown += 1;
         }
@@ -258,10 +260,7 @@ fn render_rules_violations(out: &mut String, check: &CheckReport, total_rule_cou
 
     if total_rule_count > MAX_ROWS_PER_LIST {
         let extra = total_rule_count - MAX_ROWS_PER_LIST;
-        out.push_str(&format!(
-            "_…and {} more (see check-report.json)_\n",
-            extra
-        ));
+        out.push_str(&format!("_…and {} more (see check-report.json)_\n", extra));
     }
     out.push('\n');
 }
@@ -270,7 +269,9 @@ fn render_contract_violations(out: &mut String, check: &CheckReport, total_contr
     if total_contract_count == 0 {
         return;
     }
-    let Some(contracts) = check.contracts.as_ref() else { return; };
+    let Some(contracts) = check.contracts.as_ref() else {
+        return;
+    };
 
     out.push_str(&format!(
         "**Contract drift ({})** — `graphify check --config graphify.toml`\n",
@@ -294,10 +295,7 @@ fn render_contract_violations(out: &mut String, check: &CheckReport, total_contr
 
     if total_contract_count > MAX_ROWS_PER_LIST {
         let extra = total_contract_count - MAX_ROWS_PER_LIST;
-        out.push_str(&format!(
-            "_…and {} more (see check-report.json)_\n",
-            extra
-        ));
+        out.push_str(&format!("_…and {} more (see check-report.json)_\n", extra));
     }
     out.push('\n');
 }
@@ -305,16 +303,36 @@ fn render_contract_violations(out: &mut String, check: &CheckReport, total_contr
 fn summarize_contract_violation(v: &graphify_core::contract::ContractViolation) -> String {
     use graphify_core::contract::ContractViolation as V;
     match v {
-        V::ContractFieldMissingOnTs { field, .. } => format!("field `{}` missing on TS side", field),
-        V::ContractFieldMissingOnOrm { field, .. } => format!("field `{}` missing on ORM side", field),
-        V::ContractTypeMismatch { field, .. } => format!("type mismatch on field `{}`", field),
-        V::ContractNullabilityMismatch { field, orm_nullable, ts_nullable, .. } => {
-            format!("nullability mismatch on `{}` (ORM={}, TS={})", field, orm_nullable, ts_nullable)
+        V::ContractFieldMissingOnTs { field, .. } => {
+            format!("field `{}` missing on TS side", field)
         }
-        V::ContractRelationMissingOnTs { relation, .. } => format!("relation `{}` missing on TS side", relation),
-        V::ContractRelationMissingOnOrm { relation, .. } => format!("relation `{}` missing on ORM side", relation),
-        V::ContractCardinalityMismatch { relation, .. } => format!("cardinality mismatch on relation `{}`", relation),
-        V::ContractUnmappedOrmType { field, raw_type, .. } => format!("unmapped ORM type `{}` on field `{}`", raw_type, field),
+        V::ContractFieldMissingOnOrm { field, .. } => {
+            format!("field `{}` missing on ORM side", field)
+        }
+        V::ContractTypeMismatch { field, .. } => format!("type mismatch on field `{}`", field),
+        V::ContractNullabilityMismatch {
+            field,
+            orm_nullable,
+            ts_nullable,
+            ..
+        } => {
+            format!(
+                "nullability mismatch on `{}` (ORM={}, TS={})",
+                field, orm_nullable, ts_nullable
+            )
+        }
+        V::ContractRelationMissingOnTs { relation, .. } => {
+            format!("relation `{}` missing on TS side", relation)
+        }
+        V::ContractRelationMissingOnOrm { relation, .. } => {
+            format!("relation `{}` missing on ORM side", relation)
+        }
+        V::ContractCardinalityMismatch { relation, .. } => {
+            format!("cardinality mismatch on relation `{}`", relation)
+        }
+        V::ContractUnmappedOrmType {
+            field, raw_type, ..
+        } => format!("unmapped ORM type `{}` on field `{}`", raw_type, field),
     }
 }
 
@@ -366,21 +384,57 @@ mod tests {
     }
 
     fn drift_with_cycles(introduced: Vec<Vec<&str>>, resolved: Vec<Vec<&str>>) -> DiffReport {
-        use graphify_core::diff::{CommunityDiff, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, SummaryDelta};
+        use graphify_core::diff::{
+            CommunityDiff, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, SummaryDelta,
+        };
         DiffReport {
             summary_delta: SummaryDelta {
-                nodes: Delta { before: 0, after: 0, change: 0 },
-                edges: Delta { before: 0, after: 0, change: 0 },
-                communities: Delta { before: 0, after: 0, change: 0 },
-                cycles: Delta { before: 0, after: 0, change: 0 },
+                nodes: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                edges: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                communities: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                cycles: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
             },
-            edges: EdgeDiff { added_nodes: vec![], removed_nodes: vec![], degree_changes: vec![] },
+            edges: EdgeDiff {
+                added_nodes: vec![],
+                removed_nodes: vec![],
+                degree_changes: vec![],
+            },
             cycles: CycleDiff {
-                introduced: introduced.into_iter().map(|c| c.into_iter().map(String::from).collect()).collect(),
-                resolved: resolved.into_iter().map(|c| c.into_iter().map(String::from).collect()).collect(),
+                introduced: introduced
+                    .into_iter()
+                    .map(|c| c.into_iter().map(String::from).collect())
+                    .collect(),
+                resolved: resolved
+                    .into_iter()
+                    .map(|c| c.into_iter().map(String::from).collect())
+                    .collect(),
             },
-            hotspots: HotspotDiff { rising: vec![], falling: vec![], new_hotspots: vec![], removed_hotspots: vec![] },
-            communities: CommunityDiff { moved_nodes: vec![], stable_count: 0 },
+            hotspots: HotspotDiff {
+                rising: vec![],
+                falling: vec![],
+                new_hotspots: vec![],
+                removed_hotspots: vec![],
+            },
+            communities: CommunityDiff {
+                moved_nodes: vec![],
+                stable_count: 0,
+            },
         }
     }
 
@@ -424,10 +478,7 @@ mod tests {
     #[test]
     fn renders_broken_cycle_rows_without_next_step_hint() {
         let a = minimal_analysis();
-        let d = drift_with_cycles(
-            vec![],
-            vec![vec!["app.a", "app.b"]],
-        );
+        let d = drift_with_cycles(vec![], vec![vec!["app.a", "app.b"]]);
         let out = render("my-app", &a, Some(&d), None);
         assert!(out.contains("**Broken cycle**"));
         assert!(out.contains("`app.a`"));
@@ -445,28 +496,72 @@ mod tests {
         assert!(!out.contains("**Broken cycle**"));
     }
 
-    fn drift_with_hotspots(rising: Vec<(&str, f64, f64)>, new_hotspots: Vec<(&str, f64)>) -> DiffReport {
-        use graphify_core::diff::{CommunityDiff, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, ScoreChange, SummaryDelta};
+    fn drift_with_hotspots(
+        rising: Vec<(&str, f64, f64)>,
+        new_hotspots: Vec<(&str, f64)>,
+    ) -> DiffReport {
+        use graphify_core::diff::{
+            CommunityDiff, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, ScoreChange,
+            SummaryDelta,
+        };
         DiffReport {
             summary_delta: SummaryDelta {
-                nodes: Delta { before: 0, after: 0, change: 0 },
-                edges: Delta { before: 0, after: 0, change: 0 },
-                communities: Delta { before: 0, after: 0, change: 0 },
-                cycles: Delta { before: 0, after: 0, change: 0 },
+                nodes: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                edges: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                communities: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                cycles: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
             },
-            edges: EdgeDiff { added_nodes: vec![], removed_nodes: vec![], degree_changes: vec![] },
-            cycles: CycleDiff { introduced: vec![], resolved: vec![] },
+            edges: EdgeDiff {
+                added_nodes: vec![],
+                removed_nodes: vec![],
+                degree_changes: vec![],
+            },
+            cycles: CycleDiff {
+                introduced: vec![],
+                resolved: vec![],
+            },
             hotspots: HotspotDiff {
-                rising: rising.into_iter().map(|(id, before, after)| ScoreChange {
-                    id: id.into(), before, after, delta: after - before,
-                }).collect(),
+                rising: rising
+                    .into_iter()
+                    .map(|(id, before, after)| ScoreChange {
+                        id: id.into(),
+                        before,
+                        after,
+                        delta: after - before,
+                    })
+                    .collect(),
                 falling: vec![],
-                new_hotspots: new_hotspots.into_iter().map(|(id, after)| ScoreChange {
-                    id: id.into(), before: 0.0, after, delta: after,
-                }).collect(),
+                new_hotspots: new_hotspots
+                    .into_iter()
+                    .map(|(id, after)| ScoreChange {
+                        id: id.into(),
+                        before: 0.0,
+                        after,
+                        delta: after,
+                    })
+                    .collect(),
                 removed_hotspots: vec![],
             },
-            communities: CommunityDiff { moved_nodes: vec![], stable_count: 0 },
+            communities: CommunityDiff {
+                moved_nodes: vec![],
+                stable_count: 0,
+            },
         }
     }
 
@@ -474,7 +569,10 @@ mod tests {
     fn renders_escalated_hotspots_with_explain_hint() {
         let a = minimal_analysis();
         let d = drift_with_hotspots(
-            vec![("app.services.auth", 0.71, 0.83), ("app.api.routes", 0.48, 0.52)],
+            vec![
+                ("app.services.auth", 0.71, 0.83),
+                ("app.api.routes", 0.48, 0.52),
+            ],
             vec![],
         );
         let out = render("my-app", &a, Some(&d), None);
@@ -489,10 +587,7 @@ mod tests {
     #[test]
     fn renders_new_hotspots_with_explain_hint() {
         let a = minimal_analysis();
-        let d = drift_with_hotspots(
-            vec![],
-            vec![("app.core.new_mod", 0.66)],
-        );
+        let d = drift_with_hotspots(vec![], vec![("app.core.new_mod", 0.66)]);
         let out = render("my-app", &a, Some(&d), None);
         assert!(out.contains("**New hotspots (1)**"));
         assert!(out.contains("`app.core.new_mod`"));
@@ -504,7 +599,13 @@ mod tests {
     fn caps_escalated_hotspots_at_5_rows_with_more_hint() {
         let a = minimal_analysis();
         let rising: Vec<(&str, f64, f64)> = (0..7)
-            .map(|i| (Box::leak(format!("app.mod_{}", i).into_boxed_str()) as &str, 0.5, 0.7))
+            .map(|i| {
+                (
+                    Box::leak(format!("app.mod_{}", i).into_boxed_str()) as &str,
+                    0.5,
+                    0.7,
+                )
+            })
             .collect();
         let d = drift_with_hotspots(rising, vec![]);
         let out = render("my-app", &a, Some(&d), None);
@@ -517,21 +618,57 @@ mod tests {
     }
 
     fn drift_with_community_moves(moves: Vec<(&str, usize, usize)>) -> DiffReport {
-        use graphify_core::diff::{CommunityDiff, CommunityMove, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, SummaryDelta};
+        use graphify_core::diff::{
+            CommunityDiff, CommunityMove, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff,
+            SummaryDelta,
+        };
         DiffReport {
             summary_delta: SummaryDelta {
-                nodes: Delta { before: 0, after: 0, change: 0 },
-                edges: Delta { before: 0, after: 0, change: 0 },
-                communities: Delta { before: 1, after: 2, change: 1 },
-                cycles: Delta { before: 0, after: 0, change: 0 },
+                nodes: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                edges: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                communities: Delta {
+                    before: 1,
+                    after: 2,
+                    change: 1,
+                },
+                cycles: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
             },
-            edges: EdgeDiff { added_nodes: vec![], removed_nodes: vec![], degree_changes: vec![] },
-            cycles: CycleDiff { introduced: vec![], resolved: vec![] },
-            hotspots: HotspotDiff { rising: vec![], falling: vec![], new_hotspots: vec![], removed_hotspots: vec![] },
+            edges: EdgeDiff {
+                added_nodes: vec![],
+                removed_nodes: vec![],
+                degree_changes: vec![],
+            },
+            cycles: CycleDiff {
+                introduced: vec![],
+                resolved: vec![],
+            },
+            hotspots: HotspotDiff {
+                rising: vec![],
+                falling: vec![],
+                new_hotspots: vec![],
+                removed_hotspots: vec![],
+            },
             communities: CommunityDiff {
-                moved_nodes: moves.into_iter().map(|(id, from_c, to_c)| CommunityMove {
-                    id: id.into(), from_community: from_c, to_community: to_c,
-                }).collect(),
+                moved_nodes: moves
+                    .into_iter()
+                    .map(|(id, from_c, to_c)| CommunityMove {
+                        id: id.into(),
+                        from_community: from_c,
+                        to_community: to_c,
+                    })
+                    .collect(),
                 stable_count: 0,
             },
         }
@@ -564,7 +701,7 @@ mod tests {
     #[test]
     fn renders_no_changes_message_when_drift_empty() {
         let a = minimal_analysis();
-        let d = drift_with_community_moves(vec![]);  // also no cycles, no hotspots
+        let d = drift_with_community_moves(vec![]); // also no cycles, no hotspots
         let out = render("my-app", &a, Some(&d), None);
         assert!(out.contains("#### Drift in this PR"));
         assert!(out.contains("_No architectural changes vs baseline._"));
@@ -596,21 +733,31 @@ mod tests {
                 name: "my-app".into(),
                 ok: false,
                 summary: ProjectCheckSummary {
-                    nodes: 0, edges: 0, communities: 0, cycles: 0,
-                    max_hotspot_score: 0.0, max_hotspot_id: None,
+                    nodes: 0,
+                    edges: 0,
+                    communities: 0,
+                    cycles: 0,
+                    max_hotspot_score: 0.0,
+                    max_hotspot_id: None,
                 },
                 limits: CheckLimits::default(),
-                policy_summary: PolicyCheckSummary { rules_evaluated: violations.len(), policy_violations: violations.len() },
-                violations: violations.into_iter().map(|(rule, src, tgt)| CheckViolation::Policy {
-                    kind: "policy_rule".into(),
-                    rule: rule.into(),
-                    source_node: src.into(),
-                    target_node: tgt.into(),
-                    source_project: "my-app".into(),
-                    target_project: "my-app".into(),
-                    source_selectors: vec![],
-                    target_selectors: vec![],
-                }).collect(),
+                policy_summary: PolicyCheckSummary {
+                    rules_evaluated: violations.len(),
+                    policy_violations: violations.len(),
+                },
+                violations: violations
+                    .into_iter()
+                    .map(|(rule, src, tgt)| CheckViolation::Policy {
+                        kind: "policy_rule".into(),
+                        rule: rule.into(),
+                        source_node: src.into(),
+                        target_node: tgt.into(),
+                        source_project: "my-app".into(),
+                        target_project: "my-app".into(),
+                        source_selectors: vec![],
+                        target_selectors: vec![],
+                    })
+                    .collect(),
             }],
             contracts: None,
         }
@@ -619,9 +766,11 @@ mod tests {
     #[test]
     fn renders_rules_violations_subsection() {
         let a = minimal_analysis();
-        let c = check_with_rule_violations(vec![
-            ("no_cross_layer_imports", "app.api.routes", "app.repositories.user"),
-        ]);
+        let c = check_with_rule_violations(vec![(
+            "no_cross_layer_imports",
+            "app.api.routes",
+            "app.repositories.user",
+        )]);
         let out = render("my-app", &a, None, Some(&c));
         assert!(out.contains("#### Outstanding issues"));
         assert!(out.contains("**Rules violations (1)**"));
@@ -645,11 +794,18 @@ mod tests {
                 name: "my-app".into(),
                 ok: false,
                 summary: ProjectCheckSummary {
-                    nodes: 0, edges: 0, communities: 0, cycles: 0,
-                    max_hotspot_score: 0.0, max_hotspot_id: None,
+                    nodes: 0,
+                    edges: 0,
+                    communities: 0,
+                    cycles: 0,
+                    max_hotspot_score: 0.0,
+                    max_hotspot_id: None,
                 },
                 limits: CheckLimits::default(),
-                policy_summary: PolicyCheckSummary { rules_evaluated: 0, policy_violations: 0 },
+                policy_summary: PolicyCheckSummary {
+                    rules_evaluated: 0,
+                    policy_violations: 0,
+                },
                 violations: vec![
                     // Limit with node_id (e.g. max_hotspot_score)
                     CheckViolation::Limit {
@@ -698,32 +854,50 @@ mod tests {
         use crate::check_report::CheckReport;
         let a = minimal_analysis();
         let c = CheckReport {
-            ok: true, violations: 0, projects: vec![], contracts: None,
+            ok: true,
+            violations: 0,
+            projects: vec![],
+            contracts: None,
         };
         let out = render("my-app", &a, None, Some(&c));
         assert!(!out.contains("#### Outstanding issues"));
     }
 
     fn check_with_contract_violations(violations_per_pair: Vec<(&str, &str, &str)>) -> CheckReport {
-        use std::path::PathBuf;
-        use graphify_core::contract::{ContractViolation, FieldType, PrimitiveType};
-        use crate::contract_json::{ContractCheckResult, ContractPairResult, ContractSideInfo, ViolationEntry};
         use crate::check_report::CheckReport;
+        use crate::contract_json::{
+            ContractCheckResult, ContractPairResult, ContractSideInfo, ViolationEntry,
+        };
         use graphify_core::contract::Severity;
+        use graphify_core::contract::{ContractViolation, FieldType, PrimitiveType};
+        use std::path::PathBuf;
 
-        let pairs = violations_per_pair.into_iter().map(|(pair_name, orm_tbl, ts_ty)| ContractPairResult {
-            name: pair_name.into(),
-            orm: ContractSideInfo { file: PathBuf::from("schema.ts"), symbol: orm_tbl.into(), line: 1 },
-            ts: ContractSideInfo { file: PathBuf::from("types.ts"), symbol: ts_ty.into(), line: 1 },
-            violations: vec![ViolationEntry {
-                severity: Severity::Error,
-                violation: ContractViolation::ContractFieldMissingOnTs {
-                    field: "created_at".into(),
-                    orm_type: FieldType::Primitive { value: PrimitiveType::Date },
-                    orm_line: 10,
+        let pairs = violations_per_pair
+            .into_iter()
+            .map(|(pair_name, orm_tbl, ts_ty)| ContractPairResult {
+                name: pair_name.into(),
+                orm: ContractSideInfo {
+                    file: PathBuf::from("schema.ts"),
+                    symbol: orm_tbl.into(),
+                    line: 1,
                 },
-            }],
-        }).collect::<Vec<_>>();
+                ts: ContractSideInfo {
+                    file: PathBuf::from("types.ts"),
+                    symbol: ts_ty.into(),
+                    line: 1,
+                },
+                violations: vec![ViolationEntry {
+                    severity: Severity::Error,
+                    violation: ContractViolation::ContractFieldMissingOnTs {
+                        field: "created_at".into(),
+                        orm_type: FieldType::Primitive {
+                            value: PrimitiveType::Date,
+                        },
+                        orm_line: 10,
+                    },
+                }],
+            })
+            .collect::<Vec<_>>();
 
         CheckReport {
             ok: false,

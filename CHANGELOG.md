@@ -2,6 +2,17 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## [0.6.0] - 2026-04-14
+
+### Added
+- feat(cli): `graphify pr-summary` command to render PR-ready Markdown summaries from project analysis artifacts (FEAT-015)
+- feat(cli): write `check-report.json` to each project output directory so PR summarization and downstream tooling can read a single project folder directly (FEAT-015)
+- feat(report): PR summary sections for hotspots, cycles, community shifts, rules violations, and contract drift (FEAT-015)
+- feat(core): deserialize diff and contract check report types for report/CLI composition (FEAT-015)
+
+### Fixed
+- fix(install): point `install.sh` to the correct GitHub repository owner (`parisgroup-ai/graphify`) so release downloads resolve correctly
+
 ## 0.5.0 — 2026-04-13
 
 - feat(cli): FEAT-016 contract drift detection between Drizzle ORM schemas and TS interface/type declarations, integrated into `graphify check`

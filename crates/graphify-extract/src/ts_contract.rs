@@ -39,11 +39,10 @@ pub fn extract_ts_contract_at(
         })?;
     let bytes = source.as_bytes();
 
-    let target = find_declaration(tree.root_node(), bytes, export).ok_or_else(|| {
-        TsContractParseError {
+    let target =
+        find_declaration(tree.root_node(), bytes, export).ok_or_else(|| TsContractParseError {
             message: format!("export '{export}' not found"),
-        }
-    })?;
+        })?;
 
     let (fields, relations) = match target.kind() {
         "interface_declaration" => parse_interface(target, bytes)?,
@@ -153,9 +152,7 @@ fn parse_members(
         };
         let raw_name = property_name_text(name_node, bytes).to_string();
         let mut child_cursor = member.walk();
-        let optional = member
-            .children(&mut child_cursor)
-            .any(|n| n.kind() == "?");
+        let optional = member.children(&mut child_cursor).any(|n| n.kind() == "?");
         let type_node = member.child_by_field_name("type");
         let (type_ref, mut nullable) = match type_node {
             Some(t) => resolve_type_annotation(t, bytes),
@@ -526,7 +523,8 @@ export interface UserDto {
 }
 "#;
         // One-shot helper: parse all three, then reclassify UserDto.
-        let contracts = parse_all_ts_contracts(src, &["UserDto", "ProfileDto", "PostDto"]).expect("ok");
+        let contracts =
+            parse_all_ts_contracts(src, &["UserDto", "ProfileDto", "PostDto"]).expect("ok");
         let user = contracts.iter().find(|c| c.name == "UserDto").unwrap();
         assert_eq!(user.relations.len(), 2);
         let profile = user.relations.iter().find(|r| r.name == "profile").unwrap();
@@ -565,6 +563,11 @@ export type UserDto = {
 "#;
         let c = extract_ts_contract(src, "UserDto").expect("ok");
         let id = c.fields.iter().find(|f| f.name == "id").unwrap();
-        assert!(matches!(id.type_ref, FieldType::Primitive { value: PrimitiveType::Number }));
+        assert!(matches!(
+            id.type_ref,
+            FieldType::Primitive {
+                value: PrimitiveType::Number
+            }
+        ));
     }
 }

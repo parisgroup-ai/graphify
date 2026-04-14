@@ -33,22 +33,28 @@ pub fn extract_drizzle_contract_at(
             message: format!("load TS grammar: {e}"),
         })?;
 
-    let tree = parser.parse(source, None).ok_or_else(|| DrizzleParseError {
-        message: "TS parse returned None".into(),
-    })?;
+    let tree = parser
+        .parse(source, None)
+        .ok_or_else(|| DrizzleParseError {
+            message: "TS parse returned None".into(),
+        })?;
 
     let bytes = source.as_bytes();
     let mut found: Option<(Node<'_>, &str)> = None;
 
     // Walk every `export_statement` → `lexical_declaration` → variable_declarator
     // whose value is a call to one of the known table constructors.
-    walk_table_bindings(tree.root_node(), bytes, &mut |decl_name, call_node, call_name| {
-        if (call_name.ends_with("Table") || is_schema_table_chain(call_node, bytes))
-            && first_string_arg(call_node, bytes).as_deref() == Some(table)
-        {
-            found = Some((call_node, decl_name));
-        }
-    });
+    walk_table_bindings(
+        tree.root_node(),
+        bytes,
+        &mut |decl_name, call_node, call_name| {
+            if (call_name.ends_with("Table") || is_schema_table_chain(call_node, bytes))
+                && first_string_arg(call_node, bytes).as_deref() == Some(table)
+            {
+                found = Some((call_node, decl_name));
+            }
+        },
+    );
 
     let Some((call_node, _decl_name)) = found else {
         return Err(DrizzleParseError {
@@ -67,7 +73,8 @@ pub fn extract_drizzle_contract_at(
 
     let _table_line = call_node.start_position().row + 1;
 
-    let decl_name_for_table: Option<String> = resolve_declared_name_for_call(tree.root_node(), bytes, call_node);
+    let decl_name_for_table: Option<String> =
+        resolve_declared_name_for_call(tree.root_node(), bytes, call_node);
 
     let mut relations = Vec::new();
     if let Some(var_name) = decl_name_for_table.as_deref() {
@@ -311,7 +318,8 @@ fn first_string_arg(call: Node<'_>, bytes: &[u8]) -> Option<String> {
 
 fn string_literal_value(node: Node<'_>, bytes: &[u8]) -> String {
     let raw = text_of(node, bytes);
-    raw.trim_matches(|c| c == '\'' || c == '"' || c == '`').to_string()
+    raw.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+        .to_string()
 }
 
 fn text_of<'a>(node: Node<'_>, bytes: &'a [u8]) -> &'a str {
@@ -336,10 +344,14 @@ fn parse_columns_object(obj: Node<'_>, bytes: &[u8]) -> Result<Vec<Field>, Drizz
         }
         let key_node = pair
             .child_by_field_name("key")
-            .ok_or_else(|| DrizzleParseError { message: "pair missing key".into() })?;
+            .ok_or_else(|| DrizzleParseError {
+                message: "pair missing key".into(),
+            })?;
         let value_node = pair
             .child_by_field_name("value")
-            .ok_or_else(|| DrizzleParseError { message: "pair missing value".into() })?;
+            .ok_or_else(|| DrizzleParseError {
+                message: "pair missing value".into(),
+            })?;
         let raw_name = property_key_text(key_node, bytes).to_string();
         let (type_ref, nullable, has_default) = interpret_column_chain(value_node, bytes);
         let line = pair.start_position().row + 1;
@@ -472,11 +484,11 @@ export const users = pgTable('users', {
         assert_eq!(c.side, ContractSide::Orm);
         assert_eq!(c.name, "users");
         assert_eq!(c.fields.len(), 5);
-        assert_field(&c, "id",        FieldType::Primitive { value: String },  true);  // no .notNull()
-        assert_field(&c, "email",     FieldType::Primitive { value: String },  false);
-        assert_field(&c, "age",       FieldType::Primitive { value: Number },  true);
-        assert_field(&c, "createdAt", FieldType::Primitive { value: Date },    false);
-        assert_field(&c, "active",    FieldType::Primitive { value: Boolean }, false);
+        assert_field(&c, "id", FieldType::Primitive { value: String }, true); // no .notNull()
+        assert_field(&c, "email", FieldType::Primitive { value: String }, false);
+        assert_field(&c, "age", FieldType::Primitive { value: Number }, true);
+        assert_field(&c, "createdAt", FieldType::Primitive { value: Date }, false);
+        assert_field(&c, "active", FieldType::Primitive { value: Boolean }, false);
     }
 
     #[test]

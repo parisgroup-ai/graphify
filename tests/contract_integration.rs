@@ -19,8 +19,7 @@ fn graphify_bin() -> PathBuf {
 }
 
 fn fixture_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/contract_drift/monorepo")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/contract_drift/monorepo")
 }
 
 fn run_check(args: &[&str]) -> std::process::Output {

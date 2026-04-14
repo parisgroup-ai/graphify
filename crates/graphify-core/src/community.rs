@@ -111,8 +111,10 @@ pub fn detect_communities(graph: &CodeGraph) -> Vec<Community> {
             // We compare candidates relative to the gain of staying put (0).
             let mut best_gain = 0.0_f64;
             let mut best_comm = current_comm;
-            let mut candidates: Vec<(usize, f64)> =
-                comm_weight.iter().map(|(&c, &k_i_in)| (c, k_i_in)).collect();
+            let mut candidates: Vec<(usize, f64)> = comm_weight
+                .iter()
+                .map(|(&c, &k_i_in)| (c, k_i_in))
+                .collect();
             candidates.sort_by_key(|(c, _)| *c);
 
             for (c, k_i_in) in candidates {
@@ -177,10 +179,8 @@ fn merge_singletons(community: &mut [usize], adj: &[HashMap<usize, f64>], n: usi
         }
         let mut best_comm = community[u];
         let mut best_w = 0.0_f64;
-        let mut neighbors: Vec<(usize, f64, usize)> = adj[u]
-            .iter()
-            .map(|(&v, &w)| (community[v], w, v))
-            .collect();
+        let mut neighbors: Vec<(usize, f64, usize)> =
+            adj[u].iter().map(|(&v, &w)| (community[v], w, v)).collect();
         neighbors.sort_by(|a, b| {
             b.1.partial_cmp(&a.1)
                 .unwrap_or(std::cmp::Ordering::Equal)
