@@ -8,6 +8,10 @@ use graphify_core::diff::{AnalysisSnapshot, DiffReport};
 
 use crate::check_report::CheckReport;
 
+/// Max rows emitted per bulleted list in the Drift in this PR section before
+/// an "…and N more" overflow hint takes over.
+const MAX_ROWS_PER_LIST: usize = 5;
+
 /// Render a PR summary Markdown string.
 ///
 /// * `project_name` — resolved project name (caller provides; in the CLI,
@@ -77,25 +81,39 @@ fn render_drift_section(out: &mut String, drift: Option<&DiffReport>) {
 
     render_cycle_rows(out, drift);
     render_hotspot_rows(out, drift);
-    // Community rows arrive in Task 9.
+    render_community_shift_row(out, drift);
+}
+
+fn render_community_shift_row(out: &mut String, drift: &DiffReport) {
+    let moved = &drift.communities.moved_nodes;
+    if moved.is_empty() {
+        return;
+    }
+    let communities_before = drift.summary_delta.communities.before;
+    let communities_after = drift.summary_delta.communities.after;
+    out.push_str(&format!(
+        "- **Community shift** — {} node{} moved across community boundaries (communities: {} → {})\n",
+        moved.len(),
+        if moved.len() == 1 { "" } else { "s" },
+        communities_before,
+        communities_after,
+    ));
 }
 
 fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
-    const MAX_ROWS: usize = 5;
-
     if !drift.hotspots.rising.is_empty() {
         out.push_str(&format!(
             "- **Escalated hotspots ({})**\n",
             drift.hotspots.rising.len()
         ));
-        for change in drift.hotspots.rising.iter().take(MAX_ROWS) {
+        for change in drift.hotspots.rising.iter().take(MAX_ROWS_PER_LIST) {
             out.push_str(&format!(
                 "  - `{}` ({:.2} → {:.2})  `→ graphify explain {}`\n",
                 change.id, change.before, change.after, change.id
             ));
         }
-        if drift.hotspots.rising.len() > MAX_ROWS {
-            let extra = drift.hotspots.rising.len() - MAX_ROWS;
+        if drift.hotspots.rising.len() > MAX_ROWS_PER_LIST {
+            let extra = drift.hotspots.rising.len() - MAX_ROWS_PER_LIST;
             out.push_str(&format!(
                 "  _…and {} more (see drift-report.md)_\n",
                 extra
@@ -108,14 +126,14 @@ fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
             "- **New hotspots ({})**\n",
             drift.hotspots.new_hotspots.len()
         ));
-        for change in drift.hotspots.new_hotspots.iter().take(MAX_ROWS) {
+        for change in drift.hotspots.new_hotspots.iter().take(MAX_ROWS_PER_LIST) {
             out.push_str(&format!(
                 "  - `{}` (score {:.2})  `→ graphify explain {}`\n",
                 change.id, change.after, change.id
             ));
         }
-        if drift.hotspots.new_hotspots.len() > MAX_ROWS {
-            let extra = drift.hotspots.new_hotspots.len() - MAX_ROWS;
+        if drift.hotspots.new_hotspots.len() > MAX_ROWS_PER_LIST {
+            let extra = drift.hotspots.new_hotspots.len() - MAX_ROWS_PER_LIST;
             out.push_str(&format!(
                 "  _…and {} more (see drift-report.md)_\n",
                 extra
@@ -125,29 +143,27 @@ fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
 }
 
 fn render_cycle_rows(out: &mut String, drift: &DiffReport) {
-    const MAX_ROWS: usize = 5;
-
-    for cycle in drift.cycles.introduced.iter().take(MAX_ROWS) {
+    for cycle in drift.cycles.introduced.iter().take(MAX_ROWS_PER_LIST) {
         let pair = cycle_pair_label(cycle);
         out.push_str(&format!("- **New cycle** — {}\n", pair));
         if let Some((a, b)) = cycle_first_pair(cycle) {
             out.push_str(&format!("  `→ graphify path {} {}`\n", a, b));
         }
     }
-    if drift.cycles.introduced.len() > MAX_ROWS {
-        let extra = drift.cycles.introduced.len() - MAX_ROWS;
+    if drift.cycles.introduced.len() > MAX_ROWS_PER_LIST {
+        let extra = drift.cycles.introduced.len() - MAX_ROWS_PER_LIST;
         out.push_str(&format!(
             "  _…and {} more (see drift-report.md)_\n",
             extra
         ));
     }
 
-    for cycle in drift.cycles.resolved.iter().take(MAX_ROWS) {
+    for cycle in drift.cycles.resolved.iter().take(MAX_ROWS_PER_LIST) {
         let pair = cycle_pair_label(cycle);
         out.push_str(&format!("- **Broken cycle** — {}\n", pair));
     }
-    if drift.cycles.resolved.len() > MAX_ROWS {
-        let extra = drift.cycles.resolved.len() - MAX_ROWS;
+    if drift.cycles.resolved.len() > MAX_ROWS_PER_LIST {
+        let extra = drift.cycles.resolved.len() - MAX_ROWS_PER_LIST;
         out.push_str(&format!(
             "  _…and {} more (see drift-report.md)_\n",
             extra
@@ -373,5 +389,51 @@ mod tests {
         assert!(out.contains("app.mod_4"));
         assert!(!out.contains("app.mod_5")); // 6th and 7th hidden
         assert!(out.contains("_…and 2 more"));
+    }
+
+    fn drift_with_community_moves(moves: Vec<(&str, usize, usize)>) -> DiffReport {
+        use graphify_core::diff::{CommunityDiff, CommunityMove, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, SummaryDelta};
+        DiffReport {
+            summary_delta: SummaryDelta {
+                nodes: Delta { before: 0, after: 0, change: 0 },
+                edges: Delta { before: 0, after: 0, change: 0 },
+                communities: Delta { before: 1, after: 2, change: 1 },
+                cycles: Delta { before: 0, after: 0, change: 0 },
+            },
+            edges: EdgeDiff { added_nodes: vec![], removed_nodes: vec![], degree_changes: vec![] },
+            cycles: CycleDiff { introduced: vec![], resolved: vec![] },
+            hotspots: HotspotDiff { rising: vec![], falling: vec![], new_hotspots: vec![], removed_hotspots: vec![] },
+            communities: CommunityDiff {
+                moved_nodes: moves.into_iter().map(|(id, from_c, to_c)| CommunityMove {
+                    id: id.into(), from_community: from_c, to_community: to_c,
+                }).collect(),
+                stable_count: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn renders_community_shift_row_when_nodes_moved() {
+        let a = minimal_analysis();
+        let d = drift_with_community_moves(vec![
+            ("app.services.auth", 0, 1),
+            ("app.services.user", 0, 1),
+        ]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("**Community shift**"));
+        // Aggregation: a short summary of how many nodes moved, not per-node bullets
+        assert!(out.contains("2 nodes moved") || out.contains("(2)"));
+    }
+
+    #[test]
+    fn renders_no_changes_message_when_drift_empty() {
+        let a = minimal_analysis();
+        let d = drift_with_community_moves(vec![]);  // also no cycles, no hotspots
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("#### Drift in this PR"));
+        assert!(out.contains("_No architectural changes vs baseline._"));
+        // Bullet headers should not appear when there is nothing
+        assert!(!out.contains("**New cycle**"));
+        assert!(!out.contains("**Escalated hotspots"));
     }
 }
