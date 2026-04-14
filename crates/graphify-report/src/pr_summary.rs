@@ -211,7 +211,7 @@ fn render_outstanding_section(out: &mut String, check: Option<&CheckReport>) {
 
     out.push_str("#### Outstanding issues\n\n");
     render_rules_violations(out, check, rule_count);
-    // Contract subsection arrives in Task 12.
+    render_contract_violations(out, check, contract_count);
 }
 
 fn render_rules_violations(out: &mut String, check: &CheckReport, total_rule_count: usize) {
@@ -264,6 +264,58 @@ fn render_rules_violations(out: &mut String, check: &CheckReport, total_rule_cou
         ));
     }
     out.push('\n');
+}
+
+fn render_contract_violations(out: &mut String, check: &CheckReport, total_contract_count: usize) {
+    if total_contract_count == 0 {
+        return;
+    }
+    let Some(contracts) = check.contracts.as_ref() else { return; };
+
+    out.push_str(&format!(
+        "**Contract drift ({})** — `graphify check --config graphify.toml`\n",
+        total_contract_count
+    ));
+
+    let mut shown = 0usize;
+    'outer: for pair in &contracts.pairs {
+        for entry in &pair.violations {
+            if shown >= MAX_ROWS_PER_LIST {
+                break 'outer;
+            }
+            let summary = summarize_contract_violation(&entry.violation);
+            out.push_str(&format!(
+                "- `{}` (ORM `{}`) ↔ `{}` (TS): {}\n",
+                pair.name, pair.orm.symbol, pair.ts.symbol, summary,
+            ));
+            shown += 1;
+        }
+    }
+
+    if total_contract_count > MAX_ROWS_PER_LIST {
+        let extra = total_contract_count - MAX_ROWS_PER_LIST;
+        out.push_str(&format!(
+            "_…and {} more (see check-report.json)_\n",
+            extra
+        ));
+    }
+    out.push('\n');
+}
+
+fn summarize_contract_violation(v: &graphify_core::contract::ContractViolation) -> String {
+    use graphify_core::contract::ContractViolation as V;
+    match v {
+        V::ContractFieldMissingOnTs { field, .. } => format!("field `{}` missing on TS side", field),
+        V::ContractFieldMissingOnOrm { field, .. } => format!("field `{}` missing on ORM side", field),
+        V::ContractTypeMismatch { field, .. } => format!("type mismatch on field `{}`", field),
+        V::ContractNullabilityMismatch { field, orm_nullable, ts_nullable, .. } => {
+            format!("nullability mismatch on `{}` (ORM={}, TS={})", field, orm_nullable, ts_nullable)
+        }
+        V::ContractRelationMissingOnTs { relation, .. } => format!("relation `{}` missing on TS side", relation),
+        V::ContractRelationMissingOnOrm { relation, .. } => format!("relation `{}` missing on ORM side", relation),
+        V::ContractCardinalityMismatch { relation, .. } => format!("cardinality mismatch on relation `{}`", relation),
+        V::ContractUnmappedOrmType { field, raw_type, .. } => format!("unmapped ORM type `{}` on field `{}`", raw_type, field),
+    }
 }
 
 fn render_footer(out: &mut String) {
@@ -650,5 +702,70 @@ mod tests {
         };
         let out = render("my-app", &a, None, Some(&c));
         assert!(!out.contains("#### Outstanding issues"));
+    }
+
+    fn check_with_contract_violations(violations_per_pair: Vec<(&str, &str, &str)>) -> CheckReport {
+        use std::path::PathBuf;
+        use graphify_core::contract::{ContractViolation, FieldType, PrimitiveType};
+        use crate::contract_json::{ContractCheckResult, ContractPairResult, ContractSideInfo, ViolationEntry};
+        use crate::check_report::CheckReport;
+        use graphify_core::contract::Severity;
+
+        let pairs = violations_per_pair.into_iter().map(|(pair_name, orm_tbl, ts_ty)| ContractPairResult {
+            name: pair_name.into(),
+            orm: ContractSideInfo { file: PathBuf::from("schema.ts"), symbol: orm_tbl.into(), line: 1 },
+            ts: ContractSideInfo { file: PathBuf::from("types.ts"), symbol: ts_ty.into(), line: 1 },
+            violations: vec![ViolationEntry {
+                severity: Severity::Error,
+                violation: ContractViolation::ContractFieldMissingOnTs {
+                    field: "created_at".into(),
+                    orm_type: FieldType::Primitive { value: PrimitiveType::Date },
+                    orm_line: 10,
+                },
+            }],
+        }).collect::<Vec<_>>();
+
+        CheckReport {
+            ok: false,
+            violations: pairs.len(),
+            projects: vec![],
+            contracts: Some(ContractCheckResult {
+                ok: false,
+                error_count: pairs.len(),
+                warning_count: 0,
+                pairs,
+            }),
+        }
+    }
+
+    #[test]
+    fn renders_contract_drift_subsection() {
+        let a = minimal_analysis();
+        let c = check_with_contract_violations(vec![("users_pair", "users", "User")]);
+        let out = render("my-app", &a, None, Some(&c));
+        assert!(out.contains("#### Outstanding issues"));
+        assert!(out.contains("**Contract drift (1)**"));
+        assert!(out.contains("`users`"));
+        assert!(out.contains("`User`"));
+    }
+
+    #[test]
+    fn renders_both_rules_and_contract_subsections() {
+        let a = minimal_analysis();
+        let mut c = check_with_rule_violations(vec![("r1", "a", "b")]);
+        let extra = check_with_contract_violations(vec![("pair", "users", "User")]);
+        c.contracts = extra.contracts;
+        let out = render("my-app", &a, None, Some(&c));
+        assert!(out.contains("**Rules violations"));
+        assert!(out.contains("**Contract drift"));
+    }
+
+    #[test]
+    fn renders_only_contract_subsection_when_no_rules() {
+        let a = minimal_analysis();
+        let c = check_with_contract_violations(vec![("pair", "users", "User")]);
+        let out = render("my-app", &a, None, Some(&c));
+        assert!(out.contains("**Contract drift"));
+        assert!(!out.contains("**Rules violations"));
     }
 }
