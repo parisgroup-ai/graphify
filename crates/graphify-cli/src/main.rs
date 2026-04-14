@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use graphify_core::contract::{
     CaseRule, FieldAlias, FieldType, GlobalContractConfig, PairConfig, PrimitiveType, Severity,
@@ -27,6 +27,10 @@ use graphify_extract::{
     TypeScriptExtractor,
 };
 use graphify_report::{
+    check_report::{
+        CheckLimits, CheckReport, CheckViolation, PolicyCheckSummary, ProjectCheckResult,
+        ProjectCheckSummary,
+    },
     write_analysis_json, write_cypher, write_diff_json, write_diff_markdown, write_edges_csv,
     write_graph_json, write_graphml, write_html, write_nodes_csv, write_obsidian_vault,
     write_report, write_trend_json, write_trend_markdown, Cycle,
@@ -1529,12 +1533,6 @@ fn persist_historical_snapshot(
 // Quality gates
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Default)]
-struct CheckLimits {
-    max_cycles: Option<usize>,
-    max_hotspot_score: Option<f64>,
-}
-
 #[derive(Debug, Clone, Copy)]
 enum ContractsMode {
     Auto,
@@ -1550,65 +1548,6 @@ impl ContractsMode {
             _ => ContractsMode::Auto,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ProjectCheckSummary {
-    nodes: usize,
-    edges: usize,
-    communities: usize,
-    cycles: usize,
-    max_hotspot_score: f64,
-    max_hotspot_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct PolicyCheckSummary {
-    rules_evaluated: usize,
-    policy_violations: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
-enum CheckViolation {
-    #[serde(rename = "limit")]
-    Limit {
-        kind: String,
-        actual: serde_json::Value,
-        expected_max: serde_json::Value,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        node_id: Option<String>,
-    },
-    #[serde(rename = "policy")]
-    Policy {
-        kind: String,
-        rule: String,
-        source_node: String,
-        target_node: String,
-        source_project: String,
-        target_project: String,
-        source_selectors: Vec<String>,
-        target_selectors: Vec<String>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ProjectCheckResult {
-    name: String,
-    ok: bool,
-    summary: ProjectCheckSummary,
-    limits: CheckLimits,
-    policy_summary: PolicyCheckSummary,
-    violations: Vec<CheckViolation>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct CheckReport {
-    ok: bool,
-    violations: usize,
-    projects: Vec<ProjectCheckResult>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    contracts: Option<graphify_report::ContractCheckResult>,
 }
 
 fn evaluate_quality_gates(
