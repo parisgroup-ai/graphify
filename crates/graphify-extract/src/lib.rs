@@ -14,6 +14,9 @@ pub use go::GoExtractor;
 pub use lang::{ExtractionResult, LanguageExtractor};
 pub use python::PythonExtractor;
 pub use rust_lang::RustExtractor;
-pub use ts_contract::{extract_ts_contract, extract_ts_contract_at, TsContractParseError};
+pub use ts_contract::{
+    extract_ts_contract, extract_ts_contract_at, parse_all_ts_contracts,
+    parse_all_ts_contracts_at, TsContractParseError,
+};
 pub use typescript::TypeScriptExtractor;
 pub use walker::{detect_local_prefix, discover_files, path_to_module, DiscoveredFile};

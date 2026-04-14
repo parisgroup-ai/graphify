@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use graphify_core::contract::{
-    Contract, ContractSide, Field, FieldType, PrimitiveType, Relation,
+    Cardinality, Contract, ContractSide, Field, FieldType, PrimitiveType, Relation,
 };
 use tree_sitter::{Node, Parser};
 
@@ -365,6 +365,64 @@ fn prim(p: PrimitiveType) -> FieldType {
     FieldType::Primitive { value: p }
 }
 
+/// Parse multiple TS contracts from a single source and reclassify fields
+/// that reference other known contracts as relations.
+pub fn parse_all_ts_contracts(
+    source: &str,
+    exports: &[&str],
+) -> Result<Vec<Contract>, TsContractParseError> {
+    parse_all_ts_contracts_at(source, exports, PathBuf::from("<inline>"))
+}
+
+pub fn parse_all_ts_contracts_at(
+    source: &str,
+    exports: &[&str],
+    source_file: PathBuf,
+) -> Result<Vec<Contract>, TsContractParseError> {
+    let mut contracts = Vec::with_capacity(exports.len());
+    for export in exports {
+        contracts.push(extract_ts_contract_at(source, export, source_file.clone())?);
+    }
+    let known: std::collections::HashSet<String> =
+        contracts.iter().map(|c| c.name.clone()).collect();
+    for c in &mut contracts {
+        classify_relations(c, &known);
+    }
+    Ok(contracts)
+}
+
+fn classify_relations(contract: &mut Contract, known: &std::collections::HashSet<String>) {
+    let mut i = 0;
+    while i < contract.fields.len() {
+        let f = &contract.fields[i];
+        let relation = match &f.type_ref {
+            FieldType::Named { value } if known.contains(value) => {
+                Some((value.clone(), Cardinality::One))
+            }
+            FieldType::Array { value } => match value.as_ref() {
+                FieldType::Named { value: inner } if known.contains(inner) => {
+                    Some((inner.clone(), Cardinality::Many))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some((target, cardinality)) = relation {
+            let f = contract.fields.remove(i);
+            contract.relations.push(Relation {
+                name: f.name,
+                raw_name: f.raw_name,
+                cardinality,
+                target_contract: target,
+                nullable: f.nullable,
+                line: f.line,
+            });
+        } else {
+            i += 1;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,5 +512,30 @@ export interface UserDto {
                 }
             ));
         }
+    }
+
+    #[test]
+    fn classifies_single_and_many_relations() {
+        let src = r#"
+export interface ProfileDto { id: string }
+export interface PostDto { id: string }
+export interface UserDto {
+  id: string;
+  profile?: ProfileDto;
+  posts: PostDto[];
+}
+"#;
+        // One-shot helper: parse all three, then reclassify UserDto.
+        let contracts = parse_all_ts_contracts(src, &["UserDto", "ProfileDto", "PostDto"]).expect("ok");
+        let user = contracts.iter().find(|c| c.name == "UserDto").unwrap();
+        assert_eq!(user.relations.len(), 2);
+        let profile = user.relations.iter().find(|r| r.name == "profile").unwrap();
+        assert_eq!(profile.cardinality, Cardinality::One);
+        assert!(profile.nullable);
+        let posts = user.relations.iter().find(|r| r.name == "posts").unwrap();
+        assert_eq!(posts.cardinality, Cardinality::Many);
+        // Scalar-only fields stay in fields[].
+        assert_eq!(user.fields.len(), 1);
+        assert_eq!(user.fields[0].name, "id");
     }
 }
