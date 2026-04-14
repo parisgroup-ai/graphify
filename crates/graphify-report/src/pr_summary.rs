@@ -421,8 +421,19 @@ mod tests {
         ]);
         let out = render("my-app", &a, Some(&d), None);
         assert!(out.contains("**Community shift**"));
-        // Aggregation: a short summary of how many nodes moved, not per-node bullets
-        assert!(out.contains("2 nodes moved") || out.contains("(2)"));
+        assert!(out.contains("2 nodes moved across community boundaries"));
+        assert!(out.contains("communities: 1 → 2"));
+    }
+
+    #[test]
+    fn renders_singular_community_shift_row_when_one_node_moved() {
+        let a = minimal_analysis();
+        let d = drift_with_community_moves(vec![("app.services.auth", 0, 1)]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("**Community shift**"));
+        assert!(out.contains("1 node moved"));
+        // Guard against accidental pluralization
+        assert!(!out.contains("1 nodes moved"));
     }
 
     #[test]
