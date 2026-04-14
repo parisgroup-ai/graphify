@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use graphify_core::contract::{ContractViolation, Severity};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractCheckResult {
     pub ok: bool,
     pub error_count: usize,
@@ -11,7 +11,7 @@ pub struct ContractCheckResult {
     pub pairs: Vec<ContractPairResult>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractPairResult {
     pub name: String,
     pub orm: ContractSideInfo,
@@ -19,14 +19,14 @@ pub struct ContractPairResult {
     pub violations: Vec<ViolationEntry>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractSideInfo {
     pub file: PathBuf,
     pub symbol: String,
     pub line: usize,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViolationEntry {
     pub severity: Severity,
     #[serde(flatten)]
@@ -124,5 +124,36 @@ mod tests {
         let v1 = &pair0["violations"][1];
         assert_eq!(v1["kind"], "contract_unmapped_orm_type");
         assert_eq!(v1["raw_type"], "tsvector");
+    }
+
+    #[test]
+    fn contract_check_result_roundtrips_json() {
+        let result = ContractCheckResult {
+            ok: false,
+            error_count: 1,
+            warning_count: 0,
+            pairs: vec![ContractPairResult {
+                name: "users_pair".into(),
+                orm: ContractSideInfo {
+                    file: PathBuf::from("schema/users.ts"),
+                    symbol: "users".into(),
+                    line: 10,
+                },
+                ts: ContractSideInfo {
+                    file: PathBuf::from("frontend/types/user.ts"),
+                    symbol: "User".into(),
+                    line: 5,
+                },
+                violations: vec![],
+            }],
+        };
+
+        let json = serde_json::to_string(&result).expect("serialize");
+        let back: ContractCheckResult = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(back.error_count, 1);
+        assert_eq!(back.pairs.len(), 1);
+        assert_eq!(back.pairs[0].name, "users_pair");
+        let _ = Severity::Error;
     }
 }

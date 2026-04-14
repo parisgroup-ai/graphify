@@ -74,13 +74,13 @@ pub enum Cardinality {
 // Violations
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContractComparison {
     pub pair_name: String,
     pub violations: Vec<ContractViolation>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ContractViolation {
     ContractFieldMissingOnTs {
