@@ -2963,6 +2963,37 @@ fn cmd_watch(
     }
 }
 
+#[allow(dead_code)] // consumed by Task 14 `graphify pr-summary` dispatch
+fn resolve_project_name(dir: &std::path::Path) -> String {
+    dir.file_name()
+        .and_then(|os| os.to_str())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+#[cfg(test)]
+mod pr_summary_helper_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn resolve_project_name_uses_dir_basename() {
+        assert_eq!(resolve_project_name(Path::new("./report/my-app")), "my-app");
+        assert_eq!(resolve_project_name(Path::new("/abs/report/web")), "web");
+    }
+
+    #[test]
+    fn resolve_project_name_returns_unknown_for_empty_path() {
+        assert_eq!(resolve_project_name(Path::new("")), "unknown");
+    }
+
+    #[test]
+    fn resolve_project_name_handles_trailing_slash() {
+        // Path::file_name strips trailing components that are "." or root markers.
+        assert_eq!(resolve_project_name(Path::new("./report/my-app/")), "my-app");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
