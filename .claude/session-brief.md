@@ -1,203 +1,138 @@
-# Session Brief — 2026-04-13 (Session 7 — closed)
+# Session Brief — Next Session (Session 9)
 
-**Mode:** Autonomous LLM execution
-**Last session:** Session 6 — shipped FEAT-009 (Neo4j/GraphML/Obsidian exports), FEAT-010 (watch mode), FEAT-002 (drift detection), FEAT-011 (auto-detect prefix), FEAT-004 (CI quality gates), FEAT-003 (Go/Rust), FEAT-012 (recipes), FEAT-013 (policy rules), FEAT-014 (historical trend tracking). v0.3.0 tagged + released.
+**Mode:** Short close-out session
+**Last session:** Session 8 — shipped FEAT-015 implementation (21 commits on `main`, 442 tests, clippy clean). Feature-complete; release not yet tagged.
 
-## Session 7 Outcome — FEAT-016 kickoff complete
+## Session 9 Goal — FEAT-015 close-out + v0.6.0 release
 
-**Shipped (pushed to origin/main):**
-1. `d7aa620` — chore: close FEAT-013 + FEAT-014 tasknotes; OnceLock test harness
-2. `cae3e03` — docs: FEAT-016 design spec (11 sections, 597 lines)
-3. `766ce7b` — docs: FEAT-016 implementation plan (15 tasks, 3800 lines)
-4. `31b4b82` — feat(core): Task 1 — data model + ContractBuilder
-5. `0e50b29` — feat(core): Task 2 — field alignment
-6. `9ca121f` — feat(core): Task 3 — per-field nullability + type comparison
-7. `013c246` — feat(extract): Task 6 — Drizzle scalar parser
-8. `6733b18` — feat(extract): Task 7 — Drizzle `$type`, `pgSchema`, multi-table
-9. `766f65e` — feat(extract): Task 9 — TS interface/type parser
-
-**FEAT-016 progress:** 6/15 tasks (40%) implemented. Design + plan complete.
-**Test state:** workspace green. graphify-core contract module: 12 tests. graphify-extract drizzle: 6 tests. graphify-extract ts_contract: 4 tests.
-**Clippy state:** clean on every crate FEAT-016 touched. Pre-existing `len_zero` issue in `crates/graphify-report/src/json.rs:312,313,336` (from FEAT-008 era commit `0936bf3`) — fix required before Task 12 lands so `cargo clippy -p graphify-report -- -D warnings` passes; genuinely 2 minutes of work.
-
-## Next Session — Resume from here
-
-**Remaining plan tasks:**
-- Task 4 — Relation alignment + cardinality (core, `contract.rs`)
-- Task 5 — Deterministic ordering (core, `contract.rs`)
-- Task 8 — Drizzle `relations()` block parser (extract, `drizzle.rs`)
-- Task 10 — TS scalar-vs-relation classification sweep (extract, `ts_contract.rs` + `lib.rs`)
-- Task 11 — TS intersection flattening tests (extract, `ts_contract.rs`)
-- Task 12 — Report JSON serializer (report, `contract_json.rs`)
-- Task 13 — Report Markdown section (report, `contract_markdown.rs`)
-- Task 14 — CLI wiring + 6 integration tests + monorepo fixture (**biggest task**, `graphify-cli/src/main.rs`)
-- Task 15 — README + CHANGELOG + tasknote close + v0.5.0 bump
-
-**Recommended next-session work graph:**
-
-1. **Pre-task fix** (2 min) — `cargo clippy --fix` on `crates/graphify-report/src/json.rs` for the 3 `.len() > 0` patterns, OR manual rewrite to `!… .is_empty()`. Blocks Task 12 otherwise.
-2. **Parallel lane** — dispatch Tasks 4, 8, 10 concurrently (all different files, no overlap).
-3. **After lane 2** — dispatch Tasks 5, 11, 12 concurrently (Task 5 on `contract.rs`, Task 11 on `ts_contract.rs`, Task 12 creates `contract_json.rs`).
-4. **Then** Task 13 (requires Task 12's types).
-5. **Then** Task 14 solo inline — it's the integration point, many moving pieces, higher judgment call risk.
-6. **Close-out** Task 15 with version bump + tag v0.5.0.
-
-**Context budget for next session:** read plan file (large, ~80k tokens alone). Recommend clearing and re-reading only the specific task sections needed — the plan is organized by task heading and each task is self-contained.
-
-## Rest of Session 7 brief (historical reference below)
-
----
+All FEAT-015 code is on `main` as of commit `b5ebed5`. This session does the bookkeeping + release tag.
 
 ## Work Graph
 
 ```mermaid
 graph TD
-    START[Session Start] --> LANE_0[Lane 0: Close-out FEAT-014 + test harness]
-    LANE_0 --> T0A[Update sprint.md: FEAT-014 -> done]
-    LANE_0 --> T0B[Update FEAT-014 tasknote: subtasks + verification]
-    LANE_0 --> T0C[Review pending test harness OnceLock changes]
-    T0A & T0B & T0C --> GATE1{GATE-1: commit + push origin main}
+    START[Session Start<br/>main at b5ebed5] --> LANE_0[Lane 0: Close-out]
+    LANE_0 --> T0A[Mark FEAT-015 tasknote done + completed date]
+    LANE_0 --> T0B[Move FEAT-015 to Done in sprint.md]
+    T0A & T0B --> GATE1{GATE-1: push close-out commit}
 
-    GATE1 -->|approved| FORK{Choose next epic}
-    FORK --> LANE_A[Lane A: FEAT-016 brainstorm + design spec]
-    FORK -.defer.-> LANE_B[Lane B: FEAT-015 brainstorm + design spec]
-
-    LANE_A --> A1[Brainstorm: pick first pairing surface]
-    A1 --> A2[Write feat-016 design spec]
-    A2 --> A3[Write feat-016 implementation plan]
-    A3 --> GATE2{GATE-2: commit + push design docs}
-
-    GATE2 -->|approved if time| LANE_C[Lane C: FEAT-016 implementation kickoff]
-    LANE_C --> C1[Normalized contract model types]
-    C1 --> C2[First source parser: Drizzle or Prisma]
-
-    DEFERRED[Deferred this session] -.-> D1[FEAT-015 PR-editor integration]
-    DEFERRED -.-> D2[FEAT-016 full implementation beyond kickoff]
+    GATE1 -->|approved| LANE_A[Lane A: v0.6.0 release]
+    LANE_A --> TA1[Bump workspace.package.version to 0.6.0]
+    TA1 --> TA2[Rebuild release binary to confirm version]
+    TA2 --> GATE2{GATE-2: tag + push}
+    GATE2 -->|approved| TA3[git tag v0.6.0 && git push --tags]
+    TA3 --> WAIT1[Wait: CI release workflow<br/>~5-10 min build + publish]
 ```
 
-## Approval Gates (STOP and ask user)
+## Approval Gates
 
-1. **GATE-1** — Commit + push FEAT-014 close-out, FEAT-013 test harness fix, sprint tracker update
+1. **GATE-1** — Push close-out commit (tasknote + sprint.md updates)
    - Risk: low
-   - Status: ready after Lane 0 completion
-   - Command: `git add docs/TaskNotes/Tasks/sprint.md docs/TaskNotes/Tasks/FEAT-014-historical-architecture-trend-tracking.md tests/integration_test.rs tests/query_integration.rs && git commit -m "chore: close FEAT-014 and harden integration test harness" && git push origin main`
+   - Status: blocked on Lane 0
+   - Command:
+     ```bash
+     git add docs/TaskNotes/Tasks/FEAT-015-pr-and-editor-integration.md \
+             docs/TaskNotes/Tasks/sprint.md && \
+     git commit -m "chore: close FEAT-015 tasknote and sprint board" && \
+     git push origin main
+     ```
 
-2. **GATE-2** — Commit + push FEAT-016 design spec + implementation plan
-   - Risk: low
-   - Status: blocked on Lane A completion
-   - Command: `git add docs/superpowers/specs/*feat-016*.md docs/superpowers/plans/*feat-016*.md && git commit -m "docs: design spec + plan for FEAT-016 contract drift" && git push origin main`
+2. **GATE-2** — Push `v0.6.0` tag (triggers CI release)
+   - Risk: medium (CI publishes binaries to 4 targets)
+   - Status: blocked on Lane A
+   - Command:
+     ```bash
+     git add Cargo.toml Cargo.lock && \
+     git commit -m "chore: bump version to 0.6.0" && \
+     git tag v0.6.0 && \
+     git push origin main --tags
+     ```
 
 ## External Waits
 
-- None — fully local Rust workspace, no CI/deploy dependencies this session.
+- **WAIT-1** — GitHub Actions release workflow. Triggered by `v0.6.0` tag push. Builds 4 targets (macOS Intel/ARM, Linux x86/ARM MUSL), uploads artifacts to the release. Estimated duration: 5–10 min. Readiness signal: green checkmark on the `Release` workflow in the Actions tab for commit `v0.6.0`.
 
-## Parallel Lanes
+## Lane 0 — Close-out (coordination, fast)
 
-### Lane 0 — Close-out (mandatory, fast)
-- **COORD-A** — Update `docs/TaskNotes/Tasks/sprint.md` row for FEAT-014 → **done** + Done entry
+- **COORD-A** — `docs/TaskNotes/Tasks/FEAT-015-pr-and-editor-integration.md`
   - Mode: coordination
   - Context cost: S
-  - Team dispatch: direct
-  - Pre-reads: current sprint.md
-  - Done when: row shows `**done**`, Done section lists FEAT-014 with 2026-04-13 date
+  - Pre-reads: current tasknote (already has Verification section from Session 8)
+  - Steps: set `status: done`, add `completed: 2026-04-??` (today's date), confirm subtasks all `[x]`
+  - Done when: frontmatter reflects done state, completed date present
 
-- **COORD-B** — Update `docs/TaskNotes/Tasks/FEAT-014-historical-architecture-trend-tracking.md`
+- **COORD-B** — `docs/TaskNotes/Tasks/sprint.md`
   - Mode: coordination
   - Context cost: S
-  - Team dispatch: direct
-  - Pre-reads: tasknote YAML frontmatter, git show 8ac4215
-  - Done when: status:done, completed:2026-04-13, subtasks checked, Verification section appended
+  - Steps: change FEAT-015 row from `**open**` to `**done**`; add a Done-section entry with the date
+  - Done when: sprint.md shows FEAT-015 in Done section
 
-- **COORD-C** — Review uncommitted `tests/integration_test.rs` + `tests/query_integration.rs` OnceLock harness changes
+## Lane A — v0.6.0 release
+
+- **REL-A** — Bump workspace version
   - Mode: coordination
   - Context cost: S
-  - Team dispatch: direct
-  - Pre-reads: already in context — auto-build via `cargo build -q -p graphify-cli --bin graphify` before integration tests
-  - Done when: confirmed as intentional FEAT-013 verification fix (per FEAT-013 notes), staged for commit
+  - Pre-reads: current `Cargo.toml` (grep `version = "0.5.0"` in `[workspace.package]`)
+  - Steps: edit `[workspace.package].version` from `0.5.0` to `0.6.0`; run `cargo build --release -p graphify-cli` to rebuild + update Cargo.lock
+  - Done when: `./target/release/graphify --version` prints `graphify 0.6.0`
 
-### Lane A — FEAT-016 design (primary architectural)
-- **FEAT-016-brainstorm** — Pick first pairing target
-  - Mode: architectural
-  - Context cost: M
-  - Team dispatch: solo with `superpowers:brainstorming` skill
-  - Pre-reads: `docs/TaskNotes/Tasks/FEAT-016-contract-drift-detection-between-orm-and-typescript.md`
-  - Decision points:
-    1. Backend-to-frontend (Drizzle/Prisma ↔ TS interface/type) vs backend-to-API (ORM ↔ Zod/DTO)
-    2. Explicit pairing config in graphify.toml vs convention-based discovery
-    3. Normalized field representation shape (name, type, nullable, relation, origin_node_id)
-  - Done when: decision recorded in brief Decisions Made, spec skeleton seeded
-
-- **FEAT-016-spec** — Write `docs/superpowers/specs/2026-04-13-feat-016-contract-drift-design.md`
-  - Mode: architectural
-  - Context cost: L
-  - Team dispatch: solo
-  - Pre-reads: existing specs under `docs/superpowers/specs/` (FEAT-002 drift spec as closest analog)
-  - Done when: spec covers data sources, normalization model, comparison algorithm, CLI surface, output formats
-
-- **FEAT-016-plan** — Write `docs/superpowers/plans/2026-04-13-feat-016-contract-drift.md`
-  - Mode: architectural
-  - Context cost: M
-  - Team dispatch: solo
-  - Pre-reads: FEAT-016 spec (just written)
-  - Done when: plan enumerates concrete PRs/commits/crates/tests, ordered by dependency
-
-### Lane C — FEAT-016 implementation kickoff (stretch, if time)
-- **FEAT-016-impl-1** — Normalized contract model types + first source parser
-  - Mode: architectural
-  - Context cost: L
-  - Team dispatch: solo (tight coupling to spec)
-  - Pre-reads: FEAT-016 plan, existing `crates/graphify-core/src/types.rs`, `crates/graphify-extract/src/typescript.rs`
-  - Done when: compiles, first parser recognizes one contract source, smoke test passes
+- **REL-B** — Tag + push
+  - Mode: coordination
+  - Context cost: S
+  - Steps: `git tag v0.6.0 && git push origin main --tags`
+  - Done when: tag `v0.6.0` exists on origin; CI Release workflow starts
 
 ## Sequential Chains
 
-- **COORD-A/B/C → GATE-1 → FEAT-016-brainstorm → FEAT-016-spec → FEAT-016-plan → GATE-2 → FEAT-016-impl-1** — close-out must land before new design spec work starts (clean base for next feature branch)
+- **COORD-A/B → GATE-1 → REL-A → GATE-2 → REL-B → WAIT-1**
 
 ## Decisions Made (don't re-debate)
 
-*(carried over from Session 6)*
+*(carried over from prior sessions)*
 - Rust over Python — standalone binary distribution
 - petgraph, Louvain, tree-sitter per call
 - `is_package` boolean, workspace alias preservation, singleton merging
 - QueryEngine in graphify-core, re-extract on the fly
 - CI strict clippy `-D warnings`
-- MCP separate binary with rmcp `#[tool(tool_box)]`, Arc-wrapped QueryEngine
+- MCP separate binary with rmcp, Arc-wrapped QueryEngine
 - Confidence: resolver tuple, bare calls 0.7/Inferred, non-local downgrade 0.5/Ambiguous
-- Cache on by default, `.graphify-cache.json` per project, sha2 pure Rust
-- Louvain tie-breaking now deterministic (commit 9545369)
+- Cache on by default, `.graphify-cache.json` per project
+- Louvain tie-breaking deterministic
+- Integration test harness builds graphify binary on demand (OnceLock guard)
+- Contract drift uses Drizzle schema + TS interface/type as paired sources
+- Reports use `is_empty()` never `.len() > 0` (clippy-clean)
 
-*(new — Session 7)*
-- **Integration test harness builds graphify binary on demand** (FEAT-013 verification) — `OnceLock` guard in `tests/integration_test.rs` and `tests/query_integration.rs` runs `cargo build -q -p graphify-cli --bin graphify` once per binary before any CLI assertion, eliminates stale-binary false negatives
+*(added Session 8)*
+- FEAT-015 delivery surface: CLI-only `graphify pr-summary <DIR>`; no companion GitHub Action in v1; no PR-comment-posting automation; no SARIF
+- FEAT-015 ecosystem: `graphify check` writes unified `check-report.json`; `CheckReport` + friends moved to public `graphify-report::check_report` module
+- CLI exit-code convention: `exit(1)` for all errors (consistency with `cmd_diff`/`cmd_trend`), NOT Unix-standard exit 2
+- Content philosophy: delta-first, drift-report.json is primary source; check-report.json appended as "outstanding issues" only when errors exist
+- Exhaustive match (no `_ =>`) on `ContractViolation` in `summarize_contract_violation` — forces compile error when new variants are added
 
 ## Out of Scope
 
-- FEAT-015 PR and editor integration (reason: benefits from FEAT-016 drift signal; sequence it after FEAT-016 lands)
-- FEAT-016 full implementation (reason: 16h epic, only kickoff is feasible this session; full ship → own session with plan from Lane A)
-- `target/debug/graphify` + `target/release/graphify` uncommitted artifacts (reason: gitignored via `/target` but pre-tracked; DO NOT stage — noise)
-- `.obsidian/workspace.json` (reason: IDE state, not functional)
+- Any new FEAT beyond v0.6.0 release
+- Companion GitHub Action (deferred to future feature)
+- PR comment auto-post / SARIF / MCP `summarize_for_pr` (deferred per spec Section 9)
+- Pre-existing clippy lints in `graphify-mcp`/`graphify-extract` from Rust 1.94 (`manual_flatten`, `manual_contains`) — separate cleanup task if desired
 
 ## Context Budget Plan
 
-- **Start (Lane 0)**: brief + sprint.md + FEAT-014 tasknote + git show 8ac4215 ≈ 8k tok
-- **After GATE-1**: context stable ~15k tok, no clear needed
-- **Lane A brainstorm**: +10k tok (FEAT-016 tasknote, FEAT-002 spec as reference)
-- **Lane A spec + plan**: +20k tok of writing, approaching 50k total — consider `/clear` if conversation has pre-existing bloat
-- **If Lane C reached**: recommend `/clear` + re-read brief + FEAT-016 spec/plan only (~25k tok clean start)
+- **Start**: read this brief + FEAT-015 tasknote + sprint.md + Cargo.toml ≈ 4k tok
+- **After GATE-1**: no clear needed
+- **After REL-B**: just watch CI complete; minimal context
 
 ## Re-Entry Hints (survive compaction)
 
-If context resets mid-session:
+If context resets:
 1. Re-read `.claude/session-brief.md` (this file)
-2. Run `git log origin/main..HEAD --oneline` to see what shipped since brief
-3. Run `git status --short` to see in-flight edits
-4. Check `docs/superpowers/specs/` and `docs/superpowers/plans/` for FEAT-016 artifacts
-5. Run `cargo test --workspace` if any impl work was started
-6. Resume from first unchecked node in the work graph
+2. `git log origin/main..HEAD --oneline` to see any unpushed work
+3. `git tag --list 'v*' --sort=-v:refname | head -3` to see latest tags
+4. If the tag `v0.6.0` already exists, GATE-2 is done; watch CI.
 
 ## Team Dispatch Recommendations
 
-- **Lane 0** (coordination, 3 tasks, same file): direct solo execution — fast, no benefit from subagent overhead
-- **Lane A** (architectural design): solo with `superpowers:brainstorming` skill — design choices need single coherent author, not parallel drafts
-- **Lane C** (implementation kickoff, if reached): solo — too tightly coupled to freshly-authored spec to delegate
-- **Pre-GATE-1 check**: run `cargo test --workspace` to confirm test harness fix works
-- **Pre-GATE-2 check**: spec + plan review by `superpowers:reviewer` skill before push
+- **Lane 0**: direct solo — 2 tasknote edits, trivial
+- **Lane A**: direct solo — 3 file edits + tag + push, all well-specified
+
+No subagent dispatch needed. Session should take ≤30 min LLM time.

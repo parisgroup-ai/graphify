@@ -129,6 +129,8 @@ For each [[project]]:
 | `crates/graphify-core/src/diff.rs` | AnalysisSnapshot deserialization, DiffReport, compute_diff() |
 | `crates/graphify-report/src/diff_json.rs` | Drift report JSON output |
 | `crates/graphify-report/src/diff_markdown.rs` | Drift report Markdown output |
+| `crates/graphify-report/src/check_report.rs` | Public `CheckReport` / `ProjectCheckResult` / `CheckViolation` / `CheckLimits` types (moved from graphify-cli for external consumption) |
+| `crates/graphify-report/src/pr_summary.rs` | Pure `render(project_name, analysis, drift, check) -> String` for `graphify pr-summary` Markdown output |
 | `crates/graphify-cli/src/watch.rs` | WatchFilter (extension/exclude filtering), affected project detection |
 | `crates/graphify-mcp/src/main.rs` | MCP server entry point, config parsing, extraction pipeline |
 | `crates/graphify-mcp/src/server.rs` | GraphifyServer struct, 9 MCP tool handlers, ServerHandler impl |
@@ -175,7 +177,10 @@ For each [[project]]:
 - Community equivalence mapping: max-overlap matching handles unstable community IDs across runs
 - Hotspot threshold default: 0.05 (configurable via --threshold)
 - Drift report output: drift-report.json + drift-report.md
-- Tests: 269 unit + integration tests (`cargo test --workspace`)
+- `graphify check` writes `<project_out>/check-report.json` unconditionally (unified: project rules + contract violations) — introduced by FEAT-015 so `pr-summary` can consume it
+- `graphify pr-summary <DIR>` — pure renderer over `analysis.json` (required) + `drift-report.json` / `check-report.json` (optional); Markdown to stdout, warnings to stderr, exit 1 on required-input errors, exit 0 otherwise (gating is `graphify check`'s job)
+- CLI error-exit convention: `exit(1)` for all error paths (not exit 2) — matches `cmd_diff`/`cmd_trend` pattern; keeps graphify CLI uniform
+- Tests: 442 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
@@ -207,6 +212,8 @@ git push origin main --tags            # triggers CI release
 - **FEAT-010 plan**: `docs/superpowers/plans/2026-04-13-feat-010-watch-mode.md`
 - **FEAT-002 spec**: `docs/superpowers/specs/2026-04-13-feat-002-architectural-drift-detection-design.md`
 - **FEAT-002 plan**: `docs/superpowers/plans/2026-04-13-feat-002-architectural-drift-detection.md`
+- **FEAT-015 spec**: `docs/superpowers/specs/2026-04-14-feat-015-pr-summary-cli-design.md`
+- **FEAT-015 plan**: `docs/superpowers/plans/2026-04-14-feat-015-pr-summary-cli.md`
 
 ## Task tracking
 
