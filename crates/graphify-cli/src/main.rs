@@ -37,6 +37,7 @@ use graphify_report::{
 };
 
 mod watch;
+mod install;
 
 // ---------------------------------------------------------------------------
 // Config structs
