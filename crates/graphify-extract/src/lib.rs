@@ -2,6 +2,7 @@ pub mod cache;
 pub mod drizzle;
 pub mod go;
 pub mod lang;
+pub mod php;
 pub mod python;
 pub mod resolver;
 pub mod rust_lang;
@@ -12,6 +13,7 @@ pub mod walker;
 pub use drizzle::{extract_drizzle_contract, extract_drizzle_contract_at, DrizzleParseError};
 pub use go::GoExtractor;
 pub use lang::{ExtractionResult, LanguageExtractor};
+pub use php::PhpExtractor;
 pub use python::PythonExtractor;
 pub use rust_lang::RustExtractor;
 pub use ts_contract::{
