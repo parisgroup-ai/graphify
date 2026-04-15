@@ -62,6 +62,11 @@ fn is_test_file(file_name: &str) -> bool {
         return true;
     }
 
+    // PHP / PHPUnit convention: <ClassName>Test.php
+    if file_name.ends_with("Test.php") {
+        return true;
+    }
+
     false
 }
 
@@ -74,6 +79,7 @@ fn language_for_extension(ext: &str) -> Option<Language> {
         "ts" | "tsx" => Some(Language::TypeScript),
         "go" => Some(Language::Go),
         "rs" => Some(Language::Rust),
+        "php" => Some(Language::Php),
         _ => None,
     }
 }
@@ -776,5 +782,44 @@ mod tests {
 
         let detected = detect_local_prefix(tmp.path(), &[Language::TypeScript], &[]);
         assert_eq!(detected, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // PHP support
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn path_to_module_php_regular_file() {
+        // Without PSR-4 mapping (added in a later task), path-based fallback
+        // applies: src/Services/Llm.php → "src.Services.Llm"
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/Services/Llm.php");
+        assert_eq!(path_to_module(base, file, ""), "src.Services.Llm");
+    }
+
+    #[test]
+    fn is_test_file_php_phpunit_pattern() {
+        assert!(is_test_file("UserTest.php"));
+        assert!(is_test_file("LlmTest.php"));
+        assert!(!is_test_file("User.php"));
+        assert!(!is_test_file("TestingHelper.php")); // "Testing" prefix is not a test
+        // Note: bare "Test.php" also matches ends_with("Test.php") and is treated
+        // as a test. In practice, production files are never literally named Test.php,
+        // so the false-positive is acceptable and not asserted here.
+    }
+
+    #[test]
+    fn discover_php_files_and_exclude_phpunit_tests() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("Service.php"), b"<?php\nclass Service {}").unwrap();
+        std::fs::write(src.join("ServiceTest.php"), b"<?php\nclass ServiceTest {}").unwrap();
+
+        let files = discover_files(tmp.path(), &[Language::Php], "", &[]);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].module_name, "src.Service");
+        assert_eq!(files[0].language, Language::Php);
+        assert!(!files[0].is_package, "PHP files are never packages");
     }
 }
