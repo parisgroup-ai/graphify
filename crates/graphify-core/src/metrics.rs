@@ -42,7 +42,7 @@ impl Default for ScoringWeights {
 ///
 /// The composite score ranks structural importance, but two nodes with similar
 /// scores can require very different refactors. This enum disambiguates them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HotspotType {
     /// High in-degree — many modules import this. Fix: split or invert deps.
@@ -51,6 +51,7 @@ pub enum HotspotType {
     /// inject the cross-layer dependency.
     Bridge,
     /// Both pressures present, or neither dominates — needs human judgment.
+    #[default]
     Mixed,
 }
 
@@ -121,11 +122,6 @@ pub struct NodeMetrics {
     pub hotspot_type: HotspotType,
 }
 
-impl Default for HotspotType {
-    fn default() -> Self {
-        HotspotType::Mixed
-    }
-}
 
 // ---------------------------------------------------------------------------
 // betweenness_centrality

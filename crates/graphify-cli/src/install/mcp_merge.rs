@@ -21,7 +21,7 @@ pub fn merge_claude_config(existing: &str, graphify_binary: &str) -> Result<Stri
     entry.insert("_graphify_managed".into(), Value::Bool(true));
 
     servers.insert("graphify".into(), Value::Object(entry));
-    Ok(serde_json::to_string_pretty(&root)?)
+    serde_json::to_string_pretty(&root)
 }
 
 /// Returns true if the existing `graphify` entry (if any) is ours.

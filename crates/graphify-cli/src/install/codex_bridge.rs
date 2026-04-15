@@ -18,10 +18,9 @@ pub fn run_bridge(script: &Path, install_root: &Path) -> std::io::Result<()> {
         .arg(install_root)
         .status()?;
     if !status.success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("bridge script exited with {}", status),
-        ));
+        return Err(std::io::Error::other(format!(
+            "bridge script exited with {status}"
+        )));
     }
     Ok(())
 }
