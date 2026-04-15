@@ -726,4 +726,79 @@ class Llm {
             .collect();
         assert!(calls.contains(&"helper"), "got {:?}", calls);
     }
+
+    #[test]
+    fn full_php_file_integration() {
+        use graphify_core::types::EdgeKind;
+        let r = extract(
+            r#"<?php
+namespace App\Services;
+
+use App\Models\User;
+use App\Logging\{Logger, Level};
+
+interface Servicer {
+    public function serve(): string;
+}
+
+class Llm implements Servicer {
+    public function serve(): string {
+        $user = new User();
+        log_event("served");
+        return "x";
+    }
+
+    public function helper(): void {
+        helper_fn();
+    }
+}
+
+function make_llm(): Llm {
+    setup();
+    return new Llm();
+}
+"#,
+        );
+
+        // 1 module + 1 interface + 1 class + 3 methods (Servicer::serve, Llm::serve, Llm::helper) + 1 function = 7 nodes
+        let nodes_by_kind = |k: NodeKind| -> Vec<&str> {
+            r.nodes
+                .iter()
+                .filter(|n| n.kind == k)
+                .map(|n| n.id.as_str())
+                .collect()
+        };
+        assert_eq!(nodes_by_kind(NodeKind::Module), vec!["App.Main"]);
+        assert_eq!(nodes_by_kind(NodeKind::Trait), vec!["App.Main.Servicer"]);
+        assert_eq!(nodes_by_kind(NodeKind::Class), vec!["App.Main.Llm"]);
+        let methods = nodes_by_kind(NodeKind::Method);
+        assert!(methods.contains(&"App.Main.Servicer.serve"), "got {:?}", methods);
+        assert!(methods.contains(&"App.Main.Llm.serve"), "got {:?}", methods);
+        assert!(methods.contains(&"App.Main.Llm.helper"), "got {:?}", methods);
+        assert_eq!(nodes_by_kind(NodeKind::Function), vec!["App.Main.make_llm"]);
+
+        let imports: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Imports)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(imports.contains(&"App.Models"), "Imports to App.Models; got {:?}", imports);
+        assert!(imports.contains(&"App.Logging"), "Imports to App.Logging (group); got {:?}", imports);
+
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        // `use` produces Calls to qualified symbols
+        assert!(calls.contains(&"App.Models.User"));
+        assert!(calls.contains(&"App.Logging.Logger"));
+        assert!(calls.contains(&"App.Logging.Level"));
+        // Bare calls from method/function bodies
+        assert!(calls.contains(&"log_event"));
+        assert!(calls.contains(&"helper_fn"));
+        assert!(calls.contains(&"setup"));
+    }
 }
