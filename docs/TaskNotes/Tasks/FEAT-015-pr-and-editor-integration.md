@@ -1,19 +1,21 @@
 ---
 uid: feat-015
-status: in-progress
+status: done
 priority: normal
+completed: 2026-04-15
 timeEstimate: 720
-tags:
-  - task
-  - feature
-  - dx
-  - integration
+pomodoros: 0
 projects:
-  - "[[sprint.md|Backlog]]"
+- '[[sprint.md|Backlog]]'
 contexts:
-  - dx
-  - github
-  - editor
+- dx
+- github
+- editor
+tags:
+- task
+- feature
+- dx
+- integration
 ---
 
 # PR and editor integration for architecture feedback

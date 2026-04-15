@@ -222,6 +222,30 @@ fn build_confidence_summary(graph: &CodeGraph) -> ConfidenceSummary {
     }
 }
 
+/// Returns `true` when the given JSON text looks like a trend-format
+/// [`HistoricalSnapshot`] (as produced by `graphify run` into
+/// `report/<project>/history/*.json`), rather than a full `analysis.json`.
+///
+/// Used by `graphify diff` to disambiguate: history snapshots are consumable
+/// only by `graphify trend`, and the raw serde error (`missing field
+/// 'betweenness'`) nudges users down a wrong diagnostic path. When this
+/// returns `true` the CLI can emit an explanatory message instead.
+///
+/// Detection is conservative: it requires `captured_at` (integer) **and**
+/// `project` (string) at the JSON root — both present on
+/// [`HistoricalSnapshot`] and absent from `AnalysisSnapshot`.
+pub fn is_trend_snapshot_json(text: &str) -> bool {
+    #[derive(Deserialize)]
+    struct TrendDiscriminator {
+        #[allow(dead_code)]
+        captured_at: u128,
+        #[allow(dead_code)]
+        project: String,
+    }
+
+    serde_json::from_str::<TrendDiscriminator>(text).is_ok()
+}
+
 pub fn load_historical_snapshots(dir: &Path) -> Result<Vec<HistoricalSnapshot>, String> {
     let mut snapshots = Vec::new();
     let entries = fs::read_dir(dir)
@@ -531,6 +555,66 @@ mod tests {
             nodes,
             communities,
         }
+    }
+
+    #[test]
+    fn is_trend_snapshot_json_accepts_history_shape() {
+        let json = r#"{
+            "captured_at": 1776203987090556000,
+            "project": "demo",
+            "summary": {
+                "total_nodes": 0,
+                "total_edges": 0,
+                "total_communities": 0,
+                "total_cycles": 0
+            },
+            "top_hotspots": [],
+            "confidence_summary": {
+                "extracted_count": 0,
+                "extracted_pct": 0.0,
+                "inferred_count": 0,
+                "inferred_pct": 0.0,
+                "ambiguous_count": 0,
+                "ambiguous_pct": 0.0,
+                "mean_confidence": 1.0
+            },
+            "nodes": [],
+            "communities": []
+        }"#;
+        assert!(is_trend_snapshot_json(json));
+    }
+
+    #[test]
+    fn is_trend_snapshot_json_rejects_analysis_shape() {
+        let analysis_json = r#"{
+            "nodes": [],
+            "communities": [],
+            "cycles": [],
+            "summary": {
+                "total_nodes": 0,
+                "total_edges": 0,
+                "total_communities": 0,
+                "total_cycles": 0
+            }
+        }"#;
+        assert!(!is_trend_snapshot_json(analysis_json));
+    }
+
+    #[test]
+    fn is_trend_snapshot_json_rejects_malformed_input() {
+        assert!(!is_trend_snapshot_json("{ not valid json"));
+        assert!(!is_trend_snapshot_json(""));
+        assert!(!is_trend_snapshot_json("[]"));
+    }
+
+    #[test]
+    fn is_trend_snapshot_json_rejects_partial_match() {
+        // Has `captured_at` but not `project`.
+        let json = r#"{ "captured_at": 12345 }"#;
+        assert!(!is_trend_snapshot_json(json));
+        // Has `project` but not `captured_at`.
+        let json = r#"{ "project": "demo" }"#;
+        assert!(!is_trend_snapshot_json(json));
     }
 
     #[test]

@@ -412,6 +412,11 @@ enum Commands {
     },
 
     /// Compare two analysis snapshots to detect architectural drift
+    ///
+    /// Requires full `analysis.json` files — not the trend-format snapshots
+    /// under `report/<project>/history/` (those are only consumable by
+    /// `graphify trend`). To baseline before a refactor, copy
+    /// `analysis.json` to `baseline.json` and diff against it later.
     Diff {
         /// Path to the "before" analysis.json (file-vs-file mode)
         #[arg(long)]
@@ -1212,7 +1217,39 @@ fn load_snapshot(path: &Path) -> AnalysisSnapshot {
     match serde_json::from_str::<AnalysisSnapshot>(&text) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Invalid analysis JSON {:?}: {e}", path);
+            if graphify_core::history::is_trend_snapshot_json(&text) {
+                eprintln!(
+                    "Error: {} is a trend-format history snapshot, not a full analysis.",
+                    path.display()
+                );
+                eprintln!();
+                eprintln!(
+                    "History snapshots under `report/<project>/history/` are consumable only by"
+                );
+                eprintln!(
+                    "`graphify trend`. `graphify diff` requires a full `analysis.json`."
+                );
+                eprintln!();
+                eprintln!(
+                    "To diff before/after a refactor, copy the current analysis as a baseline"
+                );
+                eprintln!("before starting the refactor:");
+                eprintln!();
+                eprintln!(
+                    "    cp report/<project>/analysis.json report/<project>/baseline.json"
+                );
+                eprintln!();
+                eprintln!("Then, after the refactor:");
+                eprintln!();
+                eprintln!(
+                    "    graphify diff --before report/<project>/baseline.json \\"
+                );
+                eprintln!(
+                    "                  --after  report/<project>/analysis.json"
+                );
+            } else {
+                eprintln!("Invalid analysis JSON {:?}: {e}", path);
+            }
             std::process::exit(1);
         }
     }
