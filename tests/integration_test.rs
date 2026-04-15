@@ -119,6 +119,94 @@ local_prefix = "app"
 }
 
 // ---------------------------------------------------------------------------
+// Test 1b: aliased Python imports do not create placeholder alias nodes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_python_alias_import_resolves_to_canonical_target() {
+    let tmp = TempDir::new().expect("create temp dir");
+    let repo_dir = tmp.path().join("repo");
+    let out_dir = tmp.path().join("output");
+
+    std::fs::create_dir_all(repo_dir.join("app/models")).expect("create models dir");
+    std::fs::create_dir_all(repo_dir.join("app/routers")).expect("create routers dir");
+
+    std::fs::write(
+        repo_dir.join("app/models/tokens.py"),
+        "class TokenUsageWithCost:\n    pass\n",
+    )
+    .expect("write tokens.py");
+    std::fs::write(
+        repo_dir.join("app/routers/course_metadata.py"),
+        "from app.models.tokens import TokenUsageWithCost as TokenUsage\n\n\
+def make():\n    return TokenUsage()\n",
+    )
+    .expect("write course_metadata.py");
+
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "alias_fixture"
+repo = "{repo}"
+lang = ["python"]
+local_prefix = "app"
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        repo = repo_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    );
+
+    let config_path = tmp.path().join("graphify.toml");
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let status = Command::new(graphify_bin())
+        .arg("run")
+        .arg("--config")
+        .arg(&config_path)
+        .status()
+        .expect("launch graphify binary");
+
+    assert!(status.success(), "graphify run exited with non-zero status");
+
+    let graph_json_path = out_dir.join("alias_fixture").join("graph.json");
+    let raw = std::fs::read_to_string(&graph_json_path).expect("read graph.json");
+    let graph: serde_json::Value = serde_json::from_str(&raw).expect("parse graph.json");
+
+    let nodes = graph["nodes"].as_array().expect("nodes must be an array");
+    let node_ids: Vec<&str> = nodes
+        .iter()
+        .filter_map(|node| node["id"].as_str())
+        .collect();
+
+    assert!(
+        node_ids.contains(&"app.models.tokens.TokenUsageWithCost"),
+        "canonical target node must exist, got {:?}",
+        node_ids
+    );
+    assert!(
+        !node_ids.contains(&"TokenUsage"),
+        "alias placeholder node must not be created, got {:?}",
+        node_ids
+    );
+
+    let links = graph["links"].as_array().expect("links must be an array");
+    let has_canonical_call = links.iter().any(|link| {
+        link["source"] == "app.routers.course_metadata"
+            && link["target"] == "app.models.tokens.TokenUsageWithCost"
+    });
+    assert!(
+        has_canonical_call,
+        "expected edge to canonical alias target in graph.json"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Test 2: full pipeline with the TypeScript fixture
 // ---------------------------------------------------------------------------
 
