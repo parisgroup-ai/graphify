@@ -1,5 +1,5 @@
 use crate::lang::{ExtractionResult, LanguageExtractor};
-use graphify_core::types::{Edge, Language, Node};
+use graphify_core::types::{Edge, Language, Node, NodeKind};
 use std::path::Path;
 use tree_sitter::Parser;
 
@@ -52,8 +52,6 @@ impl LanguageExtractor for PhpExtractor {
 // Top-level dispatch
 // ---------------------------------------------------------------------------
 
-// path is used only in recursion here; it will be consumed by class/function handlers in T6.
-#[allow(clippy::only_used_in_recursion)]
 fn dispatch_top_level(
     node: &tree_sitter::Node,
     source: &[u8],
@@ -65,10 +63,22 @@ fn dispatch_top_level(
         "namespace_use_declaration" => {
             extract_namespace_use(node, source, module_name, result);
         }
-        // Other top-level forms added in later tasks.
+        "class_declaration" => {
+            extract_symbol(node, source, path, module_name, NodeKind::Class, result);
+        }
+        "interface_declaration" => {
+            extract_symbol(node, source, path, module_name, NodeKind::Trait, result);
+        }
+        "trait_declaration" => {
+            extract_symbol(node, source, path, module_name, NodeKind::Trait, result);
+        }
+        "enum_declaration" => {
+            extract_symbol(node, source, path, module_name, NodeKind::Enum, result);
+        }
+        "function_definition" => {
+            extract_symbol(node, source, path, module_name, NodeKind::Function, result);
+        }
         _ => {
-            // Recurse in case the node wraps further statements (e.g. php_tag
-            // wraps the statement list).
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 dispatch_top_level(&child, source, path, module_name, result);
@@ -214,6 +224,43 @@ fn extract_namespace_use_group(
 }
 
 // ---------------------------------------------------------------------------
+// Symbol declarations (class, interface, trait, enum, function)
+// ---------------------------------------------------------------------------
+
+fn extract_symbol(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &Path,
+    module_name: &str,
+    kind: NodeKind,
+    result: &mut ExtractionResult,
+) {
+    let line = node.start_position().row + 1;
+
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let name = name_node.utf8_text(source).unwrap_or("");
+    if name.is_empty() {
+        return;
+    }
+
+    let symbol_id = format!("{}.{}", module_name, name);
+
+    result.nodes.push(Node::symbol(
+        &symbol_id,
+        kind,
+        path,
+        Language::Php,
+        line,
+        true,
+    ));
+    result
+        .edges
+        .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -333,5 +380,84 @@ mod tests {
             .expect("Imports edge");
         assert_eq!(imp.2.confidence, 1.0);
         assert_eq!(imp.2.confidence_kind, ConfidenceKind::Extracted);
+    }
+
+    #[test]
+    fn class_declaration_creates_class_node_and_defines() {
+        use graphify_core::types::{EdgeKind, NodeKind};
+        let r = extract("<?php\nclass Llm {}\n");
+        let class = r
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Class)
+            .expect("Class node");
+        assert_eq!(class.id, "App.Main.Llm");
+        let defines: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Defines && e.1 == "App.Main.Llm")
+            .collect();
+        assert_eq!(defines.len(), 1);
+    }
+
+    #[test]
+    fn interface_declaration_creates_trait_node() {
+        use graphify_core::types::NodeKind;
+        let r = extract("<?php\ninterface Servicer {}\n");
+        let ifc = r
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Trait)
+            .expect("Trait node for interface");
+        assert_eq!(ifc.id, "App.Main.Servicer");
+    }
+
+    #[test]
+    fn trait_declaration_creates_trait_node() {
+        use graphify_core::types::NodeKind;
+        let r = extract("<?php\ntrait Loggable {}\n");
+        let tr = r
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Trait && n.id == "App.Main.Loggable")
+            .expect("Trait node");
+        assert_eq!(tr.language, Language::Php);
+    }
+
+    #[test]
+    fn enum_declaration_creates_enum_node() {
+        use graphify_core::types::NodeKind;
+        let r = extract("<?php\nenum Status { case Active; case Archived; }\n");
+        let en = r
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Enum)
+            .expect("Enum node");
+        assert_eq!(en.id, "App.Main.Status");
+    }
+
+    #[test]
+    fn top_level_function_definition_creates_function_node() {
+        use graphify_core::types::NodeKind;
+        let r = extract("<?php\nfunction format(string $s): string { return $s; }\n");
+        let fn_node = r
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Function)
+            .expect("Function node");
+        assert_eq!(fn_node.id, "App.Main.format");
+    }
+
+    #[test]
+    fn defines_confidence_is_extracted_1_0() {
+        use graphify_core::types::{ConfidenceKind, EdgeKind};
+        let r = extract("<?php\nclass Llm {}\n");
+        let def = r
+            .edges
+            .iter()
+            .find(|e| e.2.kind == EdgeKind::Defines)
+            .expect("Defines edge");
+        assert_eq!(def.2.confidence, 1.0);
+        assert_eq!(def.2.confidence_kind, ConfidenceKind::Extracted);
     }
 }
