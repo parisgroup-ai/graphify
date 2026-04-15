@@ -401,6 +401,44 @@ Monitors source files and auto-rebuilds only affected projects on changes (300ms
 
 Fails the build if architectural constraints are violated.
 
+## AI Integrations
+
+Graphify ships ready-to-install integrations for Claude Code and Codex.
+
+### Install
+
+```bash
+graphify install-integrations
+```
+
+Auto-detects `~/.claude/` and `~/.agents/skills/`. Use `--claude-code` / `--codex` to target explicitly, `--project-local` to install into the current repo's `.claude/`, `--skip-mcp` to opt out of MCP registration, `--dry-run` to preview, `--uninstall` to reverse.
+
+### What gets installed
+
+| Kind | Name | Invocation |
+|---|---|---|
+| Agent | `graphify-analyst` | Polyvalent analyst (MCP-preferred) |
+| Agent | `graphify-ci-guardian` | Deterministic CI gate |
+| Skill | `graphify-onboarding` | Architecture tour |
+| Skill | `graphify-refactor-plan` | Phased refactor plan |
+| Skill | `graphify-drift-check` | CI drift gate |
+| Command | `/gf-analyze` | Full-pipeline summary |
+| Command | `/gf-onboard` | Invoke onboarding skill |
+| Command | `/gf-refactor-plan` | Invoke refactor plan skill |
+| Command | `/gf-drift-check` | Invoke drift check skill |
+
+### CI usage (drift gate)
+
+```yaml
+- run: graphify install-integrations --claude-code
+- run: graphify run --config graphify.toml
+- run: graphify check --config graphify.toml --json
+- run: graphify diff --before report/baseline/analysis.json --after report/<project>/analysis.json
+- run: graphify pr-summary report/<project> >> $GITHUB_STEP_SUMMARY
+```
+
+For interactive flows, invoke `/gf-onboard` or `/gf-refactor-plan` in Claude Code / Codex.
+
 ## Supported Languages
 
 - Python
