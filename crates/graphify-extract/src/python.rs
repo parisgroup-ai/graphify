@@ -1,6 +1,6 @@
 use crate::lang::{ExtractionResult, LanguageExtractor};
 use graphify_core::types::{Edge, Language, Node, NodeKind};
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::Path;
 use tree_sitter::Parser;
 
@@ -101,20 +101,21 @@ impl LanguageExtractor for PythonExtractor {
 // Import binding collection (issue #3)
 // ---------------------------------------------------------------------------
 
-/// Collect the set of names bound by top-level Python imports. The result is
-/// the local name visible in this file — `import foo as f` binds `f`, and
-/// `from x import y as z` binds `z`.
+/// Collect the top-level Python import bindings visible in this file.
+///
+/// The returned map is `local_binding -> canonical_target`, so imported aliases
+/// resolve through to the original symbol instead of creating placeholder nodes
+/// keyed by the alias itself.
 ///
 /// Binding forms covered:
-/// - `import foo` → `foo`
-/// - `import foo.bar` → `foo` (first segment — dotted access becomes a member
-///   expression, not a bare call)
-/// - `import foo as f` → `f`
-/// - `from foo import bar` → `bar`
-/// - `from foo import bar as b` → `b`
+/// - `import foo` → `foo => foo`
+/// - `import foo.bar` → `foo => foo`
+/// - `import foo as f` → `f => foo`
+/// - `from foo import bar` → `bar => foo.bar`
+/// - `from foo import bar as b` → `b => foo.bar`
 /// - `from foo import *` → nothing
-fn collect_imported_bindings(root: tree_sitter::Node, source: &[u8]) -> HashSet<String> {
-    let mut bindings = HashSet::new();
+fn collect_imported_bindings(root: tree_sitter::Node, source: &[u8]) -> HashMap<String, String> {
+    let mut bindings = HashMap::new();
     let mut cursor = root.walk();
     for node in root.children(&mut cursor) {
         match node.kind() {
@@ -133,7 +134,7 @@ fn collect_imported_bindings(root: tree_sitter::Node, source: &[u8]) -> HashSet<
 fn collect_from_import_statement(
     node: tree_sitter::Node,
     source: &[u8],
-    bindings: &mut HashSet<String>,
+    bindings: &mut HashMap<String, String>,
 ) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -143,16 +144,22 @@ fn collect_from_import_statement(
                 if let Some(first) = child.child(0) {
                     if let Ok(name) = first.utf8_text(source) {
                         if !name.is_empty() {
-                            bindings.insert(name.to_owned());
+                            bindings.insert(name.to_owned(), name.to_owned());
                         }
                     }
                 }
             }
             // `import foo as f` — bind the alias.
             "aliased_import" => {
+                let target_name = child
+                    .child(0)
+                    .and_then(|name| name.utf8_text(source).ok())
+                    .map(str::to_owned);
                 if let Some(alias) = child.child_by_field_name("alias") {
                     if let Ok(name) = alias.utf8_text(source) {
-                        bindings.insert(name.to_owned());
+                        if let Some(target_name) = target_name {
+                            bindings.insert(name.to_owned(), target_name);
+                        }
                     }
                 }
             }
@@ -164,13 +171,20 @@ fn collect_from_import_statement(
 fn collect_from_import_from_statement(
     node: tree_sitter::Node,
     source: &[u8],
-    bindings: &mut HashSet<String>,
+    bindings: &mut HashMap<String, String>,
 ) {
     // Walk children, splitting on the `import` keyword. Names that appear
     // *after* `import` are the ones that enter this file's scope.
+    let mut from_module = String::new();
     let mut past_import = false;
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
+        if !past_import
+            && matches!(child.kind(), "dotted_name" | "relative_import")
+            && from_module.is_empty()
+        {
+            from_module = child.utf8_text(source).unwrap_or("").to_owned();
+        }
         if child.kind() == "import" {
             past_import = true;
             continue;
@@ -183,21 +197,28 @@ fn collect_from_import_from_statement(
             "dotted_name" => {
                 if let Ok(name) = child.utf8_text(source) {
                     if !name.is_empty() {
-                        bindings.insert(name.to_owned());
+                        bindings.insert(name.to_owned(), format!("{}.{}", from_module, name));
                     }
                 }
             }
             // `from x import foo as f` — bind the alias `f`.
             "aliased_import" => {
+                let target_name = child
+                    .child(0)
+                    .and_then(|name| name.utf8_text(source).ok())
+                    .filter(|name| !name.is_empty())
+                    .map(|name| format!("{}.{}", from_module, name));
                 if let Some(alias) = child.child_by_field_name("alias") {
                     if let Ok(name) = alias.utf8_text(source) {
-                        bindings.insert(name.to_owned());
+                        if let Some(target_name) = target_name {
+                            bindings.insert(name.to_owned(), target_name);
+                        }
                     }
                 } else if let Some(first) = child.child(0) {
                     // Fallback: no alias field, bind the imported name.
                     if let Ok(name) = first.utf8_text(source) {
                         if !name.is_empty() {
-                            bindings.insert(name.to_owned());
+                            bindings.insert(name.to_owned(), format!("{}.{}", from_module, name));
                         }
                     }
                 }
@@ -338,7 +359,7 @@ fn extract_function_definition(
     source: &[u8],
     module_name: &str,
     path: &Path,
-    imported: &HashSet<String>,
+    imported: &HashMap<String, String>,
     result: &mut ExtractionResult,
 ) {
     let line = node.start_position().row + 1;
@@ -381,7 +402,7 @@ fn extract_class_definition(
     source: &[u8],
     module_name: &str,
     path: &Path,
-    imported: &HashSet<String>,
+    imported: &HashMap<String, String>,
     result: &mut ExtractionResult,
 ) {
     let line = node.start_position().row + 1;
@@ -426,12 +447,14 @@ fn extract_class_definition(
 ///
 /// Same-file helpers, function parameters, and Python builtins (`print`, `len`,
 /// `range`, `isinstance`) are filtered out: they never enter `imported`, so no
-/// edge is emitted. Edges carry confidence 0.9 / Extracted.
+/// edge is emitted. Aliases resolve through to their imported target so the
+/// graph keeps a single canonical node identity. Edges carry confidence 0.9 /
+/// Extracted.
 fn extract_calls_recursive(
     node: tree_sitter::Node,
     source: &[u8],
     module_name: &str,
-    imported: &HashSet<String>,
+    imported: &HashMap<String, String>,
     result: &mut ExtractionResult,
 ) {
     if node.kind() == "call" {
@@ -439,11 +462,11 @@ fn extract_calls_recursive(
         if let Some(func_child) = node.child(0) {
             if func_child.kind() == "identifier" {
                 let callee = func_child.utf8_text(source).unwrap_or("");
-                if !callee.is_empty() && imported.contains(callee) {
+                if let Some(target) = imported.get(callee) {
                     let line = node.start_position().row + 1;
                     result.edges.push((
                         module_name.to_owned(),
-                        callee.to_owned(),
+                        target.clone(),
                         Edge::calls(line)
                             .with_confidence(0.9, graphify_core::types::ConfidenceKind::Extracted),
                     ));
@@ -661,8 +684,8 @@ mod tests {
             .map(|(_, t, _)| t.as_str())
             .collect();
         assert!(
-            call_targets.contains(&"bar"),
-            "expected Calls edge to imported 'bar', got {:?}",
+            call_targets.contains(&"mod.bar"),
+            "expected Calls edge to imported target 'mod.bar', got {:?}",
             call_targets
         );
     }
@@ -705,26 +728,25 @@ mod tests {
     }
 
     #[test]
-    fn aliased_import_calls_are_keyed_by_alias() {
+    fn aliased_import_calls_are_keyed_by_qualified_target() {
         let result = extract("from mod import foo as bar\nbar(1)\n");
         let calls: Vec<_> = result
             .edges
             .iter()
             .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
             .collect();
-        // Edge targets the local alias `bar`, not the imported name `foo`.
+        // Aliased calls should resolve through to the imported symbol so the
+        // graph does not create a distinct placeholder node for the alias.
         assert!(
-            calls.iter().any(|(_, t, _)| t == "bar"),
-            "expected Calls edge to alias 'bar', got {:?}",
+            calls.iter().any(|(_, t, _)| t == "mod.foo"),
+            "expected Calls edge to qualified target 'mod.foo', got {:?}",
             calls
         );
-        // The bare-call filter keys on `bar`; it should not emit a bare
-        // `foo` node (though the existing qualified `mod.foo` edge persists).
-        let bare_foo: Vec<_> = calls.iter().filter(|(_, t, _)| t == "foo").collect();
+        let alias_calls: Vec<_> = calls.iter().filter(|(_, t, _)| t == "bar").collect();
         assert!(
-            bare_foo.is_empty(),
-            "should not key bare-call edge on imported name 'foo', got {:?}",
-            bare_foo
+            alias_calls.is_empty(),
+            "should not create a Calls edge keyed by alias 'bar', got {:?}",
+            alias_calls
         );
     }
 
@@ -751,9 +773,9 @@ mod tests {
         let calls: Vec<_> = result
             .edges
             .iter()
-            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "m")
+            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "mod")
             .collect();
-        assert_eq!(calls.len(), 1, "`import mod as m` must bind `m`");
+        assert_eq!(calls.len(), 1, "`import mod as m` must resolve calls to `mod`");
     }
 
     #[test]
@@ -789,8 +811,8 @@ mod tests {
         let call_edge = result
             .edges
             .iter()
-            .find(|(_, t, e)| e.kind == EdgeKind::Calls && t == "bar")
-            .expect("should have Calls edge to bar");
+            .find(|(_, t, e)| e.kind == EdgeKind::Calls && t == "mod.bar" && e.line == 4)
+            .expect("should have Calls edge to mod.bar");
         assert_eq!(call_edge.2.confidence, 0.9);
         assert_eq!(call_edge.2.confidence_kind, ConfidenceKind::Extracted);
     }
