@@ -254,7 +254,14 @@ impl ModuleResolver {
             return (resolved, is_local, 0.9);
         }
 
-        // 6. Direct module name — check against known modules.
+        // 6. PHP `use` targets (contain a backslash separator).
+        if raw.contains('\\') {
+            let normalized = raw.trim_start_matches('\\').replace('\\', ".");
+            let is_local = self.known_modules.contains_key(&normalized);
+            return (normalized, is_local, 1.0);
+        }
+
+        // 7. Direct module name — check against known modules.
         let is_local = self.known_modules.contains_key(raw);
         (raw.to_owned(), is_local, 1.0)
     }
@@ -1293,5 +1300,40 @@ mod tests {
         resolver.load_composer_json(&path); // must not panic
 
         assert!(resolver.psr4_mappings().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // PHP `use` targets (backslash-separated namespaces)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_php_use_matches_known_module() {
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.register_module("App.Services.Llm");
+
+        let (resolved, is_local, confidence) = resolver.resolve("App\\Services\\Llm", "App.Main", false);
+        assert_eq!(resolved, "App.Services.Llm");
+        assert!(is_local);
+        assert_eq!(confidence, 1.0);
+    }
+
+    #[test]
+    fn resolve_php_use_nonlocal_still_extracted_confidence() {
+        let resolver = ModuleResolver::new(Path::new("/repo"));
+        let (resolved, is_local, confidence) =
+            resolver.resolve("Symfony\\HttpFoundation\\Request", "App.Main", false);
+        assert_eq!(resolved, "Symfony.HttpFoundation.Request");
+        assert!(!is_local);
+        assert_eq!(confidence, 1.0);
+    }
+
+    #[test]
+    fn resolve_php_use_strips_leading_backslash() {
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.register_module("App.Models.User");
+
+        let (resolved, is_local, _) = resolver.resolve("\\App\\Models\\User", "App.Main", false);
+        assert_eq!(resolved, "App.Models.User");
+        assert!(is_local);
     }
 }
