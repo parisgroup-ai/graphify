@@ -21,6 +21,9 @@ pub struct ModuleResolver {
     ts_aliases: Vec<(String, String)>,
     /// Go module path from `go.mod` (e.g. `github.com/user/repo`).
     go_module_path: Option<String>,
+    /// PSR-4 autoload mappings from `composer.json`: `(namespace_prefix, dir_prefix)`.
+    /// Example: `("App\\", "src/")`.
+    psr4_mappings: Vec<(String, String)>,
     /// Workspace / project root (reserved for future use).
     #[allow(dead_code)]
     root: PathBuf,
@@ -37,6 +40,7 @@ impl ModuleResolver {
             known_modules: HashMap::new(),
             ts_aliases: Vec::new(),
             go_module_path: None,
+            psr4_mappings: Vec::new(),
             root: root.to_path_buf(),
         }
     }
@@ -157,6 +161,34 @@ impl ModuleResolver {
                     self.go_module_path = Some(module_path.to_owned());
                 }
                 break;
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // composer.json loading
+    // -----------------------------------------------------------------------
+
+    /// Return an immutable view over the parsed PSR-4 mappings. Used by the
+    /// walker to translate file paths to namespace-prefixed module names.
+    pub fn psr4_mappings(&self) -> &[(String, String)] {
+        &self.psr4_mappings
+    }
+
+    /// Parse `composer.json` and load `autoload.psr-4` + `autoload-dev.psr-4`
+    /// mappings. Tolerates missing files and malformed JSON — failures leave
+    /// the mappings empty without panicking.
+    pub fn load_composer_json(&mut self, composer_path: &Path) {
+        let text = match std::fs::read_to_string(composer_path) {
+            Ok(t) => t,
+            Err(_) => return,
+        };
+
+        for section in ["autoload", "autoload-dev"] {
+            if let Some(psr4_block) = find_psr4_block(&text, section) {
+                for pair in parse_psr4_pairs(&psr4_block) {
+                    self.psr4_mappings.push(pair);
+                }
             }
         }
     }
@@ -515,6 +547,160 @@ fn extract_quoted_string(s: &str) -> Option<(String, usize)> {
     }
 
     None
+}
+
+// ---------------------------------------------------------------------------
+// Composer.json mini-parser (PSR-4 only, no serde_json dep)
+// ---------------------------------------------------------------------------
+
+/// Find the body of `<section>.psr-4` as a raw substring between its outer
+/// `{` and the matching `}`. Returns None if not found.
+fn find_psr4_block(text: &str, section: &str) -> Option<String> {
+    let section_key = format!("\"{}\"", section);
+    let section_pos = text.find(&section_key)?;
+    let after_section = &text[section_pos + section_key.len()..];
+    let psr4_pos = after_section.find("\"psr-4\"")?;
+    let after_psr4 = &after_section[psr4_pos + "\"psr-4\"".len()..];
+    let open_brace = after_psr4.find('{')?;
+
+    let body_start = open_brace + 1;
+    let body_bytes = &after_psr4.as_bytes()[body_start..];
+    let mut depth: i32 = 1;
+    let mut end: Option<usize> = None;
+    for (i, &b) in body_bytes.iter().enumerate() {
+        match b {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
+
+    Some(after_psr4[body_start..body_start + end].to_owned())
+}
+
+/// Parse the body of a PSR-4 block, returning `(namespace_prefix, dir_prefix)`
+/// pairs. Accepts both `"App\\": "src/"` and `"App\\": ["src/"]` (first entry
+/// of an array wins). Tolerates whitespace and unknown keys.
+fn parse_psr4_pairs(body: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let bytes = body.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        while i < bytes.len() && (bytes[i].is_ascii_whitespace() || bytes[i] == b',') {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+
+        if bytes[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        let key_start = i + 1;
+        let key_end = match find_unescaped_quote(bytes, key_start) {
+            Some(p) => p,
+            None => break,
+        };
+        let key = &body[key_start..key_end];
+        i = key_end + 1;
+
+        while i < bytes.len() && bytes[i] != b':' {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        i += 1;
+
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+
+        let value = if i < bytes.len() && bytes[i] == b'"' {
+            let v_start = i + 1;
+            let v_end = match find_unescaped_quote(bytes, v_start) {
+                Some(p) => p,
+                None => break,
+            };
+            let v = body[v_start..v_end].to_owned();
+            i = v_end + 1;
+            Some(v)
+        } else if i < bytes.len() && bytes[i] == b'[' {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'"' && bytes[i] != b']' {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == b'"' {
+                let v_start = i + 1;
+                let v_end = match find_unescaped_quote(bytes, v_start) {
+                    Some(p) => p,
+                    None => break,
+                };
+                let v = body[v_start..v_end].to_owned();
+                i = v_end + 1;
+                while i < bytes.len() && bytes[i] != b']' {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1;
+                }
+                Some(v)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(v) = value {
+            let key_unescaped = unescape_backslashes(key);
+            out.push((key_unescaped, v));
+        }
+    }
+
+    out
+}
+
+fn find_unescaped_quote(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut i = start;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'"' {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn unescape_backslashes(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            if let Some(&next) = chars.peek() {
+                if next == '\\' {
+                    out.push('\\');
+                    chars.next();
+                    continue;
+                }
+            }
+        }
+        out.push(c);
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1022,5 +1208,90 @@ mod tests {
         assert_eq!(id, "serde");
         assert!(!is_local);
         assert_eq!(confidence, 1.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // load_composer_json
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn load_composer_json_parses_psr4_mappings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("composer.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "name": "vendor/pkg",
+  "autoload": {
+    "psr-4": {
+      "App\\": "src/",
+      "App\\Legacy\\": "src/legacy/"
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let mut resolver = ModuleResolver::new(tmp.path());
+        resolver.load_composer_json(&path);
+
+        let mappings = resolver.psr4_mappings();
+        assert!(
+            mappings.iter().any(|(ns, dir)| ns == "App\\" && dir == "src/"),
+            "App\\ → src/ mapping; got {:?}",
+            mappings
+        );
+        assert!(
+            mappings
+                .iter()
+                .any(|(ns, dir)| ns == "App\\Legacy\\" && dir == "src/legacy/"),
+            "App\\Legacy\\ → src/legacy/ mapping; got {:?}",
+            mappings
+        );
+    }
+
+    #[test]
+    fn load_composer_json_merges_autoload_dev() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("composer.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "autoload": { "psr-4": { "App\\": "src/" } },
+  "autoload-dev": { "psr-4": { "Tests\\": "tests/" } }
+}"#,
+        )
+        .unwrap();
+
+        let mut resolver = ModuleResolver::new(tmp.path());
+        resolver.load_composer_json(&path);
+
+        let mappings = resolver.psr4_mappings();
+        assert!(mappings.iter().any(|(ns, _)| ns == "App\\"));
+        assert!(mappings.iter().any(|(ns, _)| ns == "Tests\\"));
+    }
+
+    #[test]
+    fn load_composer_json_handles_malformed_without_panic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("composer.json");
+        std::fs::write(&path, "{ this is not valid json").unwrap();
+
+        let mut resolver = ModuleResolver::new(tmp.path());
+        resolver.load_composer_json(&path); // must not panic
+
+        let mappings = resolver.psr4_mappings();
+        assert!(mappings.is_empty(), "malformed file leaves mappings empty");
+    }
+
+    #[test]
+    fn load_composer_json_missing_file_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("nonexistent.json");
+
+        let mut resolver = ModuleResolver::new(tmp.path());
+        resolver.load_composer_json(&path); // must not panic
+
+        assert!(resolver.psr4_mappings().is_empty());
     }
 }
