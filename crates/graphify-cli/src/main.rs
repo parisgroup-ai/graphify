@@ -22,8 +22,8 @@ use graphify_core::{
 };
 use graphify_extract::{
     cache::{sha256_hex, CacheStats, ExtractionCache},
-    walker::{detect_local_prefix, discover_files},
-    ExtractionResult, GoExtractor, LanguageExtractor, PythonExtractor, RustExtractor,
+    walker::detect_local_prefix,
+    ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor, PythonExtractor, RustExtractor,
     TypeScriptExtractor,
 };
 use graphify_report::{
@@ -984,7 +984,7 @@ output = "./report"
 [[project]]
 name = "my-project"
 repo = "./src"
-lang = ["python"]           # Options: python, typescript, go, rust
+lang = ["python"]           # Options: python, typescript, go, rust, php
 local_prefix = "app"
 
 # Optional policy rules for graphify check:
@@ -1343,6 +1343,7 @@ fn parse_languages(lang_strs: &[String]) -> Vec<Language> {
             "typescript" | "ts" => Some(Language::TypeScript),
             "go" => Some(Language::Go),
             "rust" | "rs" => Some(Language::Rust),
+            "php" => Some(Language::Php),
             other => {
                 eprintln!("Warning: unknown language '{other}', skipping.");
                 None
@@ -1388,12 +1389,34 @@ fn run_extract(
         );
     }
 
-    // Discover files.
-    let files = discover_files(
+    // Pre-parse composer.json if PHP is in the project's language list.
+    // PSR-4 mappings must be known at walk time so module_names are computed
+    // in namespace-space (not path-space).
+    let psr4_mappings: Vec<(String, String)> = if languages.contains(&Language::Php) {
+        let composer = repo_path.join("composer.json");
+        if composer.exists() {
+            let mut tmp = graphify_extract::resolver::ModuleResolver::new(&repo_path);
+            tmp.load_composer_json(&composer);
+            tmp.psr4_mappings().to_vec()
+        } else {
+            eprintln!(
+                "Warning: PHP project at {:?} has no composer.json — PSR-4 resolution \
+                 disabled, imports may not resolve to local modules",
+                repo_path
+            );
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    // Discover files (PSR-4-aware for PHP; degrades to regular discovery for other languages).
+    let files = graphify_extract::discover_files_with_psr4(
         &repo_path,
         &languages,
         &effective_local_prefix,
         &extra_excludes,
+        &psr4_mappings,
     );
 
     // BUG-009: Warn when discovery finds very few files — likely misconfigured
@@ -1441,6 +1464,7 @@ fn run_extract(
     let typescript_extractor = TypeScriptExtractor::new();
     let go_extractor = GoExtractor::new();
     let rust_extractor = RustExtractor::new();
+    let php_extractor = PhpExtractor::new();
 
     // Build resolver.
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
@@ -1462,6 +1486,15 @@ fn run_extract(
         if go_mod.exists() {
             resolver.load_go_mod(&go_mod);
         }
+    }
+
+    // Load composer.json if PHP is in the language list.
+    if languages.contains(&Language::Php) {
+        let composer = repo_path.join("composer.json");
+        if composer.exists() {
+            resolver.load_composer_json(&composer);
+        }
+        // Warning already printed above during pre-parse; don't duplicate.
     }
 
     let repo_path_ref = &repo_path;
@@ -1498,6 +1531,7 @@ fn run_extract(
                 Language::TypeScript => &typescript_extractor,
                 Language::Go => &go_extractor,
                 Language::Rust => &rust_extractor,
+                Language::Php => &php_extractor,
             };
 
             let result = extractor.extract_file(&file.path, &source, &file.module_name);
@@ -3450,5 +3484,38 @@ mod tests {
             &violations[1],
             CheckViolation::Limit { kind, .. } if kind == "max_hotspot_score"
         ));
+    }
+}
+
+#[cfg(test)]
+mod language_parse_tests {
+    use super::*;
+    use graphify_core::types::Language;
+
+    #[test]
+    fn parse_languages_accepts_php() {
+        let langs = parse_languages(&["php".to_string()]);
+        assert_eq!(langs, vec![Language::Php]);
+    }
+
+    #[test]
+    fn parse_languages_accepts_all_five() {
+        let langs = parse_languages(&[
+            "python".to_string(),
+            "typescript".to_string(),
+            "go".to_string(),
+            "rust".to_string(),
+            "php".to_string(),
+        ]);
+        assert_eq!(
+            langs,
+            vec![
+                Language::Python,
+                Language::TypeScript,
+                Language::Go,
+                Language::Rust,
+                Language::Php,
+            ]
+        );
     }
 }

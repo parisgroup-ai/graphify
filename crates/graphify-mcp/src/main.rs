@@ -16,8 +16,8 @@ use graphify_core::{
     types::Language,
 };
 use graphify_extract::{
-    walker::discover_files, ExtractionResult, GoExtractor, LanguageExtractor, PythonExtractor,
-    RustExtractor, TypeScriptExtractor,
+    walker::discover_files, ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor,
+    PythonExtractor, RustExtractor, TypeScriptExtractor,
 };
 
 use crate::server::GraphifyServer;
@@ -225,6 +225,7 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
     let typescript_extractor = TypeScriptExtractor::new();
     let go_extractor = GoExtractor::new();
     let rust_extractor = RustExtractor::new();
+    let php_extractor = PhpExtractor::new();
 
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
     for file in &files {
@@ -261,6 +262,7 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
                 Language::TypeScript => &typescript_extractor,
                 Language::Go => &go_extractor,
                 Language::Rust => &rust_extractor,
+                Language::Php => &php_extractor,
             };
 
             Some(extractor.extract_file(&file.path, &source, &file.module_name))
