@@ -1,7 +1,7 @@
 ---
 title: Sprint
 created: 2026-04-12
-updated: 2026-04-13
+updated: 2026-04-14
 ---
 
 # Graphify — Issues
@@ -21,6 +21,7 @@ updated: 2026-04-13
 | BUG-011 | **done**    | high     | 3h     | Workspace alias imports still mangled with local_prefix   |
 | BUG-012 | **done**    | low      | 1h     | Summary JSON missing communities count                    |
 | BUG-013 | **done**    | normal   | 1h30m  | `graphify run` leaves stale report directories         |
+| BUG-014 | **open**    | low      | ?      | `graphify diff --before history/*.json` cryptic schema error |
 
 ## Backlog
 
@@ -40,8 +41,10 @@ updated: 2026-04-13
 | FEAT-012 | **done** | low      | 2h     | Recipe-based CLI examples for monorepo workflows      |
 | FEAT-013 | **done** | high     | 16h    | Policy-driven architecture rules                      |
 | FEAT-014 | **done** | normal   | 12h    | Historical architecture trend tracking                |
-| FEAT-015 | **open** | normal   | 12h    | PR and editor integration for architecture feedback   |
+| FEAT-015 | **done** | normal   | 12h    | PR and editor integration for architecture feedback   |
 | FEAT-016 | **done** | high     | 16h    | Contract drift detection between ORM and TS types     |
+| FEAT-017 | **done** | normal   | ?      | Classify top-20 hotspots as hub/bridge/mixed in report output |
+| FEAT-018 | **done** | normal   | 16h    | AI integrations (skills, agents, install-integrations subcommand) |
 
 ## Done
 
@@ -67,3 +70,6 @@ updated: 2026-04-13
 - [[FEAT-013-policy-driven-architecture-rules]] - Implemented: declarative `policy.group` / `policy.rule` config, project/group selectors, partition-aware deny rules, `graphify check` human + JSON violations, README recipes, and reliable integration coverage (2026-04-13)
 - [[FEAT-014-historical-architecture-trend-tracking]] - Implemented: snapshot history store (`graphify-core/src/history.rs`), `graphify trend` CLI surface, JSON + Markdown trend reports, regression fixtures over metric changes (2026-04-13)
 - [[FEAT-016-contract-drift-detection-between-orm-and-typescript]] - Implemented: Drizzle-to-TS contract drift detection via `graphify check`, built-in type map + overrides, snake_case<->camelCase normalization, relation cardinality comparison, JSON + Markdown + human output, 6 integration + ~34 unit tests (2026-04-13)
+- [[FEAT-015-pr-and-editor-integration]] - Implemented: `graphify pr-summary <DIR>` pure renderer over `analysis.json` + `drift-report.json` + `check-report.json`; `CheckReport` types moved to public `graphify-report::check_report`; `graphify check` now writes `check-report.json` unconditionally; exit-1 CLI convention; 17 commits (`be449dc..b5ebed5`), 442 workspace tests passing (2026-04-14)
+- [[FEAT-017-classify-top-hotspots]] - Implemented: hub/bridge/mixed classification for top hotspots via scoring rules; reported in `architecture_report.md` + `analysis.json`; existing tests updated (2026-04-14)
+- [[FEAT-018-ai-integrations]] - Implemented: `graphify install-integrations` subcommand; 2 agents (graphify-analyst Opus, graphify-ci-guardian Haiku); 3 skills (onboarding, refactor-plan, drift-check); 4 `/gf-*` commands; Codex parity via bridge + inline fallback; manifest-driven uninstall; MCP registration (Claude JSON + Codex TOML); 32 new tests (2026-04-15)
