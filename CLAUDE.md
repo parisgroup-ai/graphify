@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What is Graphify
 
-Graphify is a Rust CLI tool for architectural analysis of codebases. It extracts dependencies from Python and TypeScript source code using tree-sitter AST parsing, builds knowledge graphs with petgraph, and generates structured reports identifying architectural hotspots, circular dependencies, and community clusters.
+Graphify is a Rust CLI tool for architectural analysis of codebases. It extracts dependencies from Python, TypeScript, Go, Rust, and PHP source code using tree-sitter AST parsing, builds knowledge graphs with petgraph, and generates structured reports identifying architectural hotspots, circular dependencies, and community clusters.
 
 Distributed as a standalone binary (no runtime dependencies). Targets macOS + Linux.
 
@@ -123,9 +123,10 @@ For each [[project]]:
 | `crates/graphify-core/src/query.rs` | QueryEngine — search, path, explain, stats |
 | `crates/graphify-extract/src/python.rs` | Python extractor (imports, defs, calls) |
 | `crates/graphify-extract/src/typescript.rs` | TypeScript extractor (imports, exports, require, calls) |
-| `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative w/ `is_package`, TS path aliases) |
+| `crates/graphify-extract/src/php.rs` | PHP extractor (namespace, use, class/interface/trait/enum/function, calls) |
+| `crates/graphify-extract/src/resolver.rs` | Module resolver (Python relative w/ `is_package`, TS path aliases, PHP PSR-4 via composer.json) |
 | `crates/graphify-extract/src/cache.rs` | ExtractionCache — SHA256-based per-file extraction cache |
-| `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion + `is_package` detection |
+| `crates/graphify-extract/src/walker.rs` | File discovery + dir exclusion + `is_package` detection + PSR-4 path translation |
 | `crates/graphify-report/src/html.rs` | Interactive HTML visualization (D3.js force graph, self-contained) |
 | `crates/graphify-report/src/neo4j.rs` | Neo4j Cypher import script (CREATE nodes, CREATE relationships) |
 | `crates/graphify-report/src/graphml.rs` | GraphML XML export (compatible with yEd, Gephi) |
@@ -187,6 +188,12 @@ For each [[project]]:
 - CLI error-exit convention: `exit(1)` for all error paths (not exit 2) — matches `cmd_diff`/`cmd_trend` pattern; keeps graphify CLI uniform
 - `graphify diff` error routing: on `AnalysisSnapshot` deserialize failure, `graphify-cli::main::load_snapshot` calls `graphify_core::history::is_trend_snapshot_json` (discriminator: requires `captured_at` + `project` at root) to emit an explanatory message with the baseline-copy recipe instead of the raw serde error — pattern: run discriminator only on the error path, so happy path stays at one read + one parse
 - Tests: 493 unit + integration tests (`cargo test --workspace`)
+- PHP PSR-4 mapping loaded from `composer.json` (`autoload.psr-4` + `autoload-dev.psr-4`); longest-prefix match wins; namespaces normalized `\` → `.`
+- PHP test files excluded: `*Test.php` (PHPUnit convention)
+- PHP confidence: `use X\Y\Z` → 1.0 / Extracted (fully qualified); bare calls 0.7 / Inferred (same as Go/Python)
+- PHP method id scheme: `{module}.{ClassName}.{method}`
+- PhpExtractor never sets `is_package = true` (PHP has no package entry-point equivalent)
+- `graphify_extract::walker::discover_files_with_psr4` is the PSR-4-aware discovery entry; `discover_files` remains a thin wrapper for non-PHP projects
 
 ## Build & Release
 
@@ -226,6 +233,8 @@ git push origin main --tags            # triggers CI release
 - **FEAT-002 plan**: `docs/superpowers/plans/2026-04-13-feat-002-architectural-drift-detection.md`
 - **FEAT-015 spec**: `docs/superpowers/specs/2026-04-14-feat-015-pr-summary-cli-design.md`
 - **FEAT-015 plan**: `docs/superpowers/plans/2026-04-14-feat-015-pr-summary-cli.md`
+- **FEAT-019 spec**: `docs/superpowers/specs/2026-04-15-feat-019-php-support-design.md`
+- **FEAT-019 plan**: `docs/superpowers/plans/2026-04-15-feat-019-php-support.md`
 
 ## AI integrations
 
