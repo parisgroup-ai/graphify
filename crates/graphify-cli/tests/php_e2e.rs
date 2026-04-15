@@ -75,8 +75,7 @@ local_prefix = ""
         analysis_path
     );
 
-    let analysis_text =
-        std::fs::read_to_string(&analysis_path).expect("read analysis.json");
+    let analysis_text = std::fs::read_to_string(&analysis_path).expect("read analysis.json");
 
     assert!(
         analysis_text.contains("App.Controllers.HomeController"),

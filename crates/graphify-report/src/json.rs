@@ -2,7 +2,10 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use graphify_core::{graph::CodeGraph, metrics::{HotspotType, NodeMetrics}};
+use graphify_core::{
+    graph::CodeGraph,
+    metrics::{HotspotType, NodeMetrics},
+};
 
 use crate::{Community, Cycle};
 

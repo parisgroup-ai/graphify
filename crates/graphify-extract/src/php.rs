@@ -274,9 +274,11 @@ fn extract_symbol(
         line,
         true,
     ));
-    result
-        .edges
-        .push((module_name.to_owned(), symbol_id.clone(), Edge::defines(line)));
+    result.edges.push((
+        module_name.to_owned(),
+        symbol_id.clone(),
+        Edge::defines(line),
+    ));
 
     // For functions: scan the body for bare calls and return (no methods).
     if matches!(kind, NodeKind::Function) {
@@ -606,7 +608,10 @@ class Llm {
             .filter(|e| e.2.kind == EdgeKind::Defines && e.1 == "App.Main.Llm.call")
             .collect();
         assert_eq!(defines.len(), 1);
-        assert_eq!(defines[0].0, "App.Main", "Defines edge must come from module");
+        assert_eq!(
+            defines[0].0, "App.Main",
+            "Defines edge must come from module"
+        );
     }
 
     #[test]
@@ -683,7 +688,11 @@ function main() {
             .filter(|e| e.2.kind == EdgeKind::Calls)
             .map(|e| e.1.as_str())
             .collect();
-        assert!(!calls.contains(&"call"), "static call must be skipped; got {:?}", calls);
+        assert!(
+            !calls.contains(&"call"),
+            "static call must be skipped; got {:?}",
+            calls
+        );
     }
 
     #[test]
@@ -703,7 +712,11 @@ function main() {
             .filter(|e| e.2.kind == EdgeKind::Calls)
             .map(|e| e.1.as_str())
             .collect();
-        assert!(!calls.contains(&"call"), "instance call must be skipped; got {:?}", calls);
+        assert!(
+            !calls.contains(&"call"),
+            "instance call must be skipped; got {:?}",
+            calls
+        );
     }
 
     #[test]
@@ -772,9 +785,17 @@ function make_llm(): Llm {
         assert_eq!(nodes_by_kind(NodeKind::Trait), vec!["App.Main.Servicer"]);
         assert_eq!(nodes_by_kind(NodeKind::Class), vec!["App.Main.Llm"]);
         let methods = nodes_by_kind(NodeKind::Method);
-        assert!(methods.contains(&"App.Main.Servicer.serve"), "got {:?}", methods);
+        assert!(
+            methods.contains(&"App.Main.Servicer.serve"),
+            "got {:?}",
+            methods
+        );
         assert!(methods.contains(&"App.Main.Llm.serve"), "got {:?}", methods);
-        assert!(methods.contains(&"App.Main.Llm.helper"), "got {:?}", methods);
+        assert!(
+            methods.contains(&"App.Main.Llm.helper"),
+            "got {:?}",
+            methods
+        );
         assert_eq!(nodes_by_kind(NodeKind::Function), vec!["App.Main.make_llm"]);
 
         let imports: Vec<&str> = r
@@ -783,8 +804,16 @@ function make_llm(): Llm {
             .filter(|e| e.2.kind == EdgeKind::Imports)
             .map(|e| e.1.as_str())
             .collect();
-        assert!(imports.contains(&"App.Models"), "Imports to App.Models; got {:?}", imports);
-        assert!(imports.contains(&"App.Logging"), "Imports to App.Logging (group); got {:?}", imports);
+        assert!(
+            imports.contains(&"App.Models"),
+            "Imports to App.Models; got {:?}",
+            imports
+        );
+        assert!(
+            imports.contains(&"App.Logging"),
+            "Imports to App.Logging (group); got {:?}",
+            imports
+        );
 
         let calls: Vec<&str> = r
             .edges

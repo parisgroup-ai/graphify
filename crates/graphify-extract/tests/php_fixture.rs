@@ -23,13 +23,7 @@ fn psr4_mappings() -> Vec<(String, String)> {
 #[test]
 fn discover_php_fixture_finds_four_source_files() {
     let mappings = psr4_mappings();
-    let files = discover_files_with_psr4(
-        &fixture_root(),
-        &[Language::Php],
-        "",
-        &[],
-        &mappings,
-    );
+    let files = discover_files_with_psr4(&fixture_root(), &[Language::Php], "", &[], &mappings);
     let names: Vec<&str> = files.iter().map(|f| f.module_name.as_str()).collect();
     assert_eq!(
         files.len(),
@@ -42,15 +36,13 @@ fn discover_php_fixture_finds_four_source_files() {
 #[test]
 fn discover_php_fixture_applies_psr4_to_module_names() {
     let mappings = psr4_mappings();
-    let files = discover_files_with_psr4(
-        &fixture_root(),
-        &[Language::Php],
-        "",
-        &[],
-        &mappings,
-    );
+    let files = discover_files_with_psr4(&fixture_root(), &[Language::Php], "", &[], &mappings);
     let names: Vec<&str> = files.iter().map(|f| f.module_name.as_str()).collect();
-    assert!(names.contains(&"App.Main"), "expected App.Main; got {:?}", names);
+    assert!(
+        names.contains(&"App.Main"),
+        "expected App.Main; got {:?}",
+        names
+    );
     assert!(
         names.contains(&"App.Services.Llm"),
         "expected App.Services.Llm; got {:?}",
@@ -75,13 +67,7 @@ fn discover_php_fixture_applies_psr4_to_module_names() {
 #[test]
 fn home_controller_imports_resolve_to_local_modules() {
     let mappings = psr4_mappings();
-    let files = discover_files_with_psr4(
-        &fixture_root(),
-        &[Language::Php],
-        "",
-        &[],
-        &mappings,
-    );
+    let files = discover_files_with_psr4(&fixture_root(), &[Language::Php], "", &[], &mappings);
 
     let mut resolver = ModuleResolver::new(&fixture_root());
     for f in &files {
@@ -95,8 +81,7 @@ fn home_controller_imports_resolve_to_local_modules() {
 
     let source = std::fs::read(&ctrl.path).expect("read fixture");
     let extractor = PhpExtractor::new();
-    let result: ExtractionResult =
-        extractor.extract_file(&ctrl.path, &source, &ctrl.module_name);
+    let result: ExtractionResult = extractor.extract_file(&ctrl.path, &source, &ctrl.module_name);
 
     let calls_targets: Vec<&str> = result
         .edges
@@ -116,9 +101,11 @@ fn home_controller_imports_resolve_to_local_modules() {
     );
 
     for raw_target in ["App.Services.Llm", "App.Models.User"] {
-        let (resolved, is_local, _conf) =
-            resolver.resolve(raw_target, &ctrl.module_name, false);
-        assert_eq!(resolved, raw_target, "resolver must be identity for dot-form");
+        let (resolved, is_local, _conf) = resolver.resolve(raw_target, &ctrl.module_name, false);
+        assert_eq!(
+            resolved, raw_target,
+            "resolver must be identity for dot-form"
+        );
         assert!(is_local, "{} must resolve to local", raw_target);
     }
 }
@@ -126,13 +113,7 @@ fn home_controller_imports_resolve_to_local_modules() {
 #[test]
 fn home_controller_extracts_class_and_method_nodes() {
     let mappings = psr4_mappings();
-    let files = discover_files_with_psr4(
-        &fixture_root(),
-        &[Language::Php],
-        "",
-        &[],
-        &mappings,
-    );
+    let files = discover_files_with_psr4(&fixture_root(), &[Language::Php], "", &[], &mappings);
 
     let ctrl = files
         .iter()
@@ -146,14 +127,19 @@ fn home_controller_extracts_class_and_method_nodes() {
     let class = result
         .nodes
         .iter()
-        .find(|n| n.kind == NodeKind::Class && n.id == "App.Controllers.HomeController.HomeController")
+        .find(|n| {
+            n.kind == NodeKind::Class && n.id == "App.Controllers.HomeController.HomeController"
+        })
         .expect("class node");
     assert_eq!(class.language, Language::Php);
 
     let method = result
         .nodes
         .iter()
-        .find(|n| n.kind == NodeKind::Method && n.id == "App.Controllers.HomeController.HomeController.handle")
+        .find(|n| {
+            n.kind == NodeKind::Method
+                && n.id == "App.Controllers.HomeController.HomeController.handle"
+        })
         .expect("handle method node");
     assert_eq!(method.language, Language::Php);
 }

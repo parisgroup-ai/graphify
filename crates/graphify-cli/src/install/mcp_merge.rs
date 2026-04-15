@@ -2,7 +2,10 @@ use serde_json::{Map, Value};
 
 /// Merges a graphify MCP server entry into an existing Claude Code config.
 /// Preserves all other keys and `mcpServers.*` entries untouched.
-pub fn merge_claude_config(existing: &str, graphify_binary: &str) -> Result<String, serde_json::Error> {
+pub fn merge_claude_config(
+    existing: &str,
+    graphify_binary: &str,
+) -> Result<String, serde_json::Error> {
     let mut root: Value = if existing.trim().is_empty() {
         Value::Object(Map::new())
     } else {
@@ -28,7 +31,9 @@ pub fn merge_claude_config(existing: &str, graphify_binary: &str) -> Result<Stri
 // TODO(feat-018-follow-up): use during install to warn on foreign graphify entries
 #[allow(dead_code)]
 pub fn is_self_managed(existing: &str) -> bool {
-    let Ok(v) = serde_json::from_str::<Value>(existing) else { return false };
+    let Ok(v) = serde_json::from_str::<Value>(existing) else {
+        return false;
+    };
     v.pointer("/mcpServers/graphify/_graphify_managed")
         .and_then(Value::as_bool)
         .unwrap_or(false)
@@ -57,7 +62,8 @@ mod tests {
 
     #[test]
     fn replaces_self_managed_entry() {
-        let existing = r#"{ "mcpServers": { "graphify": { "command": "old", "_graphify_managed": true } } }"#;
+        let existing =
+            r#"{ "mcpServers": { "graphify": { "command": "old", "_graphify_managed": true } } }"#;
         let merged = merge_claude_config(existing, "/new/graphify-mcp").unwrap();
         let v: Value = serde_json::from_str(&merged).unwrap();
         assert_eq!(v["mcpServers"]["graphify"]["command"], "/new/graphify-mcp");
@@ -66,7 +72,9 @@ mod tests {
     #[test]
     fn self_managed_flag_detection() {
         assert!(!is_self_managed(""));
-        assert!(!is_self_managed(r#"{ "mcpServers": { "graphify": { "command": "foo" } } }"#));
+        assert!(!is_self_managed(
+            r#"{ "mcpServers": { "graphify": { "command": "foo" } } }"#
+        ));
         assert!(is_self_managed(
             r#"{ "mcpServers": { "graphify": { "command": "foo", "_graphify_managed": true } } }"#
         ));
@@ -75,7 +83,10 @@ mod tests {
 
 /// Merges a graphify MCP server entry into an existing Codex config.toml.
 /// Preserves other sections untouched.
-pub fn merge_codex_config(existing: &str, graphify_binary: &str) -> Result<String, toml::de::Error> {
+pub fn merge_codex_config(
+    existing: &str,
+    graphify_binary: &str,
+) -> Result<String, toml::de::Error> {
     let mut root: toml::Value = if existing.trim().is_empty() {
         toml::Value::Table(toml::value::Table::new())
     } else {
@@ -86,10 +97,15 @@ pub fn merge_codex_config(existing: &str, graphify_binary: &str) -> Result<Strin
     let servers_entry = table
         .entry("mcp_servers".to_string())
         .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
-    let servers = servers_entry.as_table_mut().expect("mcp_servers must be a table");
+    let servers = servers_entry
+        .as_table_mut()
+        .expect("mcp_servers must be a table");
 
     let mut graphify_table = toml::value::Table::new();
-    graphify_table.insert("command".into(), toml::Value::String(graphify_binary.into()));
+    graphify_table.insert(
+        "command".into(),
+        toml::Value::String(graphify_binary.into()),
+    );
     graphify_table.insert("args".into(), toml::Value::Array(vec![]));
     graphify_table.insert("_graphify_managed".into(), toml::Value::Boolean(true));
 
@@ -101,7 +117,9 @@ pub fn merge_codex_config(existing: &str, graphify_binary: &str) -> Result<Strin
 // TODO(feat-018-follow-up): use during install to warn on foreign graphify entries
 #[allow(dead_code)]
 pub fn is_self_managed_codex(existing: &str) -> bool {
-    let Ok(v) = existing.parse::<toml::Value>() else { return false };
+    let Ok(v) = existing.parse::<toml::Value>() else {
+        return false;
+    };
     v.get("mcp_servers")
         .and_then(|s| s.get("graphify"))
         .and_then(|g| g.get("_graphify_managed"))
@@ -136,7 +154,10 @@ command = "foo"
         assert_eq!(v["model"].as_str(), Some("gpt-5.4"));
         assert_eq!(v["features"]["rmcp_client"].as_bool(), Some(true));
         assert_eq!(v["mcp_servers"]["other"]["command"].as_str(), Some("foo"));
-        assert_eq!(v["mcp_servers"]["graphify"]["command"].as_str(), Some("/bin/graphify-mcp"));
+        assert_eq!(
+            v["mcp_servers"]["graphify"]["command"].as_str(),
+            Some("/bin/graphify-mcp")
+        );
     }
 
     #[test]

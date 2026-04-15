@@ -87,7 +87,10 @@ min_graphify_version: "0.6.0"
 ..."#;
         let (fm, _) = parse(input).unwrap();
         assert_eq!(fm.model.as_deref(), Some("opus"));
-        assert_eq!(fm.tools.as_ref().unwrap(), &["Bash".to_string(), "Read".into()]);
+        assert_eq!(
+            fm.tools.as_ref().unwrap(),
+            &["Bash".to_string(), "Read".into()]
+        );
         assert_eq!(fm.min_graphify_version.as_deref(), Some("0.6.0"));
     }
 

@@ -85,11 +85,7 @@ impl Default for HotspotThresholds {
 ///   exceed `hub_threshold`.
 /// - **Mixed** — neither threshold fires, or both fire (severe hub *and*
 ///   bridge), so the refactor strategy needs human judgment.
-pub fn classify(
-    in_degree: usize,
-    betweenness: f64,
-    thresholds: &HotspotThresholds,
-) -> HotspotType {
+pub fn classify(in_degree: usize, betweenness: f64, thresholds: &HotspotThresholds) -> HotspotType {
     let is_hub = in_degree > thresholds.hub_threshold;
     let ratio = betweenness / in_degree.max(1) as f64;
     let is_bridge = ratio > thresholds.bridge_ratio;
@@ -705,11 +701,7 @@ mod tests {
             hub_threshold: 3,
             bridge_ratio: 1e9, // unreachable
         };
-        let metrics = compute_metrics_with_thresholds(
-            &g,
-            &ScoringWeights::default(),
-            &thresholds,
-        );
+        let metrics = compute_metrics_with_thresholds(&g, &ScoringWeights::default(), &thresholds);
         let a = metrics.iter().find(|m| m.id == "a").unwrap();
         assert_eq!(a.hotspot_type, HotspotType::Hub);
     }

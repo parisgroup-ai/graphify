@@ -181,11 +181,7 @@ mod tests {
 
     #[test]
     fn php_language_maps_to_php_extension() {
-        let filter = WatchFilter::new(
-            &["php".to_string()],
-            &[],
-            Path::new("/out"),
-        );
+        let filter = WatchFilter::new(&["php".to_string()], &[], Path::new("/out"));
         assert!(filter.should_rebuild(Path::new("/project/app/main.php")));
     }
 }

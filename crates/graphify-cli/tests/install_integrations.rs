@@ -13,7 +13,9 @@ use tempfile::TempDir;
 fn graphify_bin() -> PathBuf {
     let mut p = std::env::current_exe().unwrap();
     p.pop(); // test exe dir
-    if p.ends_with("deps") { p.pop(); }
+    if p.ends_with("deps") {
+        p.pop();
+    }
     p.join("graphify")
 }
 
@@ -25,7 +27,12 @@ fn install_to_empty_home_creates_all_artifacts() {
     fs::create_dir_all(home.path().join(".agents/skills")).unwrap();
 
     let status = std::process::Command::new(graphify_bin())
-        .args(["install-integrations", "--claude-code", "--codex", "--skip-mcp"])
+        .args([
+            "install-integrations",
+            "--claude-code",
+            "--codex",
+            "--skip-mcp",
+        ])
         .env("HOME", home.path())
         .current_dir(project.path())
         .status()
@@ -33,15 +40,39 @@ fn install_to_empty_home_creates_all_artifacts() {
     assert!(status.success());
 
     // Agents
-    assert!(home.path().join(".claude/agents/graphify-analyst.md").exists());
-    assert!(home.path().join(".claude/agents/graphify-ci-guardian.md").exists());
+    assert!(home
+        .path()
+        .join(".claude/agents/graphify-analyst.md")
+        .exists());
+    assert!(home
+        .path()
+        .join(".claude/agents/graphify-ci-guardian.md")
+        .exists());
     // Skills
-    assert!(home.path().join(".claude/skills/graphify-onboarding/SKILL.md").exists());
-    assert!(home.path().join(".claude/skills/graphify-refactor-plan/SKILL.md").exists());
-    assert!(home.path().join(".claude/skills/graphify-drift-check/SKILL.md").exists());
+    assert!(home
+        .path()
+        .join(".claude/skills/graphify-onboarding/SKILL.md")
+        .exists());
+    assert!(home
+        .path()
+        .join(".claude/skills/graphify-refactor-plan/SKILL.md")
+        .exists());
+    assert!(home
+        .path()
+        .join(".claude/skills/graphify-drift-check/SKILL.md")
+        .exists());
     // Commands
-    for cmd in &["gf-analyze", "gf-onboard", "gf-refactor-plan", "gf-drift-check"] {
-        assert!(home.path().join(".claude/commands").join(format!("{}.md", cmd)).exists());
+    for cmd in &[
+        "gf-analyze",
+        "gf-onboard",
+        "gf-refactor-plan",
+        "gf-drift-check",
+    ] {
+        assert!(home
+            .path()
+            .join(".claude/commands")
+            .join(format!("{}.md", cmd))
+            .exists());
     }
     // Manifest
     assert!(home.path().join(".claude/.graphify-install.json").exists());
@@ -89,13 +120,21 @@ fn dry_run_writes_nothing() {
     fs::create_dir_all(home.path().join(".claude")).unwrap();
 
     let status = std::process::Command::new(graphify_bin())
-        .args(["install-integrations", "--claude-code", "--skip-mcp", "--dry-run"])
+        .args([
+            "install-integrations",
+            "--claude-code",
+            "--skip-mcp",
+            "--dry-run",
+        ])
         .env("HOME", home.path())
         .current_dir(project.path())
         .status()
         .unwrap();
     assert!(status.success());
-    assert!(!home.path().join(".claude/agents/graphify-analyst.md").exists());
+    assert!(!home
+        .path()
+        .join(".claude/agents/graphify-analyst.md")
+        .exists());
     assert!(!home.path().join(".claude/.graphify-install.json").exists());
 }
 
@@ -117,11 +156,26 @@ fn uninstall_removes_only_installed_files() {
             .unwrap()
             .success()
     };
-    assert!(run(&["install-integrations", "--claude-code", "--skip-mcp"]));
-    assert!(home.path().join(".claude/agents/graphify-analyst.md").exists());
+    assert!(run(&[
+        "install-integrations",
+        "--claude-code",
+        "--skip-mcp"
+    ]));
+    assert!(home
+        .path()
+        .join(".claude/agents/graphify-analyst.md")
+        .exists());
 
-    assert!(run(&["install-integrations", "--claude-code", "--skip-mcp", "--uninstall"]));
-    assert!(!home.path().join(".claude/agents/graphify-analyst.md").exists());
+    assert!(run(&[
+        "install-integrations",
+        "--claude-code",
+        "--skip-mcp",
+        "--uninstall"
+    ]));
+    assert!(!home
+        .path()
+        .join(".claude/agents/graphify-analyst.md")
+        .exists());
     assert!(user_file.exists(), "user-authored file must not be removed");
 }
 
@@ -143,11 +197,20 @@ fn force_overwrites_modified_file() {
             .success()
     };
     // Without --force: skipped as conflict
-    assert!(run(&["install-integrations", "--claude-code", "--skip-mcp"]));
+    assert!(run(&[
+        "install-integrations",
+        "--claude-code",
+        "--skip-mcp"
+    ]));
     let content = fs::read_to_string(&analyst).unwrap();
     assert_eq!(content, "user-modified content");
     // With --force: overwritten
-    assert!(run(&["install-integrations", "--claude-code", "--skip-mcp", "--force"]));
+    assert!(run(&[
+        "install-integrations",
+        "--claude-code",
+        "--skip-mcp",
+        "--force"
+    ]));
     let after = fs::read_to_string(&analyst).unwrap();
     assert_ne!(after, "user-modified content");
     assert!(after.contains("graphify-analyst"));
@@ -158,8 +221,10 @@ fn manifest_lock_is_up_to_date() {
     // Walk the real integrations/ dir (relative to workspace root) and
     // compute content hashes. Compare against integrations/.manifest.lock.json.
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap() // crates/
-        .parent().unwrap() // workspace root
+        .parent()
+        .unwrap() // crates/
+        .parent()
+        .unwrap() // workspace root
         .to_path_buf();
     let integrations = workspace_root.join("integrations");
     let lock_path = integrations.join(".manifest.lock.json");
@@ -186,19 +251,29 @@ fn manifest_lock_is_up_to_date() {
     );
 }
 
-fn walk_collect(root: &std::path::Path, base: &std::path::Path, out: &mut BTreeMap<String, String>) {
+fn walk_collect(
+    root: &std::path::Path,
+    base: &std::path::Path,
+    out: &mut BTreeMap<String, String>,
+) {
     for entry in fs::read_dir(root).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
         let file_name = entry.file_name();
-        if file_name == ".manifest.lock.json" { continue; }
+        if file_name == ".manifest.lock.json" {
+            continue;
+        }
         if path.is_dir() {
             walk_collect(&path, base, out);
         } else {
             let bytes = fs::read(&path).unwrap();
             let mut hasher = Sha256::new();
             hasher.update(&bytes);
-            let rel = path.strip_prefix(base).unwrap().to_string_lossy().replace('\\', "/");
+            let rel = path
+                .strip_prefix(base)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
             out.insert(rel, format!("{:x}", hasher.finalize()));
         }
     }
@@ -211,7 +286,12 @@ fn project_local_writes_to_project_dir() {
     fs::create_dir_all(home.path().join(".claude")).unwrap();
 
     let status = std::process::Command::new(graphify_bin())
-        .args(["install-integrations", "--claude-code", "--project-local", "--skip-mcp"])
+        .args([
+            "install-integrations",
+            "--claude-code",
+            "--project-local",
+            "--skip-mcp",
+        ])
         .env("HOME", home.path())
         .current_dir(project.path())
         .status()
@@ -219,9 +299,18 @@ fn project_local_writes_to_project_dir() {
     assert!(status.success());
 
     // Should land in project's .claude/, NOT in home's .claude/
-    assert!(project.path().join(".claude/agents/graphify-analyst.md").exists());
-    assert!(project.path().join(".claude/skills/graphify-onboarding/SKILL.md").exists());
-    assert!(!home.path().join(".claude/agents/graphify-analyst.md").exists());
+    assert!(project
+        .path()
+        .join(".claude/agents/graphify-analyst.md")
+        .exists());
+    assert!(project
+        .path()
+        .join(".claude/skills/graphify-onboarding/SKILL.md")
+        .exists());
+    assert!(!home
+        .path()
+        .join(".claude/agents/graphify-analyst.md")
+        .exists());
 }
 
 #[test]
@@ -277,7 +366,11 @@ fn uninstall_removes_mcp_entry_preserves_others() {
             .success()
     };
     assert!(run(&["install-integrations", "--claude-code"]));
-    assert!(run(&["install-integrations", "--claude-code", "--uninstall"]));
+    assert!(run(&[
+        "install-integrations",
+        "--claude-code",
+        "--uninstall"
+    ]));
 
     let after = fs::read_to_string(home.path().join(".claude.json")).unwrap();
     let v: serde_json::Value = serde_json::from_str(&after).unwrap();

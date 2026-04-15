@@ -1244,7 +1244,9 @@ mod tests {
 
         let mappings = resolver.psr4_mappings();
         assert!(
-            mappings.iter().any(|(ns, dir)| ns == "App\\" && dir == "src/"),
+            mappings
+                .iter()
+                .any(|(ns, dir)| ns == "App\\" && dir == "src/"),
             "App\\ → src/ mapping; got {:?}",
             mappings
         );
@@ -1311,7 +1313,8 @@ mod tests {
         let mut resolver = ModuleResolver::new(Path::new("/repo"));
         resolver.register_module("App.Services.Llm");
 
-        let (resolved, is_local, confidence) = resolver.resolve("App\\Services\\Llm", "App.Main", false);
+        let (resolved, is_local, confidence) =
+            resolver.resolve("App\\Services\\Llm", "App.Main", false);
         assert_eq!(resolved, "App.Services.Llm");
         assert!(is_local);
         assert_eq!(confidence, 1.0);

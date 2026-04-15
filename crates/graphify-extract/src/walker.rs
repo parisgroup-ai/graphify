@@ -180,7 +180,11 @@ pub fn path_to_module_psr4(
     let combined = if ns_prefix_clean.is_empty() {
         remainder_no_ext.to_owned()
     } else {
-        format!("{}/{}", ns_prefix_clean.replace('\\', "/"), remainder_no_ext)
+        format!(
+            "{}/{}",
+            ns_prefix_clean.replace('\\', "/"),
+            remainder_no_ext
+        )
     };
 
     combined.replace(['/', '\\'], ".")

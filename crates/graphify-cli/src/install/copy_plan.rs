@@ -9,8 +9,15 @@ pub static INTEGRATIONS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../integ
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CopyAction {
-    Write { dest: PathBuf, bytes: Vec<u8>, kind: String },
-    Skip { dest: PathBuf, reason: SkipReason },
+    Write {
+        dest: PathBuf,
+        bytes: Vec<u8>,
+        kind: String,
+    },
+    Skip {
+        dest: PathBuf,
+        reason: SkipReason,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,12 +43,22 @@ pub fn build_plan(pairs: &[(String, PathBuf, String)], force: bool) -> PlanResul
         if dest.exists() && !force {
             let existing = fs::read(dest).unwrap_or_default();
             if sha256_of_bytes(&existing) == sha256_of_bytes(&bytes) {
-                actions.push(CopyAction::Skip { dest: dest.clone(), reason: SkipReason::Identical });
+                actions.push(CopyAction::Skip {
+                    dest: dest.clone(),
+                    reason: SkipReason::Identical,
+                });
             } else {
-                actions.push(CopyAction::Skip { dest: dest.clone(), reason: SkipReason::Conflict });
+                actions.push(CopyAction::Skip {
+                    dest: dest.clone(),
+                    reason: SkipReason::Conflict,
+                });
             }
         } else {
-            actions.push(CopyAction::Write { dest: dest.clone(), bytes, kind: kind.clone() });
+            actions.push(CopyAction::Write {
+                dest: dest.clone(),
+                bytes,
+                kind: kind.clone(),
+            });
         }
     }
     PlanResult { actions }
@@ -111,7 +128,10 @@ mod tests {
         let plan = build_plan(&pairs, false);
         assert_eq!(plan.actions.len(), 1);
         match &plan.actions[0] {
-            CopyAction::Skip { reason: SkipReason::Identical, .. } => {}
+            CopyAction::Skip {
+                reason: SkipReason::Identical,
+                ..
+            } => {}
             other => panic!("expected Skip(Identical), got {:?}", other),
         }
     }
@@ -130,7 +150,10 @@ mod tests {
         )];
         let plan = build_plan(&pairs, false);
         match &plan.actions[0] {
-            CopyAction::Skip { reason: SkipReason::Conflict, .. } => {}
+            CopyAction::Skip {
+                reason: SkipReason::Conflict,
+                ..
+            } => {}
             other => panic!("expected Skip(Conflict), got {:?}", other),
         }
     }
@@ -179,6 +202,6 @@ mod tests {
         let plan = build_plan(&pairs, false);
         let manifest = execute(&plan, true).unwrap();
         assert_eq!(manifest.len(), 1); // manifest shape reported
-        assert!(!dest.exists());       // but nothing written
+        assert!(!dest.exists()); // but nothing written
     }
 }

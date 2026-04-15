@@ -36,8 +36,8 @@ use graphify_report::{
     write_report, write_trend_json, write_trend_markdown, Cycle,
 };
 
-mod watch;
 mod install;
+mod watch;
 
 // ---------------------------------------------------------------------------
 // Config structs
@@ -1040,8 +1040,7 @@ fn cmd_diff(
             let w = resolve_weights(&cfg, None);
             let thresholds = resolve_hotspot_thresholds(&cfg, None, None);
             let (graph, _, _stats) = run_extract(project_cfg, &cfg.settings, None, false);
-            let (mut metrics, communities, cycles_simple) =
-                run_analyze(&graph, &w, &thresholds);
+            let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w, &thresholds);
             assign_community_ids(&mut metrics, &communities);
             // Build an AnalysisSnapshot from live data.
             let total_nodes = metrics.len();
@@ -1223,10 +1222,14 @@ fn load_snapshot(path: &Path) -> AnalysisSnapshot {
                     path.display()
                 );
                 eprintln!();
-                eprintln!("History snapshots under `report/<project>/history/` are consumable only by");
+                eprintln!(
+                    "History snapshots under `report/<project>/history/` are consumable only by"
+                );
                 eprintln!("`graphify trend`. `graphify diff` requires a full `analysis.json`.");
                 eprintln!();
-                eprintln!("To diff before/after a refactor, copy the current analysis as a baseline");
+                eprintln!(
+                    "To diff before/after a refactor, copy the current analysis as a baseline"
+                );
                 eprintln!("before starting the refactor:");
                 eprintln!();
                 eprintln!("    cp report/<project>/analysis.json report/<project>/baseline.json");
@@ -3079,8 +3082,15 @@ fn cmd_watch(
     for project in &cfg.project {
         let proj_out = out_dir.join(&project.name);
         std::fs::create_dir_all(&proj_out).expect("create output directory");
-        let _ =
-            run_pipeline_for_project(project, &cfg.settings, &proj_out, &weights, &thresholds, &formats, force);
+        let _ = run_pipeline_for_project(
+            project,
+            &cfg.settings,
+            &proj_out,
+            &weights,
+            &thresholds,
+            &formats,
+            force,
+        );
         eprintln!("[{}] Ready.", project.name);
     }
 
@@ -3332,7 +3342,10 @@ fn cmd_install_integrations(
     if opts.project_local {
         let gitignore = opts.project_root.join(".gitignore");
         let tracked = std::fs::read_to_string(&gitignore)
-            .map(|s| s.lines().any(|l| l.trim() == ".claude" || l.trim() == ".claude/"))
+            .map(|s| {
+                s.lines()
+                    .any(|l| l.trim() == ".claude" || l.trim() == ".claude/")
+            })
             .unwrap_or(false);
         if !tracked {
             eprintln!(
