@@ -203,3 +203,64 @@ fn walk_collect(root: &std::path::Path, base: &std::path::Path, out: &mut BTreeM
         }
     }
 }
+
+#[test]
+fn mcp_registration_preserves_existing_config() {
+    let home = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    fs::create_dir_all(home.path().join(".claude")).unwrap();
+
+    // Seed an existing Claude config with unrelated entries
+    let existing = r#"{
+  "theme": "dark",
+  "mcpServers": {
+    "notion": { "command": "/opt/notion-mcp" }
+  }
+}"#;
+    fs::write(home.path().join(".claude.json"), existing).unwrap();
+
+    let status = std::process::Command::new(graphify_bin())
+        .args(["install-integrations", "--claude-code"])
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let merged = fs::read_to_string(home.path().join(".claude.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&merged).unwrap();
+    assert_eq!(v["theme"], "dark");
+    assert_eq!(v["mcpServers"]["notion"]["command"], "/opt/notion-mcp");
+    assert_eq!(v["mcpServers"]["graphify"]["_graphify_managed"], true);
+}
+
+#[test]
+fn uninstall_removes_mcp_entry_preserves_others() {
+    let home = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    fs::create_dir_all(home.path().join(".claude")).unwrap();
+    let existing = r#"{
+  "theme": "dark",
+  "mcpServers": {
+    "notion": { "command": "/opt/notion-mcp" }
+  }
+}"#;
+    fs::write(home.path().join(".claude.json"), existing).unwrap();
+
+    let run = |args: &[&str]| -> bool {
+        std::process::Command::new(graphify_bin())
+            .args(args)
+            .env("HOME", home.path())
+            .current_dir(project.path())
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(run(&["install-integrations", "--claude-code"]));
+    assert!(run(&["install-integrations", "--claude-code", "--uninstall"]));
+
+    let after = fs::read_to_string(home.path().join(".claude.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&after).unwrap();
+    assert_eq!(v["mcpServers"]["notion"]["command"], "/opt/notion-mcp");
+    assert!(v["mcpServers"].get("graphify").is_none());
+}
