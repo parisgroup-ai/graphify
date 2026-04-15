@@ -35,6 +35,11 @@ graphify path app.main app.services.llm --config graphify.toml
 graphify explain app.services.llm --config graphify.toml
 graphify shell --config graphify.toml
 
+# Install AI integrations (Claude Code / Codex)
+graphify install-integrations                   # auto-detect
+graphify install-integrations --project-local   # install into ./.claude
+graphify install-integrations --uninstall       # remove installed artifacts
+
 # Build from source
 cargo build --release -p graphify-cli
 # Binary at target/release/graphify
@@ -214,6 +219,15 @@ git push origin main --tags            # triggers CI release
 - **FEAT-002 plan**: `docs/superpowers/plans/2026-04-13-feat-002-architectural-drift-detection.md`
 - **FEAT-015 spec**: `docs/superpowers/specs/2026-04-14-feat-015-pr-summary-cli-design.md`
 - **FEAT-015 plan**: `docs/superpowers/plans/2026-04-14-feat-015-pr-summary-cli.md`
+
+## AI integrations
+
+Source in `integrations/`; installed via `graphify install-integrations`.
+
+- Agents: `graphify-analyst` (Opus, MCP-preferred), `graphify-ci-guardian` (Haiku, CLI-only)
+- Skills: `graphify-onboarding`, `graphify-refactor-plan`, `graphify-drift-check`
+- Commands: `/gf-analyze`, `/gf-onboard`, `/gf-refactor-plan`, `/gf-drift-check`
+- Spec: `docs/superpowers/specs/2026-04-15-feat-018-ai-integrations-design.md`
 
 ## Task tracking
 
