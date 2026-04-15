@@ -10,11 +10,15 @@ members = [
 ]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/parisgroup-ai/graphify"
 
 [workspace.dependencies]
+graphify-core = { version = "0.8.1", path = "crates/graphify-core" }
+graphify-extract = { version = "0.8.1", path = "crates/graphify-extract" }
+graphify-report = { version = "0.8.1", path = "crates/graphify-report" }
 tempfile = "3"
 serde_json = "1"
 serde_yaml = "0.9"
@@ -31,6 +35,7 @@ name = "graphify-integration-tests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 
 [dev-dependencies]
 tempfile = { workspace = true }

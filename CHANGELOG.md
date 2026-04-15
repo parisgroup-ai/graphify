@@ -2,6 +2,14 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## [0.8.1] - 2026-04-15
+
+### Fixed
+- fix(extract): resolve Python `from X import Y as Z` aliases to the canonical imported symbol so alias calls no longer create placeholder graph nodes
+
+### Changed
+- chore(release): make workspace crates publishable by inheriting versioned internal dependencies and crate metadata from the workspace
+
 ## [0.8.0] - 2026-04-15
 
 ### Added

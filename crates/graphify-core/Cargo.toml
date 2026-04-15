@@ -2,6 +2,9 @@
 name = "graphify-core"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core graph model, analysis algorithms, and query engine for Graphify."
 
 [dependencies]
 petgraph = "0.7"

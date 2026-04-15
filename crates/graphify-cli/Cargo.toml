@@ -2,15 +2,18 @@
 name = "graphify-cli"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Command-line interface for Graphify architecture analysis."
 
 [[bin]]
 name = "graphify"
 path = "src/main.rs"
 
 [dependencies]
-graphify-core = { path = "../graphify-core" }
-graphify-extract = { path = "../graphify-extract" }
-graphify-report = { path = "../graphify-report" }
+graphify-core = { workspace = true }
+graphify-extract = { workspace = true }
+graphify-report = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
@@ -30,5 +33,5 @@ which = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 serde_json = { workspace = true }
-graphify-report = { path = "../graphify-report" }
+graphify-report = { workspace = true }
 sha2 = { workspace = true }

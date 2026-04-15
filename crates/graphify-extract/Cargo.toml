@@ -2,9 +2,12 @@
 name = "graphify-extract"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Language extractors and module resolution for Graphify."
 
 [dependencies]
-graphify-core = { path = "../graphify-core" }
+graphify-core = { workspace = true }
 tree-sitter = "0.25"
 tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"

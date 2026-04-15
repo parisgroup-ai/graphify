@@ -2,14 +2,17 @@
 name = "graphify-mcp"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "MCP server that exposes Graphify queries to AI assistants."
 
 [[bin]]
 name = "graphify-mcp"
 path = "src/main.rs"
 
 [dependencies]
-graphify-core = { path = "../graphify-core" }
-graphify-extract = { path = "../graphify-extract" }
+graphify-core = { workspace = true }
+graphify-extract = { workspace = true }
 rmcp = { version = "0.1", features = ["server", "transport-io", "macros"] }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
