@@ -1,0 +1,4 @@
+[mcp_servers.graphify]
+command = "{{GRAPHIFY_MCP_BINARY}}"
+args = []
+_graphify_managed = true
