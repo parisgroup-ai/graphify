@@ -205,6 +205,26 @@ fn walk_collect(root: &std::path::Path, base: &std::path::Path, out: &mut BTreeM
 }
 
 #[test]
+fn project_local_writes_to_project_dir() {
+    let home = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    fs::create_dir_all(home.path().join(".claude")).unwrap();
+
+    let status = std::process::Command::new(graphify_bin())
+        .args(["install-integrations", "--claude-code", "--project-local", "--skip-mcp"])
+        .env("HOME", home.path())
+        .current_dir(project.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    // Should land in project's .claude/, NOT in home's .claude/
+    assert!(project.path().join(".claude/agents/graphify-analyst.md").exists());
+    assert!(project.path().join(".claude/skills/graphify-onboarding/SKILL.md").exists());
+    assert!(!home.path().join(".claude/agents/graphify-analyst.md").exists());
+}
+
+#[test]
 fn mcp_registration_preserves_existing_config() {
     let home = TempDir::new().unwrap();
     let project = TempDir::new().unwrap();

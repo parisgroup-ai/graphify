@@ -3270,6 +3270,19 @@ fn cmd_install_integrations(
         graphify_mcp_binary,
     };
 
+    if opts.project_local {
+        let gitignore = opts.project_root.join(".gitignore");
+        let tracked = std::fs::read_to_string(&gitignore)
+            .map(|s| s.lines().any(|l| l.trim() == ".claude" || l.trim() == ".claude/"))
+            .unwrap_or(false);
+        if !tracked {
+            eprintln!(
+                "Note: .claude/ will be created in {}. Add it to .gitignore if you do not want to commit skill files.",
+                opts.project_root.display()
+            );
+        }
+    }
+
     if uninstall {
         match install::run_uninstall(&opts) {
             Ok(()) => println!("Uninstall complete."),
