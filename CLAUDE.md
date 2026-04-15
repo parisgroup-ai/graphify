@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+See also: [[AGENTS.md]]
+
 ## What is Graphify
 
 Graphify is a Rust CLI tool for architectural analysis of codebases. It extracts dependencies from Python, TypeScript, Go, Rust, and PHP source code using tree-sitter AST parsing, builds knowledge graphs with petgraph, and generates structured reports identifying architectural hotspots, circular dependencies, and community clusters.
@@ -45,7 +47,7 @@ cargo build --release -p graphify-cli
 # Binary at target/release/graphify
 
 # Tests
-cargo test --workspace                     # all 269 tests
+cargo test --workspace
 cargo test -p graphify-extract             # single crate
 ```
 
@@ -187,7 +189,7 @@ For each [[project]]:
 - `graphify pr-summary <DIR>` — pure renderer over `analysis.json` (required) + `drift-report.json` / `check-report.json` (optional); Markdown to stdout, warnings to stderr, exit 1 on required-input errors, exit 0 otherwise (gating is `graphify check`'s job)
 - CLI error-exit convention: `exit(1)` for all error paths (not exit 2) — matches `cmd_diff`/`cmd_trend` pattern; keeps graphify CLI uniform
 - `graphify diff` error routing: on `AnalysisSnapshot` deserialize failure, `graphify-cli::main::load_snapshot` calls `graphify_core::history::is_trend_snapshot_json` (discriminator: requires `captured_at` + `project` at root) to emit an explanatory message with the baseline-copy recipe instead of the raw serde error — pattern: run discriminator only on the error path, so happy path stays at one read + one parse
-- Tests: 493 unit + integration tests (`cargo test --workspace`)
+- Tests: run `cargo test --workspace` for the authoritative current count
 - PHP PSR-4 mapping loaded from `composer.json` (`autoload.psr-4` + `autoload-dev.psr-4`); longest-prefix match wins; namespaces normalized `\` → `.`
 - PHP test files excluded: `*Test.php` (PHPUnit convention)
 - PHP confidence: `use X\Y\Z` → 1.0 / Extracted (fully qualified); bare calls 0.7 / Inferred (same as Go/Python)
@@ -219,6 +221,12 @@ git commit -m "fix: bump version to X.Y.Z"
 git tag vX.Y.Z
 git push origin main --tags            # triggers CI release
 ```
+
+### Current workflow
+
+- Solo-dev mode: changes may go directly to `main`
+- Releases are published from pushed tags, not from PR merges
+- Keep `Cargo.lock` aligned with workspace version bumps to avoid post-release CI drift
 
 ## Design docs
 
