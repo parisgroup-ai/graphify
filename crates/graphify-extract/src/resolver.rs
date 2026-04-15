@@ -366,6 +366,19 @@ fn resolve_ts_relative(raw: &str, from_module: &str) -> String {
     }
 
     // `remaining` is now the relative path without leading `./` or `../`.
+    // Strip TS/JS file extension: TS-ESM and NodeNext imports carry the `.js`
+    // suffix (which resolves to `.ts` source). Without stripping, `./foo.js`
+    // produces the literal id `parent.foo.js` and never matches `known_modules`,
+    // inflating the ambiguous-edge count on bundler-style projects.
+    // Longer extensions come first so `.tsx` matches before `.ts`.
+    const TS_EXTENSIONS: &[&str] = &[
+        ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".js", ".ts",
+    ];
+    let remaining = TS_EXTENSIONS
+        .iter()
+        .find_map(|ext| remaining.strip_suffix(ext))
+        .unwrap_or(remaining);
+
     // Convert it to dot notation and append.
     let suffix = remaining.replace('/', ".");
 
@@ -742,6 +755,48 @@ mod tests {
         let (id, is_local, _) = r.resolve("../lib/api", "src.services.user", false);
         assert_eq!(id, "src.lib.api");
         assert!(is_local, "src.lib.api is registered");
+    }
+
+    #[test]
+    fn resolve_ts_relative_strips_js_suffix() {
+        // TS-ESM / "moduleResolution": "bundler" imports carry a `.js` suffix
+        // that resolves to `.ts` source. `./services/user.js` → `src.services.user`.
+        let r = make_resolver();
+        let (id, is_local, _) = r.resolve("./services/user.js", "src.index", false);
+        assert_eq!(id, "src.services.user");
+        assert!(is_local, "suffix-stripped path should match known module");
+    }
+
+    #[test]
+    fn resolve_ts_relative_strips_tsx_suffix() {
+        // Order-sensitive: `.tsx` must strip before `.ts`.
+        let r = make_resolver();
+        let (id, _, _) = r.resolve("./services/user.tsx", "src.index", false);
+        assert_eq!(id, "src.services.user");
+    }
+
+    #[test]
+    fn resolve_ts_relative_strips_mjs_suffix() {
+        let r = make_resolver();
+        let (id, _, _) = r.resolve("./services/user.mjs", "src.index", false);
+        assert_eq!(id, "src.services.user");
+    }
+
+    #[test]
+    fn resolve_ts_relative_no_suffix_unchanged() {
+        // Regression guard: plain `./foo` without extension must still resolve.
+        let r = make_resolver();
+        let (id, _, _) = r.resolve("./services/user", "src.index", false);
+        assert_eq!(id, "src.services.user");
+    }
+
+    #[test]
+    fn resolve_ts_relative_unknown_extension_kept() {
+        // Non-TS extensions (e.g. `.css`, `.json`) are not stripped.
+        // `./styles.css` should remain as-is so it lands as an external node.
+        let r = make_resolver();
+        let (id, _, _) = r.resolve("./styles.css", "src.index", false);
+        assert_eq!(id, "src.styles.css");
     }
 
     // -----------------------------------------------------------------------
