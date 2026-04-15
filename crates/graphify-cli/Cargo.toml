@@ -31,3 +31,4 @@ which = { workspace = true }
 tempfile = { workspace = true }
 serde_json = { workspace = true }
 graphify-report = { path = "../graphify-report" }
+sha2 = { workspace = true }
