@@ -84,3 +84,78 @@ mod tests {
         ));
     }
 }
+
+/// Merges a graphify MCP server entry into an existing Codex config.toml.
+/// Preserves other sections untouched.
+pub fn merge_codex_config(existing: &str, graphify_binary: &str) -> Result<String, toml::de::Error> {
+    let mut root: toml::Value = if existing.trim().is_empty() {
+        toml::Value::Table(toml::value::Table::new())
+    } else {
+        existing.parse()?
+    };
+
+    let table = root.as_table_mut().expect("root must be table");
+    let servers_entry = table
+        .entry("mcp_servers".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::value::Table::new()));
+    let servers = servers_entry.as_table_mut().expect("mcp_servers must be a table");
+
+    let mut graphify_table = toml::value::Table::new();
+    graphify_table.insert("command".into(), toml::Value::String(graphify_binary.into()));
+    graphify_table.insert("args".into(), toml::Value::Array(vec![]));
+    graphify_table.insert("_graphify_managed".into(), toml::Value::Boolean(true));
+
+    servers.insert("graphify".into(), toml::Value::Table(graphify_table));
+
+    Ok(toml::to_string_pretty(&root).expect("serialize TOML"))
+}
+
+pub fn is_self_managed_codex(existing: &str) -> bool {
+    let Ok(v) = existing.parse::<toml::Value>() else { return false };
+    v.get("mcp_servers")
+        .and_then(|s| s.get("graphify"))
+        .and_then(|g| g.get("_graphify_managed"))
+        .and_then(|b| b.as_bool())
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod codex_tests {
+    use super::*;
+
+    #[test]
+    fn adds_graphify_to_empty_toml() {
+        let merged = merge_codex_config("", "/bin/graphify-mcp").unwrap();
+        assert!(merged.contains("[mcp_servers.graphify]"));
+        assert!(merged.contains("_graphify_managed = true"));
+    }
+
+    #[test]
+    fn preserves_unrelated_sections() {
+        let existing = r#"
+model = "gpt-5.4"
+
+[features]
+rmcp_client = true
+
+[mcp_servers.other]
+command = "foo"
+"#;
+        let merged = merge_codex_config(existing, "/bin/graphify-mcp").unwrap();
+        let v: toml::Value = merged.parse().unwrap();
+        assert_eq!(v["model"].as_str(), Some("gpt-5.4"));
+        assert_eq!(v["features"]["rmcp_client"].as_bool(), Some(true));
+        assert_eq!(v["mcp_servers"]["other"]["command"].as_str(), Some("foo"));
+        assert_eq!(v["mcp_servers"]["graphify"]["command"].as_str(), Some("/bin/graphify-mcp"));
+    }
+
+    #[test]
+    fn codex_self_managed_flag_detection() {
+        assert!(!is_self_managed_codex(""));
+        let managed = r#"[mcp_servers.graphify]
+command = "x"
+_graphify_managed = true
+"#;
+        assert!(is_self_managed_codex(managed));
+    }
+}
