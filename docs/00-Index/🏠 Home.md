@@ -1,7 +1,7 @@
 ---
 title: Graphify Documentation
 created: 2026-04-14
-updated: 2026-04-14
+updated: 2026-04-15
 status: published
 tags:
   - type/index
@@ -56,7 +56,7 @@ related:
 ## 📊 Project Status
 
 > [!info] Current Version
-> **v0.6.0** — see root `Cargo.toml` (`[workspace.package].version`)
+> **v0.8.0** — see root `Cargo.toml` (`[workspace.package].version`)
 
 > [!tip] Sprint Board
 > Active and completed work tracked in `[[sprint|TaskNotes Sprint Board]]`.

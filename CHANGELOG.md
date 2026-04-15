@@ -2,6 +2,29 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## [0.8.0] - 2026-04-15
+
+### Added
+- feat(php): first-class PHP support across extraction, resolution, and CLI analysis, including PSR-4 autoload mapping support and `.php` project discovery (FEAT-019)
+- feat(report): surface low-confidence extraction findings directly in `architecture_report.md`
+- feat(integrations): add `/gf-setup` and ship the Obsidian documentation vault alongside AI integrations
+
+### Fixed
+- fix(extract): restrict `Calls` edges to imported callees to reduce false positives in call graph output
+- fix(extract): strip `.ts`/`.js` extensions in `resolve_ts_relative` so relative imports normalize consistently
+- fix(report): improve Obsidian wiki-links and self-contained overview rendering
+- fix(cli): remove the misleading `local_prefix` existence check that rejected valid layouts
+
+## [0.7.0] - 2026-04-15
+
+### Added
+- feat(cli): add `graphify install-integrations` for manifest-driven install/uninstall of Graphify assets into Claude Code and Codex
+- feat(integrations): ship bundled Graphify AI integrations: slash commands, skills, agents, and MCP configuration templates for Claude Code and Codex (FEAT-018)
+- feat(core): classify top hotspots as `hub`, `bridge`, or `mixed` in report output (FEAT-017)
+
+### Fixed
+- fix(install): make uninstall respect `--dry-run`, track inline wrapper files, and warn when project-local install risks untracked artifacts
+
 ## [0.6.0] - 2026-04-14
 
 ### Added

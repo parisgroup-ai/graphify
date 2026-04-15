@@ -137,7 +137,7 @@ Binary name: `graphify-mcp`.
 
 ## Versioning
 
-All crates share `version.workspace = true`. Bump only `[workspace.package].version` in root `Cargo.toml`. Current: **v0.6.0**.
+All crates share `version.workspace = true`. Bump only `[workspace.package].version` in root `Cargo.toml`. Current: **v0.8.0**.
 
 ## Related
 

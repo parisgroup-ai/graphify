@@ -1,7 +1,7 @@
 ---
 title: "graphify pr-summary"
 created: 2026-04-14
-updated: 2026-04-14
+updated: 2026-04-15
 status: published
 tags:
   - type/cli
@@ -87,7 +87,7 @@ Markdown to **stdout**; warnings to **stderr**. Layout:
 **Contract drift (1)** — `graphify check --config graphify.toml`
 - `users` (Drizzle) ↔ `UserDto` (TS): FieldMissingOnTs `phone`
 
-<sub>Graphify v0.6.0 · `graphify pr-summary <dir>` to regenerate</sub>
+<sub>Graphify v0.8.0 · `graphify pr-summary <dir>` to regenerate</sub>
 ```
 
 ## Exit codes

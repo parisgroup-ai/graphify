@@ -1,7 +1,7 @@
 ---
 title: Installation
 created: 2026-04-14
-updated: 2026-04-14
+updated: 2026-04-15
 status: published
 tags:
   - type/guide
@@ -63,7 +63,7 @@ cp target/release/graphify /usr/local/bin/
 
 ```bash
 $ graphify --version
-graphify 0.6.0
+graphify 0.8.0
 ```
 
 ## Option 3 — Run from source (no install)
