@@ -7,6 +7,15 @@ use graphify_core::metrics::NodeMetrics;
 
 use crate::{Community, Cycle};
 
+/// Normalize a node id for use as an Obsidian wiki-link target.
+///
+/// Filenames under the vault replace `/` with `_` (Obsidian interprets `/` as a
+/// folder separator). Wiki-link text must use the same canonicalization so the
+/// link resolves to the on-disk file.
+fn wikilink_target(id: &str) -> String {
+    id.replace('/', "_")
+}
+
 /// Writes an Obsidian vault directory at `path`, with one `.md` file per node.
 ///
 /// Each markdown file contains YAML frontmatter with node metadata and a body
@@ -105,7 +114,7 @@ pub fn write_obsidian_vault(
             writeln!(buf, "## Imports").unwrap();
             writeln!(buf).unwrap();
             for (tgt, _edge) in targets {
-                writeln!(buf, "- [[{tgt}]]").unwrap();
+                writeln!(buf, "- [[{}]]", wikilink_target(tgt)).unwrap();
             }
             writeln!(buf).unwrap();
         }
@@ -115,7 +124,7 @@ pub fn write_obsidian_vault(
             writeln!(buf, "## Imported By").unwrap();
             writeln!(buf).unwrap();
             for (src, _edge) in sources {
-                writeln!(buf, "- [[{src}]]").unwrap();
+                writeln!(buf, "- [[{}]]", wikilink_target(src)).unwrap();
             }
             writeln!(buf).unwrap();
         }
@@ -125,7 +134,7 @@ pub fn write_obsidian_vault(
             writeln!(buf, "## Defines").unwrap();
             writeln!(buf).unwrap();
             for tgt in targets {
-                writeln!(buf, "- [[{tgt}]]").unwrap();
+                writeln!(buf, "- [[{}]]", wikilink_target(tgt)).unwrap();
             }
             writeln!(buf).unwrap();
         }
@@ -135,7 +144,7 @@ pub fn write_obsidian_vault(
             writeln!(buf, "## Calls").unwrap();
             writeln!(buf).unwrap();
             for (tgt, _edge) in targets {
-                writeln!(buf, "- [[{tgt}]]").unwrap();
+                writeln!(buf, "- [[{}]]", wikilink_target(tgt)).unwrap();
             }
             writeln!(buf).unwrap();
         }
@@ -145,7 +154,7 @@ pub fn write_obsidian_vault(
             writeln!(buf, "## Called By").unwrap();
             writeln!(buf).unwrap();
             for (src, _edge) in sources {
-                writeln!(buf, "- [[{src}]]").unwrap();
+                writeln!(buf, "- [[{}]]", wikilink_target(src)).unwrap();
             }
             writeln!(buf).unwrap();
         }
@@ -156,7 +165,10 @@ pub fn write_obsidian_vault(
             writeln!(buf).unwrap();
             for cid in cycle_ids {
                 let cycle = &cycles[cid - 1];
-                let chain: Vec<String> = cycle.iter().map(|m| format!("[[{m}]]")).collect();
+                let chain: Vec<String> = cycle
+                    .iter()
+                    .map(|m| format!("[[{}]]", wikilink_target(m)))
+                    .collect();
                 writeln!(buf, "- Cycle {cid}: {}", chain.join(" → ")).unwrap();
             }
             writeln!(buf).unwrap();
@@ -188,10 +200,124 @@ pub fn write_obsidian_vault(
     let mut node_ids: Vec<&str> = graph.nodes().iter().map(|n| n.id.as_str()).collect();
     node_ids.sort();
     for id in node_ids {
-        writeln!(index, "- [[{id}]]").unwrap();
+        writeln!(index, "- [[{}]]", wikilink_target(id)).unwrap();
     }
 
     std::fs::write(path.join("_index.md"), index).expect("write Obsidian index");
+
+    // Issue #5: self-contained vault — mirror architecture_report.md into a
+    // vault-internal note so users opening the vault in Obsidian get the full
+    // analytical context (hotspots, communities, cycles) without leaving the
+    // vault. `00-` prefix sorts it first in Obsidian's file explorer.
+    write_overview_note(graph, metrics, communities, cycles, path);
+}
+
+/// Writes a vault-internal `00-architecture-overview.md` that mirrors the
+/// content of `architecture_report.md`, with wiki-links to per-node notes.
+fn write_overview_note(
+    graph: &CodeGraph,
+    metrics: &[NodeMetrics],
+    communities: &[Community],
+    cycles: &[Cycle],
+    path: &Path,
+) {
+    let mut buf = String::new();
+
+    // Frontmatter tags for Obsidian filtering (e.g. "tag:#graphify/overview").
+    writeln!(buf, "---").unwrap();
+    writeln!(buf, "tags: [graphify, architecture, overview]").unwrap();
+    writeln!(buf, "---").unwrap();
+    writeln!(buf).unwrap();
+
+    writeln!(buf, "# Architecture Overview").unwrap();
+    writeln!(buf).unwrap();
+
+    // Summary
+    writeln!(buf, "## Summary").unwrap();
+    writeln!(buf).unwrap();
+    writeln!(buf, "| Metric | Value |").unwrap();
+    writeln!(buf, "|--------|-------|").unwrap();
+    writeln!(buf, "| Total nodes | {} |", graph.node_count()).unwrap();
+    writeln!(buf, "| Total edges | {} |", graph.edge_count()).unwrap();
+    writeln!(buf, "| Communities | {} |", communities.len()).unwrap();
+    writeln!(buf, "| Circular dependencies | {} |", cycles.len()).unwrap();
+    writeln!(buf).unwrap();
+
+    // Top Hotspots (top 20 by score) — wiki-linked for navigation.
+    if !metrics.is_empty() {
+        writeln!(buf, "## Top Hotspots").unwrap();
+        writeln!(buf).unwrap();
+        writeln!(
+            buf,
+            "| Rank | Module | Score | Betweenness | PageRank | In-degree | In cycle |"
+        )
+        .unwrap();
+        writeln!(
+            buf,
+            "|------|--------|-------|-------------|----------|-----------|----------|"
+        )
+        .unwrap();
+
+        let mut sorted: Vec<&NodeMetrics> = metrics.iter().collect();
+        sorted.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        for (rank, m) in sorted.iter().take(20).enumerate() {
+            writeln!(
+                buf,
+                "| {} | [[{}]] | {:.4} | {:.4} | {:.4} | {} | {} |",
+                rank + 1,
+                wikilink_target(&m.id),
+                m.score,
+                m.betweenness,
+                m.pagerank,
+                m.in_degree,
+                if m.in_cycle { "yes" } else { "no" },
+            )
+            .unwrap();
+        }
+        writeln!(buf).unwrap();
+    }
+
+    // Communities
+    if !communities.is_empty() {
+        writeln!(buf, "## Communities").unwrap();
+        writeln!(buf).unwrap();
+        for community in communities {
+            writeln!(
+                buf,
+                "### Community {} ({} members)",
+                community.id,
+                community.members.len()
+            )
+            .unwrap();
+            writeln!(buf).unwrap();
+            for member in &community.members {
+                writeln!(buf, "- [[{}]]", wikilink_target(member)).unwrap();
+            }
+            writeln!(buf).unwrap();
+        }
+    }
+
+    // Circular Dependencies (only when present)
+    if !cycles.is_empty() {
+        writeln!(buf, "## Circular Dependencies").unwrap();
+        writeln!(buf).unwrap();
+        for (i, cycle) in cycles.iter().enumerate() {
+            let chain: Vec<String> = cycle
+                .iter()
+                .map(|m| format!("[[{}]]", wikilink_target(m)))
+                .collect();
+            writeln!(buf, "{}. {}", i + 1, chain.join(" → ")).unwrap();
+        }
+        writeln!(buf).unwrap();
+    }
+
+    std::fs::write(path.join("00-architecture-overview.md"), buf)
+        .expect("write Obsidian overview note");
 }
 
 // ---------------------------------------------------------------------------
@@ -370,5 +496,118 @@ mod tests {
         assert!(index.contains("- [[app.main]]"));
         assert!(index.contains("- [[app.utils]]"));
         assert!(index.contains("Nodes: 2"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Issue #4 — wiki-link targets must match sanitized filenames
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn vault_includes_self_contained_overview_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault_path = dir.path().join("vault");
+
+        let mut g = CodeGraph::new();
+        g.add_node(Node::module("a", "a.py", Language::Python, 1, true));
+        g.add_node(Node::module("b", "b.py", Language::Python, 1, true));
+        g.add_edge("a", "b", Edge::imports(1));
+        g.add_edge("b", "a", Edge::imports(2));
+
+        let metrics = vec![
+            NodeMetrics {
+                id: "a".to_string(),
+                score: 0.9,
+                in_degree: 1,
+                in_cycle: true,
+                ..Default::default()
+            },
+            NodeMetrics {
+                id: "b".to_string(),
+                score: 0.3,
+                in_degree: 1,
+                in_cycle: true,
+                ..Default::default()
+            },
+        ];
+        let communities = vec![Community {
+            id: 0,
+            members: vec!["a".to_string(), "b".to_string()],
+        }];
+        let cycles = vec![vec!["a".to_string(), "b".to_string()]];
+
+        write_obsidian_vault(&g, &metrics, &communities, &cycles, &vault_path);
+
+        let overview_path = vault_path.join("00-architecture-overview.md");
+        assert!(overview_path.exists(), "overview note must exist");
+        let content = std::fs::read_to_string(&overview_path).unwrap();
+        assert!(content.contains("tags: [graphify, architecture, overview]"));
+        assert!(content.contains("# Architecture Overview"));
+        assert!(content.contains("## Top Hotspots"));
+        // Hotspot rows are wiki-linked for navigation.
+        assert!(content.contains("[[a]]"));
+        assert!(content.contains("[[b]]"));
+        assert!(content.contains("## Communities"));
+        assert!(content.contains("### Community 0 (2 members)"));
+        assert!(content.contains("## Circular Dependencies"));
+        assert!(content.contains("[[a]] → [[b]]"));
+    }
+
+    #[test]
+    fn wikilinks_and_filenames_use_underscore_for_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault_path = dir.path().join("vault");
+
+        let mut g = CodeGraph::new();
+        g.add_node(Node::module(
+            "@scope/pkg.a",
+            "packages/a.ts",
+            Language::TypeScript,
+            1,
+            true,
+        ));
+        g.add_node(Node::module(
+            "@scope/pkg.b",
+            "packages/b.ts",
+            Language::TypeScript,
+            1,
+            true,
+        ));
+        g.add_edge("@scope/pkg.a", "@scope/pkg.b", Edge::imports(1));
+
+        let metrics = vec![
+            NodeMetrics {
+                id: "@scope/pkg.a".to_string(),
+                ..Default::default()
+            },
+            NodeMetrics {
+                id: "@scope/pkg.b".to_string(),
+                ..Default::default()
+            },
+        ];
+        let cycles = vec![vec!["@scope/pkg.a".to_string(), "@scope/pkg.b".to_string()]];
+
+        write_obsidian_vault(&g, &metrics, &[], &cycles, &vault_path);
+
+        // Filenames are underscore-normalized.
+        assert!(vault_path.join("@scope_pkg.a.md").exists());
+        assert!(vault_path.join("@scope_pkg.b.md").exists());
+
+        // Wiki-links in _index.md use underscores (no slashes), so Obsidian
+        // resolves them to the flat filenames above.
+        let index = std::fs::read_to_string(vault_path.join("_index.md")).unwrap();
+        assert!(index.contains("[[@scope_pkg.a]]"));
+        assert!(index.contains("[[@scope_pkg.b]]"));
+        assert!(
+            !index.contains("[[@scope/pkg."),
+            "wiki-links must not contain '/', got: {index}"
+        );
+
+        // Cross-node wiki-links (Imports / Imported By / Cycles) do the same.
+        let a = std::fs::read_to_string(vault_path.join("@scope_pkg.a.md")).unwrap();
+        assert!(a.contains("[[@scope_pkg.b]]"));
+        assert!(
+            !a.contains("[[@scope/pkg.b]]"),
+            "wiki-link to sibling must not contain '/', got: {a}"
+        );
     }
 }
