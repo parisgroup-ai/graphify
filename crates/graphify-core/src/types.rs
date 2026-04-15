@@ -11,6 +11,7 @@ pub enum Language {
     TypeScript,
     Go,
     Rust,
+    Php,
 }
 
 // ---------------------------------------------------------------------------
@@ -432,5 +433,26 @@ mod tests {
             true,
         );
         assert_eq!(node.kind, NodeKind::Enum);
+    }
+
+    #[test]
+    fn language_php_serialization() {
+        let php_json = serde_json::to_string(&Language::Php).expect("serialize");
+        assert_eq!(php_json, "\"Php\"");
+        let php_back: Language = serde_json::from_str(&php_json).expect("deserialize");
+        assert_eq!(php_back, Language::Php);
+    }
+
+    #[test]
+    fn create_php_module_node() {
+        let node = Node::module(
+            "App.Services.Llm",
+            "src/Services/Llm.php",
+            Language::Php,
+            1,
+            true,
+        );
+        assert_eq!(node.language, Language::Php);
+        assert_eq!(node.kind, NodeKind::Module);
     }
 }
