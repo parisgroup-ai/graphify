@@ -1434,19 +1434,6 @@ fn run_extract(
         );
     }
 
-    // Also warn if local_prefix looks like a directory but doesn't exist inside repo.
-    if !effective_local_prefix.is_empty() {
-        let prefix_dir = repo_path.join(&effective_local_prefix);
-        if !prefix_dir.is_dir() {
-            eprintln!(
-                "Warning: project '{}' has local_prefix '{}' but directory '{}' does not exist.",
-                project.name,
-                effective_local_prefix,
-                prefix_dir.display(),
-            );
-        }
-    }
-
     // Load extraction cache (unless --force or no cache dir).
     let cache = match (force, cache_dir) {
         (false, Some(dir)) => {

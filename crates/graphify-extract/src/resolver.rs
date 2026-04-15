@@ -410,9 +410,7 @@ fn resolve_ts_relative(raw: &str, from_module: &str) -> String {
     // produces the literal id `parent.foo.js` and never matches `known_modules`,
     // inflating the ambiguous-edge count on bundler-style projects.
     // Longer extensions come first so `.tsx` matches before `.ts`.
-    const TS_EXTENSIONS: &[&str] = &[
-        ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".js", ".ts",
-    ];
+    const TS_EXTENSIONS: &[&str] = &[".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".js", ".ts"];
     let remaining = TS_EXTENSIONS
         .iter()
         .find_map(|ext| remaining.strip_suffix(ext))

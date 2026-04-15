@@ -209,18 +209,6 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
         );
     }
 
-    if !local_prefix.is_empty() {
-        let prefix_dir = repo_path.join(local_prefix);
-        if !prefix_dir.is_dir() {
-            eprintln!(
-                "Warning: project '{}' has local_prefix '{}' but directory '{}' does not exist.",
-                project.name,
-                local_prefix,
-                prefix_dir.display(),
-            );
-        }
-    }
-
     let python_extractor = PythonExtractor::new();
     let typescript_extractor = TypeScriptExtractor::new();
     let go_extractor = GoExtractor::new();
