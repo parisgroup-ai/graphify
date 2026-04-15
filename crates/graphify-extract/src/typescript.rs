@@ -1,5 +1,6 @@
 use crate::lang::{ExtractionResult, LanguageExtractor};
 use graphify_core::types::{Edge, Language, Node, NodeKind};
+use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::Parser;
 
@@ -50,8 +51,15 @@ impl LanguageExtractor for TypeScriptExtractor {
             true,
         ));
 
-        // Walk the root children to extract statements.
+        // Issue #3: build a file-local set of names bound by top-level imports
+        // (and CommonJS `require` declarations). `extract_calls_recursive` then
+        // only emits a `Calls` edge when the callee is one of those bindings —
+        // same-file helpers, function parameters, and JS globals no longer
+        // pollute the graph with phantom nodes.
         let root = tree.root_node();
+        let imported = collect_imported_bindings(root, source);
+
+        // Walk the root children to extract statements.
         let mut cursor = root.walk();
         for node in root.children(&mut cursor) {
             match node.kind() {
@@ -59,31 +67,206 @@ impl LanguageExtractor for TypeScriptExtractor {
                     extract_import_statement(node, source, module_name, &mut result);
                 }
                 "export_statement" => {
-                    extract_export_statement(node, source, module_name, path, &mut result);
+                    extract_export_statement(
+                        node,
+                        source,
+                        module_name,
+                        path,
+                        &imported,
+                        &mut result,
+                    );
                 }
                 "lexical_declaration" | "variable_declaration" => {
                     // Handles `const x = require('./util')`
                     extract_require_calls(node, source, module_name, &mut result);
-                    extract_calls_recursive(node, source, module_name, &mut result);
+                    extract_calls_recursive(node, source, module_name, &imported, &mut result);
                 }
                 "expression_statement" => {
                     extract_require_calls(node, source, module_name, &mut result);
-                    extract_calls_recursive(node, source, module_name, &mut result);
+                    extract_calls_recursive(node, source, module_name, &imported, &mut result);
                 }
                 "function_declaration" => {
-                    extract_function_declaration(node, source, module_name, path, &mut result);
+                    extract_function_declaration(
+                        node,
+                        source,
+                        module_name,
+                        path,
+                        &imported,
+                        &mut result,
+                    );
                 }
                 "class_declaration" => {
-                    extract_class_declaration(node, source, module_name, path, &mut result);
+                    extract_class_declaration(
+                        node,
+                        source,
+                        module_name,
+                        path,
+                        &imported,
+                        &mut result,
+                    );
                 }
                 _ => {
                     // Scan anything else for bare function calls.
-                    extract_calls_recursive(node, source, module_name, &mut result);
+                    extract_calls_recursive(node, source, module_name, &imported, &mut result);
                 }
             }
         }
 
         result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Import binding collection (issue #3)
+// ---------------------------------------------------------------------------
+
+/// Collect the set of names bound by top-level ES6 imports and CommonJS
+/// `require` declarations. The result is the local alias actually visible
+/// inside this file — `import { foo as bar }` binds `bar`, not `foo`.
+///
+/// Binding forms covered:
+/// - `import foo from 'x'`                     → `foo`
+/// - `import { a, b as c } from 'x'`           → `a`, `c`
+/// - `import * as ns from 'x'`                 → `ns`
+/// - `import type { T } from 'x'`              → `T`
+/// - `import 'x'` (side-effect only)           → nothing
+/// - `const foo = require('x')`                → `foo`
+/// - `const { a, b: c } = require('x')`        → `a`, `c`
+/// - `export { foo } from 'x'` (re-export)     → nothing (doesn't bind locally)
+fn collect_imported_bindings(root: tree_sitter::Node, source: &[u8]) -> HashSet<String> {
+    let mut bindings = HashSet::new();
+    let mut cursor = root.walk();
+    for node in root.children(&mut cursor) {
+        match node.kind() {
+            "import_statement" => {
+                collect_from_import_statement(node, source, &mut bindings);
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                collect_from_require_declaration(node, source, &mut bindings);
+            }
+            _ => {}
+        }
+    }
+    bindings
+}
+
+fn collect_from_import_statement(
+    node: tree_sitter::Node,
+    source: &[u8],
+    bindings: &mut HashSet<String>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "import_clause" {
+            continue;
+        }
+        let mut inner = child.walk();
+        for clause_child in child.children(&mut inner) {
+            match clause_child.kind() {
+                // Default import: `import foo from 'x'`
+                "identifier" => {
+                    if let Ok(name) = clause_child.utf8_text(source) {
+                        bindings.insert(name.to_owned());
+                    }
+                }
+                // Named imports: `import { a, b as c } from 'x'`
+                "named_imports" => {
+                    let mut ni = clause_child.walk();
+                    for spec in clause_child.children(&mut ni) {
+                        if spec.kind() != "import_specifier" {
+                            continue;
+                        }
+                        // Prefer alias over name — local binding uses the alias.
+                        let bind_name = spec
+                            .child_by_field_name("alias")
+                            .or_else(|| spec.child_by_field_name("name"))
+                            .and_then(|n| n.utf8_text(source).ok());
+                        if let Some(name) = bind_name {
+                            if !name.is_empty() {
+                                bindings.insert(name.to_owned());
+                            }
+                        }
+                    }
+                }
+                // Namespace import: `import * as ns from 'x'`
+                "namespace_import" => {
+                    let mut ii = clause_child.walk();
+                    for n in clause_child.children(&mut ii) {
+                        if n.kind() == "identifier" {
+                            if let Ok(name) = n.utf8_text(source) {
+                                bindings.insert(name.to_owned());
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn collect_from_require_declaration(
+    node: tree_sitter::Node,
+    source: &[u8],
+    bindings: &mut HashSet<String>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "variable_declarator" {
+            continue;
+        }
+        let is_require = child
+            .child_by_field_name("value")
+            .map(|v| {
+                v.kind() == "call_expression"
+                    && v.child_by_field_name("function")
+                        .and_then(|f| f.utf8_text(source).ok())
+                        == Some("require")
+            })
+            .unwrap_or(false);
+        if !is_require {
+            continue;
+        }
+        if let Some(name_node) = child.child_by_field_name("name") {
+            collect_binding_names(name_node, source, bindings);
+        }
+    }
+}
+
+fn collect_binding_names(node: tree_sitter::Node, source: &[u8], bindings: &mut HashSet<String>) {
+    match node.kind() {
+        "identifier" => {
+            if let Ok(name) = node.utf8_text(source) {
+                bindings.insert(name.to_owned());
+            }
+        }
+        "object_pattern" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                match child.kind() {
+                    // `const { a } = ...` binds `a`.
+                    "shorthand_property_identifier_pattern" => {
+                        if let Ok(name) = child.utf8_text(source) {
+                            bindings.insert(name.to_owned());
+                        }
+                    }
+                    // `const { a: b } = ...` binds `b` (the value side).
+                    "pair_pattern" => {
+                        if let Some(value) = child.child_by_field_name("value") {
+                            collect_binding_names(value, source, bindings);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        "array_pattern" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_binding_names(child, source, bindings);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -132,6 +315,7 @@ fn extract_export_statement(
     source: &[u8],
     module_name: &str,
     path: &Path,
+    imported: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     let line = node.start_position().row + 1;
@@ -194,10 +378,10 @@ fn extract_export_statement(
     for child in node.children(&mut cursor) {
         match child.kind() {
             "function_declaration" | "function" => {
-                extract_function_declaration(child, source, module_name, path, result);
+                extract_function_declaration(child, source, module_name, path, imported, result);
             }
             "class_declaration" | "class" => {
-                extract_class_declaration(child, source, module_name, path, result);
+                extract_class_declaration(child, source, module_name, path, imported, result);
             }
             _ => {}
         }
@@ -214,6 +398,7 @@ fn extract_function_declaration(
     source: &[u8],
     module_name: &str,
     path: &Path,
+    imported: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     let line = node.start_position().row + 1;
@@ -248,7 +433,7 @@ fn extract_function_declaration(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "statement_block" {
-            extract_calls_recursive(child, source, module_name, result);
+            extract_calls_recursive(child, source, module_name, imported, result);
         }
     }
 }
@@ -259,6 +444,7 @@ fn extract_class_declaration(
     source: &[u8],
     module_name: &str,
     path: &Path,
+    imported: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     let line = node.start_position().row + 1;
@@ -292,7 +478,7 @@ fn extract_class_declaration(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "class_body" {
-            extract_calls_recursive(child, source, module_name, result);
+            extract_calls_recursive(child, source, module_name, imported, result);
         }
     }
 }
@@ -350,13 +536,19 @@ fn extract_require_calls(
 // Call site extraction
 // ---------------------------------------------------------------------------
 
-/// Recursively scan `node` and emit Calls edges for every bare function call
-/// (i.e. `call_expression` nodes whose `function` field is an `identifier`,
-/// not a `member_expression` or similar).
+/// Recursively scan `node` and emit `Calls` edges for every bare function call
+/// whose callee is a top-level import binding (see `collect_imported_bindings`).
+///
+/// Same-file helpers, function parameters, and JS globals are filtered out:
+/// they never enter `imported`, so no edge is emitted. Edges are keyed by the
+/// local alias used in the source (`import { foo as bar } ...; bar()` keys on
+/// `bar`), and carry confidence 0.9 / Extracted — the symbol is a known import,
+/// not a guess.
 fn extract_calls_recursive(
     node: tree_sitter::Node,
     source: &[u8],
     module_name: &str,
+    imported: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     if node.kind() == "call_expression" {
@@ -364,13 +556,13 @@ fn extract_calls_recursive(
             if func_child.kind() == "identifier" {
                 let callee = func_child.utf8_text(source).unwrap_or("");
                 // Skip `require` — handled by extract_require_calls.
-                if callee != "require" && !callee.is_empty() {
+                if callee != "require" && !callee.is_empty() && imported.contains(callee) {
                     let line = node.start_position().row + 1;
                     result.edges.push((
                         module_name.to_owned(),
                         callee.to_owned(),
                         Edge::calls(line)
-                            .with_confidence(0.7, graphify_core::types::ConfidenceKind::Inferred),
+                            .with_confidence(0.9, graphify_core::types::ConfidenceKind::Extracted),
                     ));
                 }
             }
@@ -381,7 +573,7 @@ fn extract_calls_recursive(
     // Recurse into all children.
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_calls_recursive(child, source, module_name, result);
+        extract_calls_recursive(child, source, module_name, imported, result);
     }
 }
 
@@ -645,12 +837,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Call expression
+    // Call expression (issue #3 — imported callees only)
     // -----------------------------------------------------------------------
 
     #[test]
-    fn bare_call_expression_produces_calls_edge() {
-        let result = extract("createUser(data);\n");
+    fn imported_callee_produces_calls_edge() {
+        let result = extract("import { createUser } from './users';\ncreateUser(data);\n");
         let calls: Vec<_> = result
             .edges
             .iter()
@@ -659,20 +851,131 @@ mod tests {
         assert_eq!(
             calls.len(),
             1,
-            "expected 1 Calls edge to createUser, got {:?}",
+            "expected 1 Calls edge to imported createUser, got {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn same_file_helper_call_produces_no_edge() {
+        // `sleep` is defined in this file and not imported — no Calls edge.
+        let result = extract(
+            "function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }\nsleep(100);\n",
+        );
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "sleep")
+            .collect();
+        assert!(
+            calls.is_empty(),
+            "same-file helper must not emit Calls edge, got {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn js_globals_produce_no_calls_edge() {
+        // JS globals (setTimeout, String, Array, ...) are never imported.
+        let result = extract("setTimeout(fn, 100);\nString(123);\nArray.from([]);\n");
+        let call_targets: Vec<&str> = result
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
+            .map(|(_, t, _)| t.as_str())
+            .collect();
+        assert!(
+            !call_targets.contains(&"setTimeout"),
+            "setTimeout global must be skipped, got {:?}",
+            call_targets
+        );
+        assert!(
+            !call_targets.contains(&"String"),
+            "String global must be skipped, got {:?}",
+            call_targets
+        );
+    }
+
+    #[test]
+    fn aliased_import_calls_are_keyed_by_alias() {
+        let result = extract("import { foo as bar } from './x';\nbar(1);\n");
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
+            .collect();
+        // Edge targets the local alias `bar`, not the imported name `foo`.
+        assert!(
+            calls.iter().any(|(_, t, _)| t == "bar"),
+            "expected Calls edge to alias 'bar', got {:?}",
+            calls
+        );
+        assert!(
+            !calls.iter().any(|(_, t, _)| t == "foo"),
+            "should not key on imported name 'foo', got {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn namespace_import_is_bound() {
+        let result = extract("import * as util from './util';\nutil('x');\n");
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "util")
+            .collect();
+        assert_eq!(calls.len(), 1, "namespace import must bind the alias");
+    }
+
+    #[test]
+    fn require_destructuring_binds_callees() {
+        let result = extract("const { foo, bar: baz } = require('./x');\nfoo();\nbaz();\n");
+        let call_targets: Vec<&str> = result
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
+            .map(|(_, t, _)| t.as_str())
+            .collect();
+        assert!(
+            call_targets.contains(&"foo"),
+            "expected Calls edge to destructured 'foo', got {:?}",
+            call_targets
+        );
+        assert!(
+            call_targets.contains(&"baz"),
+            "expected Calls edge to renamed 'baz', got {:?}",
+            call_targets
+        );
+    }
+
+    #[test]
+    fn re_export_does_not_bind_locally() {
+        // `export { foo } from 'x'` forwards the symbol but does NOT bind `foo`
+        // in this file's scope — calling `foo()` here would be a TypeError.
+        let result = extract("export { foo } from './x';\nfoo(1);\n");
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "foo")
+            .collect();
+        assert!(
+            calls.is_empty(),
+            "re-export must not create a local binding, got {:?}",
             calls
         );
     }
 
     #[test]
     fn method_calls_are_skipped() {
-        let result = extract("obj.method(data);\n");
+        let result = extract("import { obj } from './obj';\nobj.method(data);\n");
         let calls: Vec<_> = result
             .edges
             .iter()
             .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
             .collect();
-        // `obj.method()` is a member_expression — should be skipped.
+        // `obj.method()` is a member_expression — should be skipped regardless
+        // of whether `obj` is imported.
         assert!(
             calls.iter().all(|(_, t, _)| t != "method"),
             "obj.method() should be skipped, got {:?}",
@@ -681,24 +984,20 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Extensions
-    // -----------------------------------------------------------------------
-
-    // -----------------------------------------------------------------------
     // Confidence
     // -----------------------------------------------------------------------
 
     #[test]
-    fn bare_call_sites_have_inferred_confidence() {
+    fn imported_callee_has_extracted_confidence() {
         use graphify_core::types::ConfidenceKind;
-        let result = extract("createUser(data);\n");
+        let result = extract("import { createUser } from './users';\ncreateUser(data);\n");
         let call_edge = result
             .edges
             .iter()
             .find(|(_, t, e)| e.kind == EdgeKind::Calls && t == "createUser")
             .expect("should have Calls edge to createUser");
-        assert_eq!(call_edge.2.confidence, 0.7);
-        assert_eq!(call_edge.2.confidence_kind, ConfidenceKind::Inferred);
+        assert_eq!(call_edge.2.confidence, 0.9);
+        assert_eq!(call_edge.2.confidence_kind, ConfidenceKind::Extracted);
     }
 
     #[test]

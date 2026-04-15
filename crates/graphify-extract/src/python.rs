@@ -1,5 +1,6 @@
 use crate::lang::{ExtractionResult, LanguageExtractor};
 use graphify_core::types::{Edge, Language, Node, NodeKind};
+use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::Parser;
 
@@ -46,8 +47,15 @@ impl LanguageExtractor for PythonExtractor {
             .nodes
             .push(Node::module(module_name, path, Language::Python, 1, true));
 
-        // Walk the root children to extract statements.
+        // Issue #3: build a file-local set of names bound by top-level imports
+        // (`import x`, `from x import y`). `extract_calls_recursive` only emits
+        // `Calls` edges when the callee is one of those bindings, so same-file
+        // helpers and Python builtins (`print`, `len`, `range`) no longer
+        // produce phantom nodes.
         let root = tree.root_node();
+        let imported = collect_imported_bindings(root, source);
+
+        // Walk the root children to extract statements.
         let mut cursor = root.walk();
         for node in root.children(&mut cursor) {
             match node.kind() {
@@ -58,20 +66,147 @@ impl LanguageExtractor for PythonExtractor {
                     extract_import_from_statement(node, source, module_name, &mut result);
                 }
                 "function_definition" => {
-                    extract_function_definition(node, source, module_name, path, &mut result);
+                    extract_function_definition(
+                        node,
+                        source,
+                        module_name,
+                        path,
+                        &imported,
+                        &mut result,
+                    );
                 }
                 "class_definition" => {
-                    extract_class_definition(node, source, module_name, path, &mut result);
+                    extract_class_definition(
+                        node,
+                        source,
+                        module_name,
+                        path,
+                        &imported,
+                        &mut result,
+                    );
                 }
                 _ => {
                     // For top-level expression statements or other constructs,
                     // scan for bare function calls.
-                    extract_calls_recursive(node, source, module_name, &mut result);
+                    extract_calls_recursive(node, source, module_name, &imported, &mut result);
                 }
             }
         }
 
         result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Import binding collection (issue #3)
+// ---------------------------------------------------------------------------
+
+/// Collect the set of names bound by top-level Python imports. The result is
+/// the local name visible in this file — `import foo as f` binds `f`, and
+/// `from x import y as z` binds `z`.
+///
+/// Binding forms covered:
+/// - `import foo` → `foo`
+/// - `import foo.bar` → `foo` (first segment — dotted access becomes a member
+///   expression, not a bare call)
+/// - `import foo as f` → `f`
+/// - `from foo import bar` → `bar`
+/// - `from foo import bar as b` → `b`
+/// - `from foo import *` → nothing
+fn collect_imported_bindings(root: tree_sitter::Node, source: &[u8]) -> HashSet<String> {
+    let mut bindings = HashSet::new();
+    let mut cursor = root.walk();
+    for node in root.children(&mut cursor) {
+        match node.kind() {
+            "import_statement" => {
+                collect_from_import_statement(node, source, &mut bindings);
+            }
+            "import_from_statement" => {
+                collect_from_import_from_statement(node, source, &mut bindings);
+            }
+            _ => {}
+        }
+    }
+    bindings
+}
+
+fn collect_from_import_statement(
+    node: tree_sitter::Node,
+    source: &[u8],
+    bindings: &mut HashSet<String>,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            // `import foo` or `import foo.bar` — bind the first segment.
+            "dotted_name" => {
+                if let Some(first) = child.child(0) {
+                    if let Ok(name) = first.utf8_text(source) {
+                        if !name.is_empty() {
+                            bindings.insert(name.to_owned());
+                        }
+                    }
+                }
+            }
+            // `import foo as f` — bind the alias.
+            "aliased_import" => {
+                if let Some(alias) = child.child_by_field_name("alias") {
+                    if let Ok(name) = alias.utf8_text(source) {
+                        bindings.insert(name.to_owned());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_from_import_from_statement(
+    node: tree_sitter::Node,
+    source: &[u8],
+    bindings: &mut HashSet<String>,
+) {
+    // Walk children, splitting on the `import` keyword. Names that appear
+    // *after* `import` are the ones that enter this file's scope.
+    let mut past_import = false;
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "import" {
+            past_import = true;
+            continue;
+        }
+        if !past_import {
+            continue;
+        }
+        match child.kind() {
+            // `from x import foo` — bind `foo`.
+            "dotted_name" => {
+                if let Ok(name) = child.utf8_text(source) {
+                    if !name.is_empty() {
+                        bindings.insert(name.to_owned());
+                    }
+                }
+            }
+            // `from x import foo as f` — bind the alias `f`.
+            "aliased_import" => {
+                if let Some(alias) = child.child_by_field_name("alias") {
+                    if let Ok(name) = alias.utf8_text(source) {
+                        bindings.insert(name.to_owned());
+                    }
+                } else if let Some(first) = child.child(0) {
+                    // Fallback: no alias field, bind the imported name.
+                    if let Ok(name) = first.utf8_text(source) {
+                        if !name.is_empty() {
+                            bindings.insert(name.to_owned());
+                        }
+                    }
+                }
+            }
+            // `from x import *` — intentionally unsupported (would require
+            // cross-file analysis to know what's bound).
+            "wildcard_import" => {}
+            _ => {}
+        }
     }
 }
 
@@ -203,6 +338,7 @@ fn extract_function_definition(
     source: &[u8],
     module_name: &str,
     path: &Path,
+    imported: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     let line = node.start_position().row + 1;
@@ -234,7 +370,7 @@ fn extract_function_definition(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "block" {
-            extract_calls_recursive(child, source, module_name, result);
+            extract_calls_recursive(child, source, module_name, imported, result);
         }
     }
 }
@@ -245,6 +381,7 @@ fn extract_class_definition(
     source: &[u8],
     module_name: &str,
     path: &Path,
+    imported: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     let line = node.start_position().row + 1;
@@ -275,7 +412,7 @@ fn extract_class_definition(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "block" {
-            extract_calls_recursive(child, source, module_name, result);
+            extract_calls_recursive(child, source, module_name, imported, result);
         }
     }
 }
@@ -284,27 +421,31 @@ fn extract_class_definition(
 // Call site extraction
 // ---------------------------------------------------------------------------
 
-/// Recursively scan `node` and emit Calls edges for every bare function call
-/// (i.e. `call` nodes whose function child is an `identifier`, not an
-/// `attribute`).
+/// Recursively scan `node` and emit `Calls` edges for every bare function call
+/// whose callee is a top-level import binding (see `collect_imported_bindings`).
+///
+/// Same-file helpers, function parameters, and Python builtins (`print`, `len`,
+/// `range`, `isinstance`) are filtered out: they never enter `imported`, so no
+/// edge is emitted. Edges carry confidence 0.9 / Extracted.
 fn extract_calls_recursive(
     node: tree_sitter::Node,
     source: &[u8],
     module_name: &str,
+    imported: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     if node.kind() == "call" {
         // First child of a `call` node is the function expression.
         if let Some(func_child) = node.child(0) {
             if func_child.kind() == "identifier" {
-                let callee = func_child.utf8_text(source).unwrap_or("").to_owned();
-                if !callee.is_empty() {
+                let callee = func_child.utf8_text(source).unwrap_or("");
+                if !callee.is_empty() && imported.contains(callee) {
                     let line = node.start_position().row + 1;
                     result.edges.push((
                         module_name.to_owned(),
-                        callee,
+                        callee.to_owned(),
                         Edge::calls(line)
-                            .with_confidence(0.7, graphify_core::types::ConfidenceKind::Inferred),
+                            .with_confidence(0.9, graphify_core::types::ConfidenceKind::Extracted),
                     ));
                 }
             }
@@ -315,7 +456,7 @@ fn extract_calls_recursive(
     // Recurse into all children.
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_calls_recursive(child, source, module_name, result);
+        extract_calls_recursive(child, source, module_name, imported, result);
     }
 }
 
@@ -507,12 +648,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Call sites
+    // Call sites (issue #3 — imported callees only)
     // -----------------------------------------------------------------------
 
     #[test]
-    fn bare_call_sites_produce_calls_edges() {
-        let result = extract("def foo():\n    bar()\n    baz(x, y)\n");
+    fn imported_callee_produces_calls_edge() {
+        let result = extract("from mod import bar\n\ndef foo():\n    bar()\n");
         let call_targets: Vec<&str> = result
             .edges
             .iter()
@@ -521,24 +662,112 @@ mod tests {
             .collect();
         assert!(
             call_targets.contains(&"bar"),
-            "expected Calls edge to 'bar'"
-        );
-        assert!(
-            call_targets.contains(&"baz"),
-            "expected Calls edge to 'baz'"
+            "expected Calls edge to imported 'bar', got {:?}",
+            call_targets
         );
     }
 
     #[test]
-    fn method_calls_are_skipped() {
-        let result = extract("def foo():\n    self.method()\n    obj.call(x)\n");
+    fn same_file_helper_call_produces_no_edge() {
+        // `sleep` is defined in this file and not imported — no Calls edge.
+        let result = extract("def sleep(n):\n    pass\n\ndef main():\n    sleep(1)\n");
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "sleep")
+            .collect();
+        assert!(
+            calls.is_empty(),
+            "same-file helper must not emit Calls edge, got {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn python_builtins_produce_no_calls_edge() {
+        // `print`, `len`, `range`, `isinstance` are Python builtins — never
+        // imported, so no Calls edges.
+        let result = extract("print(len('x'))\nfor i in range(10):\n    pass\n");
         let call_targets: Vec<&str> = result
             .edges
             .iter()
             .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
             .map(|(_, t, _)| t.as_str())
             .collect();
-        // Neither "method" nor "call" should appear as targets from attribute calls.
+        for builtin in ["print", "len", "range"] {
+            assert!(
+                !call_targets.contains(&builtin),
+                "builtin '{}' must be skipped, got {:?}",
+                builtin,
+                call_targets
+            );
+        }
+    }
+
+    #[test]
+    fn aliased_import_calls_are_keyed_by_alias() {
+        let result = extract("from mod import foo as bar\nbar(1)\n");
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
+            .collect();
+        // Edge targets the local alias `bar`, not the imported name `foo`.
+        assert!(
+            calls.iter().any(|(_, t, _)| t == "bar"),
+            "expected Calls edge to alias 'bar', got {:?}",
+            calls
+        );
+        // The bare-call filter keys on `bar`; it should not emit a bare
+        // `foo` node (though the existing qualified `mod.foo` edge persists).
+        let bare_foo: Vec<_> = calls.iter().filter(|(_, t, _)| t == "foo").collect();
+        assert!(
+            bare_foo.is_empty(),
+            "should not key bare-call edge on imported name 'foo', got {:?}",
+            bare_foo
+        );
+    }
+
+    #[test]
+    fn wildcard_import_does_not_bind() {
+        // `from mod import *` pulls unknown symbols into scope — we
+        // intentionally do not track them (would require cross-file analysis).
+        let result = extract("from mod import *\n\nfoo()\n");
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "foo")
+            .collect();
+        assert!(
+            calls.is_empty(),
+            "wildcard import must not bind names, got {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn import_as_alias_binds_alias() {
+        let result = extract("import mod as m\nm()\n");
+        let calls: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "m")
+            .collect();
+        assert_eq!(calls.len(), 1, "`import mod as m` must bind `m`");
+    }
+
+    #[test]
+    fn method_calls_are_skipped() {
+        let result =
+            extract("from mod import obj\n\ndef foo():\n    self.method()\n    obj.call(x)\n");
+        let call_targets: Vec<&str> = result
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
+            .map(|(_, t, _)| t.as_str())
+            .collect();
+        // Neither "method" nor "call" should appear as targets from attribute
+        // calls, regardless of whether the receiver is imported.
         assert!(
             !call_targets.contains(&"method"),
             "self.method() should be skipped"
@@ -549,44 +778,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn top_level_bare_calls_are_captured() {
-        let result = extract("setup()\nconfigure(debug=True)\n");
-        let call_targets: Vec<&str> = result
-            .edges
-            .iter()
-            .filter(|(_, _, e)| e.kind == EdgeKind::Calls)
-            .map(|(_, t, _)| t.as_str())
-            .collect();
-        assert!(
-            call_targets.contains(&"setup"),
-            "expected Calls edge to 'setup'"
-        );
-        assert!(
-            call_targets.contains(&"configure"),
-            "expected Calls edge to 'configure'"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Extensions
-    // -----------------------------------------------------------------------
-
     // -----------------------------------------------------------------------
     // Confidence
     // -----------------------------------------------------------------------
 
     #[test]
-    fn bare_call_sites_have_inferred_confidence() {
+    fn imported_callee_has_extracted_confidence() {
         use graphify_core::types::ConfidenceKind;
-        let result = extract("def foo():\n    bar()\n");
+        let result = extract("from mod import bar\n\ndef foo():\n    bar()\n");
         let call_edge = result
             .edges
             .iter()
             .find(|(_, t, e)| e.kind == EdgeKind::Calls && t == "bar")
             .expect("should have Calls edge to bar");
-        assert_eq!(call_edge.2.confidence, 0.7);
-        assert_eq!(call_edge.2.confidence_kind, ConfidenceKind::Inferred);
+        assert_eq!(call_edge.2.confidence, 0.9);
+        assert_eq!(call_edge.2.confidence_kind, ConfidenceKind::Extracted);
     }
 
     #[test]
