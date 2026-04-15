@@ -79,9 +79,28 @@ fn dispatch_top_level(
             extract_symbol(node, source, path, module_name, NodeKind::Function, result);
         }
         _ => {
+            // First try matching deeper — PHP wraps statements in containers
+            // we may not enumerate explicitly.
+            let mut has_specific_child = false;
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
-                dispatch_top_level(&child, source, path, module_name, result);
+                match child.kind() {
+                    "namespace_use_declaration"
+                    | "class_declaration"
+                    | "interface_declaration"
+                    | "trait_declaration"
+                    | "enum_declaration"
+                    | "function_definition" => {
+                        dispatch_top_level(&child, source, path, module_name, result);
+                        has_specific_child = true;
+                    }
+                    _ => {}
+                }
+            }
+            // If none of the children were language-level declarations, treat
+            // this subtree as expression statements and scan for calls.
+            if !has_specific_child {
+                extract_calls_recursive(node, source, module_name, result);
             }
         }
     }
@@ -259,14 +278,18 @@ fn extract_symbol(
         .edges
         .push((module_name.to_owned(), symbol_id.clone(), Edge::defines(line)));
 
-    // Walk body: method declarations emit Method nodes (only for class/trait/enum).
-    // Functions don't contain methods, so short-circuit for NodeKind::Function.
+    // For functions: scan the body for bare calls and return (no methods).
     if matches!(kind, NodeKind::Function) {
+        if let Some(body) = node.child_by_field_name("body") {
+            extract_calls_recursive(&body, source, module_name, result);
+        }
         return;
     }
 
+    // For class/trait/enum: walk body for methods + bare calls anywhere.
     if let Some(body) = node.child_by_field_name("body") {
         extract_methods_in_body(&body, source, path, module_name, name, result);
+        extract_calls_recursive(&body, source, module_name, result);
     }
 }
 
@@ -319,6 +342,43 @@ fn emit_method(
     result
         .edges
         .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
+}
+
+// ---------------------------------------------------------------------------
+// Bare call extraction
+// ---------------------------------------------------------------------------
+
+/// Recursively scan `node` for `function_call_expression` whose callee is a
+/// bare `name` identifier, emitting a `Calls` edge with confidence 0.7 /
+/// Inferred. Skips `scoped_call_expression` (e.g. `A::b()`) and
+/// `member_call_expression` (e.g. `$a->b()`), matching the Go/Python policy.
+fn extract_calls_recursive(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    module_name: &str,
+    result: &mut ExtractionResult,
+) {
+    if node.kind() == "function_call_expression" {
+        if let Some(func) = node.child_by_field_name("function") {
+            if func.kind() == "name" {
+                let callee = func.utf8_text(source).unwrap_or("").to_owned();
+                if !callee.is_empty() {
+                    let line = node.start_position().row + 1;
+                    result.edges.push((
+                        module_name.to_owned(),
+                        callee,
+                        Edge::calls(line)
+                            .with_confidence(0.7, graphify_core::types::ConfidenceKind::Inferred),
+                    ));
+                }
+            }
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_calls_recursive(&child, source, module_name, result);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -565,5 +625,105 @@ trait Loggable {
             .find(|n| n.kind == NodeKind::Method && n.id == "App.Main.Loggable.log")
             .expect("Method node inside trait");
         assert_eq!(method.language, Language::Php);
+    }
+
+    #[test]
+    fn bare_call_inside_function_produces_calls_edge() {
+        use graphify_core::types::EdgeKind;
+        let r = extract(
+            r#"<?php
+function main() {
+    setup();
+    configure(true);
+}
+"#,
+        );
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(calls.contains(&"setup"), "got {:?}", calls);
+        assert!(calls.contains(&"configure"), "got {:?}", calls);
+    }
+
+    #[test]
+    fn bare_call_confidence_is_inferred_0_7() {
+        use graphify_core::types::{ConfidenceKind, EdgeKind};
+        let r = extract(
+            r#"<?php
+function main() {
+    foo();
+}
+"#,
+        );
+        let call = r
+            .edges
+            .iter()
+            .find(|e| e.2.kind == EdgeKind::Calls && e.1 == "foo")
+            .expect("Calls edge to foo");
+        assert_eq!(call.2.confidence, 0.7);
+        assert_eq!(call.2.confidence_kind, ConfidenceKind::Inferred);
+    }
+
+    #[test]
+    fn static_call_not_extracted_as_bare() {
+        use graphify_core::types::EdgeKind;
+        let r = extract(
+            r#"<?php
+function main() {
+    Llm::call();
+}
+"#,
+        );
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(!calls.contains(&"call"), "static call must be skipped; got {:?}", calls);
+    }
+
+    #[test]
+    fn instance_method_call_not_extracted_as_bare() {
+        use graphify_core::types::EdgeKind;
+        let r = extract(
+            r#"<?php
+function main() {
+    $llm = new Llm();
+    $llm->call();
+}
+"#,
+        );
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(!calls.contains(&"call"), "instance call must be skipped; got {:?}", calls);
+    }
+
+    #[test]
+    fn bare_call_inside_method_produces_calls_edge() {
+        use graphify_core::types::EdgeKind;
+        let r = extract(
+            r#"<?php
+class Llm {
+    public function run() {
+        helper();
+    }
+}
+"#,
+        );
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(calls.contains(&"helper"), "got {:?}", calls);
     }
 }
