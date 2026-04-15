@@ -2,7 +2,15 @@ use std::fmt::Write as FmtWrite;
 use std::path::Path;
 
 use graphify_core::graph::CodeGraph;
-use graphify_core::metrics::NodeMetrics;
+use graphify_core::metrics::{HotspotType, NodeMetrics};
+
+fn hotspot_type_label(t: HotspotType) -> &'static str {
+    match t {
+        HotspotType::Hub => "hub",
+        HotspotType::Bridge => "bridge",
+        HotspotType::Mixed => "mixed",
+    }
+}
 
 use crate::{Community, Cycle};
 
@@ -82,12 +90,12 @@ pub fn write_report(
     writeln!(buf).unwrap();
     writeln!(
         buf,
-        "| Rank | Module | Score | Betweenness | PageRank | In-degree | In cycle |"
+        "| Rank | Module | Type | Score | Betweenness | PageRank | In-degree | In cycle |"
     )
     .unwrap();
     writeln!(
         buf,
-        "|------|--------|-------|-------------|----------|-----------|----------|"
+        "|------|--------|------|-------|-------------|----------|-----------|----------|"
     )
     .unwrap();
 
@@ -101,9 +109,10 @@ pub fn write_report(
     for (rank, m) in sorted.iter().take(20).enumerate() {
         writeln!(
             buf,
-            "| {} | `{}` | {:.4} | {:.4} | {:.4} | {} | {} |",
+            "| {} | `{}` | {} | {:.4} | {:.4} | {:.4} | {} | {} |",
             rank + 1,
             m.id,
+            hotspot_type_label(m.hotspot_type),
             m.score,
             m.betweenness,
             m.pagerank,
@@ -112,6 +121,12 @@ pub fn write_report(
         )
         .unwrap();
     }
+    writeln!(buf).unwrap();
+    writeln!(
+        buf,
+        "_Type legend: **hub** = high in-degree (split or invert deps) · **bridge** = high betweenness-per-incoming (inject cross-layer dep) · **mixed** = both or neither (human review)._"
+    )
+    .unwrap();
     writeln!(buf).unwrap();
 
     // Communities
@@ -160,7 +175,7 @@ mod tests {
                 out_degree: 1,
                 in_cycle: false,
                 score: 0.42,
-                community_id: 0,
+                ..Default::default()
             },
             NodeMetrics {
                 id: "app.utils".to_string(),
@@ -170,7 +185,7 @@ mod tests {
                 out_degree: 2,
                 in_cycle: true,
                 score: 0.08,
-                community_id: 0,
+                ..Default::default()
             },
         ]
     }
@@ -218,6 +233,29 @@ mod tests {
         assert!(content.contains("## Top Hotspots"));
         assert!(content.contains("## Circular Dependencies"));
         assert!(content.contains("app.main"));
+    }
+
+    #[test]
+    fn write_report_renders_hotspot_type_column_and_legend() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report_type.md");
+        let mut metrics = make_metrics();
+        metrics[0].hotspot_type = HotspotType::Hub;
+        metrics[1].hotspot_type = HotspotType::Bridge;
+        let communities = make_communities();
+        let cycles: Vec<Cycle> = vec![];
+        let graph = make_graph();
+
+        write_report("typed", &metrics, &communities, &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // Header includes Type column
+        assert!(content.contains("| Rank | Module | Type |"));
+        // Both labels appear in body rows
+        assert!(content.contains("| hub |"));
+        assert!(content.contains("| bridge |"));
+        // Legend present
+        assert!(content.contains("_Type legend"));
     }
 
     #[test]

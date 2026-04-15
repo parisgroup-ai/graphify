@@ -126,7 +126,7 @@ mod tests {
             out_degree: 2,
             in_cycle: true,
             score: 0.4,
-            community_id: 0,
+            ..Default::default()
         }]
     }
 

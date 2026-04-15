@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use petgraph::Direction;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
+use serde::{Deserialize, Serialize};
 
 use crate::cycles::find_sccs;
 use crate::graph::CodeGraph;
@@ -34,11 +35,77 @@ impl Default for ScoringWeights {
 }
 
 // ---------------------------------------------------------------------------
+// HotspotType + HotspotThresholds
+// ---------------------------------------------------------------------------
+
+/// Classification of *why* a node is a hotspot.
+///
+/// The composite score ranks structural importance, but two nodes with similar
+/// scores can require very different refactors. This enum disambiguates them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HotspotType {
+    /// High in-degree — many modules import this. Fix: split or invert deps.
+    Hub,
+    /// High betweenness-per-incoming-edge — chokepoint between layers. Fix:
+    /// inject the cross-layer dependency.
+    Bridge,
+    /// Both pressures present, or neither dominates — needs human judgment.
+    Mixed,
+}
+
+/// Thresholds controlling [`classify`].
+///
+/// Defaults are calibrated against medium-sized polyglot repos (~1k modules).
+/// Tune via `--hub-threshold` / `--bridge-ratio` for very small or very large
+/// graphs.
+#[derive(Debug, Clone, Copy)]
+pub struct HotspotThresholds {
+    /// Minimum in-degree to qualify as a hub. Default: 50.
+    pub hub_threshold: usize,
+    /// Minimum `betweenness / max(in_degree, 1)` to qualify as a bridge.
+    /// Default: 3000.
+    pub bridge_ratio: f64,
+}
+
+impl Default for HotspotThresholds {
+    fn default() -> Self {
+        Self {
+            hub_threshold: 50,
+            bridge_ratio: 3000.0,
+        }
+    }
+}
+
+/// Classifies a node as `hub`, `bridge`, or `mixed` from its raw metrics.
+///
+/// - **Hub** — in-degree exceeds `hub_threshold` *and* the bridge ratio does not.
+/// - **Bridge** — bridge ratio exceeds `bridge_ratio` *and* in-degree does not
+///   exceed `hub_threshold`.
+/// - **Mixed** — neither threshold fires, or both fire (severe hub *and*
+///   bridge), so the refactor strategy needs human judgment.
+pub fn classify(
+    in_degree: usize,
+    betweenness: f64,
+    thresholds: &HotspotThresholds,
+) -> HotspotType {
+    let is_hub = in_degree > thresholds.hub_threshold;
+    let ratio = betweenness / in_degree.max(1) as f64;
+    let is_bridge = ratio > thresholds.bridge_ratio;
+
+    match (is_hub, is_bridge) {
+        (true, false) => HotspotType::Hub,
+        (false, true) => HotspotType::Bridge,
+        _ => HotspotType::Mixed,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // NodeMetrics
 // ---------------------------------------------------------------------------
 
 /// Computed metrics for a single graph node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeMetrics {
     pub id: String,
     pub betweenness: f64,
@@ -50,6 +117,14 @@ pub struct NodeMetrics {
     pub score: f64,
     /// Community identifier — filled later by community detection; defaults to 0.
     pub community_id: usize,
+    /// Hotspot classification — see [`HotspotType`].
+    pub hotspot_type: HotspotType,
+}
+
+impl Default for HotspotType {
+    fn default() -> Self {
+        HotspotType::Mixed
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -258,12 +333,26 @@ pub fn normalize(values: &HashMap<String, f64>) -> HashMap<String, f64> {
 /// Computes all metrics for every node in `graph` and returns them as a
 /// `Vec<NodeMetrics>` sorted by score descending (highest first).
 ///
+/// Uses default [`HotspotThresholds`]. Call [`compute_metrics_with_thresholds`]
+/// to override.
+pub fn compute_metrics(graph: &CodeGraph, weights: &ScoringWeights) -> Vec<NodeMetrics> {
+    compute_metrics_with_thresholds(graph, weights, &HotspotThresholds::default())
+}
+
+/// Like [`compute_metrics`] but lets the caller override the hotspot
+/// classification thresholds.
+///
 /// Steps:
 /// 1. Compute raw betweenness and PageRank.
 /// 2. Build raw in/out degree and in_cycle boolean maps.
 /// 3. Normalize betweenness, PageRank, and in_degree to [0, 1].
 /// 4. Score = weighted sum: `w.betweenness * bt + w.pagerank * pr + w.in_degree * id + w.in_cycle * ic`.
-pub fn compute_metrics(graph: &CodeGraph, weights: &ScoringWeights) -> Vec<NodeMetrics> {
+/// 5. Classify each node via [`classify`] over its raw `in_degree` and `betweenness`.
+pub fn compute_metrics_with_thresholds(
+    graph: &CodeGraph,
+    weights: &ScoringWeights,
+    thresholds: &HotspotThresholds,
+) -> Vec<NodeMetrics> {
     let ids: Vec<String> = graph.node_ids().iter().map(|s| s.to_string()).collect();
     if ids.is_empty() {
         return Vec::new();
@@ -305,15 +394,20 @@ pub fn compute_metrics(graph: &CodeGraph, weights: &ScoringWeights) -> Vec<NodeM
                 + weights.in_degree * id_norm
                 + weights.in_cycle * ic;
 
+            let raw_in_deg = graph.in_degree(id);
+            let raw_bt_val = raw_bt.get(id).copied().unwrap_or(0.0);
+            let hotspot_type = classify(raw_in_deg, raw_bt_val, thresholds);
+
             NodeMetrics {
                 id: id.clone(),
-                betweenness: raw_bt.get(id).copied().unwrap_or(0.0),
+                betweenness: raw_bt_val,
                 pagerank: raw_pr.get(id).copied().unwrap_or(0.0),
-                in_degree: graph.in_degree(id),
+                in_degree: raw_in_deg,
                 out_degree: graph.out_degree(id),
                 in_cycle,
                 score,
                 community_id: 0,
+                hotspot_type,
             }
         })
         .collect();
@@ -544,6 +638,85 @@ mod tests {
         for m in &metrics {
             assert_eq!(m.community_id, 0, "community_id should default to 0");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // classify
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn classify_hub_when_in_degree_dominates() {
+        // 60 incoming edges, modest betweenness → hub
+        let t = HotspotThresholds::default();
+        assert_eq!(classify(60, 100.0, &t), HotspotType::Hub);
+    }
+
+    #[test]
+    fn classify_bridge_when_betweenness_per_incoming_dominates() {
+        // 2 incoming, huge betweenness → ratio 5000 > 3000 → bridge
+        let t = HotspotThresholds::default();
+        assert_eq!(classify(2, 10_000.0, &t), HotspotType::Bridge);
+    }
+
+    #[test]
+    fn classify_mixed_when_both_thresholds_fire() {
+        // High in-degree AND high ratio → human judgment needed
+        let t = HotspotThresholds::default();
+        assert_eq!(classify(200, 1_000_000.0, &t), HotspotType::Mixed);
+    }
+
+    #[test]
+    fn classify_mixed_when_neither_threshold_fires() {
+        let t = HotspotThresholds::default();
+        assert_eq!(classify(5, 100.0, &t), HotspotType::Mixed);
+    }
+
+    #[test]
+    fn classify_zero_in_degree_uses_max_one_in_denominator() {
+        // 0 incoming, betweenness 4000 → ratio 4000 > 3000 → bridge (no /0)
+        let t = HotspotThresholds::default();
+        assert_eq!(classify(0, 4_000.0, &t), HotspotType::Bridge);
+    }
+
+    #[test]
+    fn classify_respects_custom_thresholds() {
+        let t = HotspotThresholds {
+            hub_threshold: 10,
+            bridge_ratio: 100.0,
+        };
+        assert_eq!(classify(11, 50.0, &t), HotspotType::Hub);
+        assert_eq!(classify(2, 300.0, &t), HotspotType::Bridge);
+    }
+
+    #[test]
+    fn compute_metrics_populates_hotspot_type() {
+        let g = star_graph();
+        let metrics = compute_metrics(&g, &ScoringWeights::default());
+        // Every node must have a classification — default thresholds make small
+        // graphs all "mixed", but the field must exist.
+        for m in &metrics {
+            assert!(matches!(
+                m.hotspot_type,
+                HotspotType::Hub | HotspotType::Bridge | HotspotType::Mixed
+            ));
+        }
+    }
+
+    #[test]
+    fn compute_metrics_with_thresholds_classifies_hub() {
+        // Force "a" (in_degree=4) above a tiny hub threshold.
+        let g = star_graph();
+        let thresholds = HotspotThresholds {
+            hub_threshold: 3,
+            bridge_ratio: 1e9, // unreachable
+        };
+        let metrics = compute_metrics_with_thresholds(
+            &g,
+            &ScoringWeights::default(),
+            &thresholds,
+        );
+        let a = metrics.iter().find(|m| m.id == "a").unwrap();
+        assert_eq!(a.hotspot_type, HotspotType::Hub);
     }
 
     #[test]

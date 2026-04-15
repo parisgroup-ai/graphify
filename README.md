@@ -276,6 +276,31 @@ After `graphify run` + `graphify diff` + `graphify check` populate the project o
 
 Output is optimized for solo-dev + AI-authored PR review: each finding carries an inline `graphify explain` / `graphify path` hint so the next investigation step is one copy-paste away.
 
+## Hotspot Classification (v0.7+)
+
+Every top-20 hotspot in `architecture_report.md`, `analysis.json`, and `pr-summary` is tagged with a classification that dictates which refactor fits best:
+
+| Type | Signal | Recommended fix |
+|------|--------|-----------------|
+| **hub** | `in_degree > hub_threshold` (default: 50) | Split the module into submodules, or invert the dependency on its largest consumers. |
+| **bridge** | `betweenness / max(in_degree, 1) > bridge_ratio` (default: 3000) | Inject the cross-layer dependency instead of calling through. Reduces chokepoints. |
+| **mixed** | Both thresholds fire, or neither | Human judgment: inspect the call graph before choosing. |
+
+Tune per-repo via CLI or config:
+
+```bash
+graphify run --config graphify.toml --hub-threshold 80 --bridge-ratio 5000
+graphify check --config graphify.toml --hub-threshold 20 --bridge-ratio 1500
+```
+
+```toml
+[hotspots]
+hub_threshold = 80
+bridge_ratio = 5000
+```
+
+Why classify at all? Two nodes can share a composite score of 0.6 for completely different reasons — a 200-module hub needs a different refactor than an 80-line chokepoint that bridges four layers. See FEAT-017 for the motivating evidence.
+
 ## MCP Server
 
 Graphify includes an MCP server (`graphify-mcp`) that exposes graph queries to AI assistants like Claude:

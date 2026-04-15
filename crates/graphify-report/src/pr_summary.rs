@@ -4,7 +4,10 @@
 //! project's Graphify output directory. Pure function: no I/O. Consumers are
 //! expected to load inputs separately and pass them in as structs.
 
+use std::collections::HashMap;
+
 use graphify_core::diff::{AnalysisSnapshot, DiffReport};
+use graphify_core::metrics::HotspotType;
 
 use crate::check_report::CheckReport;
 
@@ -28,12 +31,40 @@ pub fn render(
     check: Option<&CheckReport>,
 ) -> String {
     let mut out = String::new();
+    let type_lookup = build_hotspot_type_lookup(analysis);
     render_header(&mut out, project_name);
     render_stats_line(&mut out, analysis, drift);
-    render_drift_section(&mut out, drift);
+    render_drift_section(&mut out, drift, &type_lookup);
     render_outstanding_section(&mut out, check);
     render_footer(&mut out);
     out
+}
+
+/// Builds a node-id → classification map from the snapshot's nodes.
+/// Returns an empty map for older snapshots that don't carry the field.
+fn build_hotspot_type_lookup(analysis: &AnalysisSnapshot) -> HashMap<String, HotspotType> {
+    analysis
+        .nodes
+        .iter()
+        .filter_map(|n| n.hotspot_type.map(|t| (n.id.clone(), t)))
+        .collect()
+}
+
+fn hotspot_type_label(t: HotspotType) -> &'static str {
+    match t {
+        HotspotType::Hub => "hub",
+        HotspotType::Bridge => "bridge",
+        HotspotType::Mixed => "mixed",
+    }
+}
+
+/// Renders ` [hub]` / ` [bridge]` / ` [mixed]` (with leading space) when the
+/// id is classified, or an empty string otherwise.
+fn type_annotation(id: &str, lookup: &HashMap<String, HotspotType>) -> String {
+    match lookup.get(id) {
+        Some(t) => format!(" [{}]", hotspot_type_label(*t)),
+        None => String::new(),
+    }
 }
 
 fn render_header(out: &mut String, project_name: &str) {
@@ -69,7 +100,11 @@ fn render_stats_line(out: &mut String, analysis: &AnalysisSnapshot, drift: Optio
     }
 }
 
-fn render_drift_section(out: &mut String, drift: Option<&DiffReport>) {
+fn render_drift_section(
+    out: &mut String,
+    drift: Option<&DiffReport>,
+    type_lookup: &HashMap<String, HotspotType>,
+) {
     out.push_str("#### Drift in this PR\n\n");
     let Some(drift) = drift else {
         out.push_str(
@@ -90,7 +125,7 @@ fn render_drift_section(out: &mut String, drift: Option<&DiffReport>) {
     }
 
     render_cycle_rows(out, drift);
-    render_hotspot_rows(out, drift);
+    render_hotspot_rows(out, drift, type_lookup);
     render_community_shift_row(out, drift);
     out.push('\n');
 }
@@ -111,7 +146,11 @@ fn render_community_shift_row(out: &mut String, drift: &DiffReport) {
     ));
 }
 
-fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
+fn render_hotspot_rows(
+    out: &mut String,
+    drift: &DiffReport,
+    type_lookup: &HashMap<String, HotspotType>,
+) {
     if !drift.hotspots.rising.is_empty() {
         out.push_str(&format!(
             "- **Escalated hotspots ({})**\n",
@@ -119,8 +158,12 @@ fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
         ));
         for change in drift.hotspots.rising.iter().take(MAX_ROWS_PER_LIST) {
             out.push_str(&format!(
-                "  - `{}` ({:.2} → {:.2})  `→ graphify explain {}`\n",
-                change.id, change.before, change.after, change.id
+                "  - `{}`{} ({:.2} → {:.2})  `→ graphify explain {}`\n",
+                change.id,
+                type_annotation(&change.id, type_lookup),
+                change.before,
+                change.after,
+                change.id,
             ));
         }
         if drift.hotspots.rising.len() > MAX_ROWS_PER_LIST {
@@ -136,8 +179,11 @@ fn render_hotspot_rows(out: &mut String, drift: &DiffReport) {
         ));
         for change in drift.hotspots.new_hotspots.iter().take(MAX_ROWS_PER_LIST) {
             out.push_str(&format!(
-                "  - `{}` (score {:.2})  `→ graphify explain {}`\n",
-                change.id, change.after, change.id
+                "  - `{}`{} (score {:.2})  `→ graphify explain {}`\n",
+                change.id,
+                type_annotation(&change.id, type_lookup),
+                change.after,
+                change.id,
             ));
         }
         if drift.hotspots.new_hotspots.len() > MAX_ROWS_PER_LIST {
@@ -593,6 +639,72 @@ mod tests {
         assert!(out.contains("`app.core.new_mod`"));
         assert!(out.contains("score 0.66"));
         assert!(out.contains("`→ graphify explain app.core.new_mod`"));
+    }
+
+    /// Snapshot helper that injects classified nodes for type-annotation tests.
+    fn analysis_with_classified_nodes(nodes: Vec<(&str, &str)>) -> AnalysisSnapshot {
+        let entries: Vec<String> = nodes
+            .into_iter()
+            .map(|(id, ht)| {
+                format!(
+                    r#"{{"id":"{}","betweenness":0.0,"pagerank":0.0,"in_degree":0,"out_degree":0,"in_cycle":false,"score":0.0,"community_id":0,"hotspot_type":"{}"}}"#,
+                    id, ht
+                )
+            })
+            .collect();
+        let json = format!(
+            r#"{{
+                "nodes": [{}],
+                "communities": [],
+                "cycles": [],
+                "summary": {{
+                    "total_nodes": 0,
+                    "total_edges": 0,
+                    "total_communities": 0,
+                    "total_cycles": 0
+                }}
+            }}"#,
+            entries.join(",")
+        );
+        serde_json::from_str(&json).expect("classified snapshot")
+    }
+
+    #[test]
+    fn annotates_escalated_hotspot_with_classification() {
+        let a = analysis_with_classified_nodes(vec![
+            ("app.services.auth", "hub"),
+            ("app.api.routes", "bridge"),
+        ]);
+        let d = drift_with_hotspots(
+            vec![
+                ("app.services.auth", 0.71, 0.83),
+                ("app.api.routes", 0.48, 0.52),
+            ],
+            vec![],
+        );
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("`app.services.auth` [hub]"));
+        assert!(out.contains("`app.api.routes` [bridge]"));
+    }
+
+    #[test]
+    fn annotates_new_hotspot_with_classification() {
+        let a = analysis_with_classified_nodes(vec![("app.core.new_mod", "mixed")]);
+        let d = drift_with_hotspots(vec![], vec![("app.core.new_mod", 0.66)]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("`app.core.new_mod` [mixed]"));
+    }
+
+    #[test]
+    fn omits_annotation_when_node_not_in_snapshot() {
+        // Empty snapshot => no lookup hits => no annotation.
+        let a = minimal_analysis();
+        let d = drift_with_hotspots(vec![("app.x", 0.3, 0.5)], vec![]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("`app.x` (0.30 → 0.50)"));
+        assert!(!out.contains("[hub]"));
+        assert!(!out.contains("[bridge]"));
+        assert!(!out.contains("[mixed]"));
     }
 
     #[test]

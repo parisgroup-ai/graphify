@@ -53,7 +53,7 @@ fn build_test_graph() -> (CodeGraph, Vec<NodeMetrics>, Vec<Community>, Vec<Cycle
             out_degree: 2,
             in_cycle: false,
             score: 0.6,
-            community_id: 0,
+            ..Default::default()
         },
         NodeMetrics {
             id: "app.utils".into(),
@@ -63,7 +63,7 @@ fn build_test_graph() -> (CodeGraph, Vec<NodeMetrics>, Vec<Community>, Vec<Cycle
             out_degree: 1,
             in_cycle: false,
             score: 0.3,
-            community_id: 0,
+            ..Default::default()
         },
         NodeMetrics {
             id: "app.db".into(),
@@ -74,6 +74,7 @@ fn build_test_graph() -> (CodeGraph, Vec<NodeMetrics>, Vec<Community>, Vec<Cycle
             in_cycle: false,
             score: 0.2,
             community_id: 1,
+            ..Default::default()
         },
         NodeMetrics {
             id: "app.api".into(),
@@ -84,6 +85,7 @@ fn build_test_graph() -> (CodeGraph, Vec<NodeMetrics>, Vec<Community>, Vec<Cycle
             in_cycle: false,
             score: 0.1,
             community_id: 1,
+            ..Default::default()
         },
     ];
 

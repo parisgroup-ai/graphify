@@ -233,7 +233,7 @@ mod tests {
                 out_degree: 1,
                 in_cycle: false,
                 score: 0.4,
-                community_id: 0,
+                ..Default::default()
             },
             NodeMetrics {
                 id: "app.utils".to_string(),
@@ -243,7 +243,7 @@ mod tests {
                 out_degree: 0,
                 in_cycle: false,
                 score: 0.1,
-                community_id: 0,
+                ..Default::default()
             },
         ]
     }
@@ -333,7 +333,7 @@ mod tests {
                 out_degree: 1,
                 in_cycle: true,
                 score: 0.5,
-                community_id: 0,
+                ..Default::default()
             },
             NodeMetrics {
                 id: "b".to_string(),
@@ -343,7 +343,7 @@ mod tests {
                 out_degree: 1,
                 in_cycle: true,
                 score: 0.5,
-                community_id: 0,
+                ..Default::default()
             },
         ];
         let cycles = vec![vec!["a".to_string(), "b".to_string()]];

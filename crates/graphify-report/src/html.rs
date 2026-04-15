@@ -258,7 +258,7 @@ mod tests {
                 out_degree: 2,
                 in_cycle: false,
                 score: 0.4,
-                community_id: 0,
+                ..Default::default()
             },
             NodeMetrics {
                 id: "app.utils".to_string(),
@@ -268,7 +268,7 @@ mod tests {
                 out_degree: 0,
                 in_cycle: false,
                 score: 0.1,
-                community_id: 0,
+                ..Default::default()
             },
         ]
     }
@@ -399,7 +399,7 @@ mod tests {
             out_degree: 0,
             in_cycle: false,
             score: 0.0,
-            community_id: 0,
+            ..Default::default()
         }];
         write_html("single", &g, &metrics, &[], &[], &path);
         assert!(path.exists());

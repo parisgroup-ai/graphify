@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use graphify_core::{graph::CodeGraph, metrics::NodeMetrics};
+use graphify_core::{graph::CodeGraph, metrics::{HotspotType, NodeMetrics}};
 
 use crate::{Community, Cycle};
 
@@ -96,6 +96,7 @@ struct MetricsRecord<'a> {
     in_cycle: bool,
     score: f64,
     community_id: usize,
+    hotspot_type: HotspotType,
 }
 
 #[derive(Serialize)]
@@ -156,6 +157,7 @@ pub fn write_analysis_json(
             in_cycle: m.in_cycle,
             score: m.score,
             community_id: m.community_id,
+            hotspot_type: m.hotspot_type,
         })
         .collect();
 
@@ -282,7 +284,7 @@ mod tests {
                 out_degree: 2,
                 in_cycle: false,
                 score: 0.4,
-                community_id: 0,
+                ..Default::default()
             },
             NodeMetrics {
                 id: "app.utils".to_string(),
@@ -292,7 +294,7 @@ mod tests {
                 out_degree: 0,
                 in_cycle: false,
                 score: 0.1,
-                community_id: 0,
+                ..Default::default()
             },
         ]
     }
@@ -362,6 +364,26 @@ mod tests {
         let link = &value["links"][0];
         assert_eq!(link["confidence"], 0.85);
         assert_eq!(link["confidence_kind"], "Inferred");
+    }
+
+    #[test]
+    fn write_analysis_json_includes_hotspot_type_per_node() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let graph = make_graph();
+
+        let mut metrics = make_metrics();
+        metrics[0].hotspot_type = HotspotType::Bridge;
+        metrics[1].hotspot_type = HotspotType::Hub;
+
+        let cycles: Vec<Cycle> = vec![];
+        write_analysis_json(&metrics, &[], &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let nodes = value["nodes"].as_array().unwrap();
+        assert_eq!(nodes[0]["hotspot_type"], "bridge");
+        assert_eq!(nodes[1]["hotspot_type"], "hub");
     }
 
     #[test]

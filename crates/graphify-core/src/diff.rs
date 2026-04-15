@@ -2,6 +2,8 @@ use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
+use crate::metrics::HotspotType;
+
 // ---------------------------------------------------------------------------
 // Input: AnalysisSnapshot (deserialized from analysis.json)
 // ---------------------------------------------------------------------------
@@ -28,6 +30,10 @@ pub struct NodeSnapshot {
     pub in_cycle: bool,
     pub score: f64,
     pub community_id: usize,
+    /// Hotspot classification — added in v0.7. Older snapshots without this
+    /// field deserialize to `None`.
+    #[serde(default)]
+    pub hotspot_type: Option<HotspotType>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -523,6 +529,7 @@ mod tests {
             in_cycle: false,
             score,
             community_id: community,
+            hotspot_type: None,
         }
     }
 

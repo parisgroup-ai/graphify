@@ -15,7 +15,7 @@ use graphify_core::{
     cycles::{find_sccs, find_simple_cycles},
     graph::CodeGraph,
     history::{build_historical_snapshot, compute_trend_report, load_historical_snapshots},
-    metrics::{compute_metrics, ScoringWeights},
+    metrics::{compute_metrics_with_thresholds, HotspotThresholds, ScoringWeights},
     policy::{CompiledPolicy, PolicyConfig, ProjectGraph, ProjectPolicyResult},
     query::{QueryEngine, SearchFilters, SortField},
     types::Language,
@@ -52,6 +52,14 @@ struct Config {
     policy: PolicyConfig,
     #[serde(default)]
     contract: ContractConfigRaw,
+    #[serde(default)]
+    hotspots: HotspotsConfig,
+}
+
+#[derive(Deserialize, Default)]
+struct HotspotsConfig {
+    hub_threshold: Option<usize>,
+    bridge_ratio: Option<f64>,
 }
 
 #[derive(Deserialize, Default)]
@@ -177,6 +185,14 @@ enum Commands {
         #[arg(long)]
         weights: Option<String>,
 
+        /// In-degree threshold above which a node is classified as a hub (default: 50)
+        #[arg(long)]
+        hub_threshold: Option<usize>,
+
+        /// betweenness/in_degree ratio above which a node is classified as a bridge (default: 3000)
+        #[arg(long)]
+        bridge_ratio: Option<f64>,
+
         /// Force full rebuild, ignoring extraction cache
         #[arg(long)]
         force: bool,
@@ -196,6 +212,14 @@ enum Commands {
         #[arg(long)]
         weights: Option<String>,
 
+        /// In-degree threshold above which a node is classified as a hub (default: 50)
+        #[arg(long)]
+        hub_threshold: Option<usize>,
+
+        /// betweenness/in_degree ratio above which a node is classified as a bridge (default: 3000)
+        #[arg(long)]
+        bridge_ratio: Option<f64>,
+
         /// Output formats: json,csv,md,html,neo4j,graphml,obsidian (comma-separated)
         #[arg(long)]
         format: Option<String>,
@@ -214,6 +238,14 @@ enum Commands {
         /// Output directory (overrides config setting)
         #[arg(long)]
         output: Option<PathBuf>,
+
+        /// In-degree threshold above which a node is classified as a hub (default: 50)
+        #[arg(long)]
+        hub_threshold: Option<usize>,
+
+        /// betweenness/in_degree ratio above which a node is classified as a bridge (default: 3000)
+        #[arg(long)]
+        bridge_ratio: Option<f64>,
 
         /// Force full rebuild, ignoring extraction cache
         #[arg(long)]
@@ -238,6 +270,14 @@ enum Commands {
         /// Maximum allowed hotspot score
         #[arg(long)]
         max_hotspot_score: Option<f64>,
+
+        /// In-degree threshold above which a node is classified as a hub (default: 50)
+        #[arg(long)]
+        hub_threshold: Option<usize>,
+
+        /// betweenness/in_degree ratio above which a node is classified as a bridge (default: 3000)
+        #[arg(long)]
+        bridge_ratio: Option<f64>,
 
         /// Filter to a specific project
         #[arg(long)]
@@ -469,17 +509,21 @@ fn main() {
             config,
             output,
             weights,
+            hub_threshold,
+            bridge_ratio,
             force,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
+            let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
                 let (graph, _, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
                 print_cache_stats(&project.name, &stats);
-                let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
+                let (mut metrics, communities, cycles_simple) =
+                    run_analyze(&graph, &w, &thresholds);
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
                 write_analysis_json(
@@ -505,12 +549,15 @@ fn main() {
             config,
             output,
             weights,
+            hub_threshold,
+            bridge_ratio,
             format,
             force,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
+            let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
             let formats = resolve_formats(&cfg, format.as_deref());
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
@@ -521,6 +568,7 @@ fn main() {
                     &cfg.settings,
                     &proj_out,
                     &w,
+                    &thresholds,
                     &formats,
                     force,
                 );
@@ -540,11 +588,14 @@ fn main() {
         Commands::Run {
             config,
             output,
+            hub_threshold,
+            bridge_ratio,
             force,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, None);
+            let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
             let formats = resolve_formats(&cfg, None);
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
@@ -555,6 +606,7 @@ fn main() {
                     &cfg.settings,
                     &proj_out,
                     &w,
+                    &thresholds,
                     &formats,
                     force,
                 );
@@ -576,6 +628,8 @@ fn main() {
             output,
             max_cycles,
             max_hotspot_score,
+            hub_threshold,
+            bridge_ratio,
             project,
             json,
             force,
@@ -592,6 +646,8 @@ fn main() {
                     max_cycles,
                     max_hotspot_score,
                 },
+                hub_threshold,
+                bridge_ratio,
                 json,
                 ContractsMode::from_flags(contracts, no_contracts),
                 contracts_warnings_as_errors,
@@ -930,8 +986,10 @@ fn cmd_diff(
             let projects = filter_projects(&cfg, project);
             let project_cfg = projects[0];
             let w = resolve_weights(&cfg, None);
+            let thresholds = resolve_hotspot_thresholds(&cfg, None, None);
             let (graph, _, _stats) = run_extract(project_cfg, &cfg.settings, None, false);
-            let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w);
+            let (mut metrics, communities, cycles_simple) =
+                run_analyze(&graph, &w, &thresholds);
             assign_community_ids(&mut metrics, &communities);
             // Build an AnalysisSnapshot from live data.
             let total_nodes = metrics.len();
@@ -950,6 +1008,7 @@ fn cmd_diff(
                         in_cycle: m.in_cycle,
                         score: m.score,
                         community_id: m.community_id,
+                        hotspot_type: Some(m.hotspot_type),
                     })
                     .collect(),
                 communities: communities
@@ -1169,6 +1228,25 @@ fn resolve_weights(cfg: &Config, override_str: Option<&str>) -> ScoringWeights {
         }
     }
     ScoringWeights::default()
+}
+
+/// Resolves hotspot classification thresholds.
+///
+/// Precedence: CLI flag > `[hotspots]` config > [`HotspotThresholds::default`].
+fn resolve_hotspot_thresholds(
+    cfg: &Config,
+    hub_override: Option<usize>,
+    bridge_override: Option<f64>,
+) -> HotspotThresholds {
+    let defaults = HotspotThresholds::default();
+    HotspotThresholds {
+        hub_threshold: hub_override
+            .or(cfg.hotspots.hub_threshold)
+            .unwrap_or(defaults.hub_threshold),
+        bridge_ratio: bridge_override
+            .or(cfg.hotspots.bridge_ratio)
+            .unwrap_or(defaults.bridge_ratio),
+    }
 }
 
 fn resolve_formats(cfg: &Config, override_str: Option<&str>) -> Vec<String> {
@@ -1453,8 +1531,12 @@ type AnalysisResult = (
     Vec<Cycle>,
 );
 
-fn run_analyze(graph: &CodeGraph, weights: &ScoringWeights) -> AnalysisResult {
-    let metrics = compute_metrics(graph, weights);
+fn run_analyze(
+    graph: &CodeGraph,
+    weights: &ScoringWeights,
+    thresholds: &HotspotThresholds,
+) -> AnalysisResult {
+    let metrics = compute_metrics_with_thresholds(graph, weights, thresholds);
     let communities = detect_communities(graph);
     let sccs = find_sccs(graph);
 
@@ -1484,12 +1566,13 @@ fn run_pipeline_for_project(
     settings: &Settings,
     proj_out: &Path,
     weights: &ScoringWeights,
+    thresholds: &HotspotThresholds,
     formats: &[String],
     force: bool,
 ) -> ProjectData {
     let (graph, _, stats) = run_extract(project, settings, Some(proj_out), force);
     print_cache_stats(&project.name, &stats);
-    let (mut metrics, communities, cycles_simple) = run_analyze(&graph, weights);
+    let (mut metrics, communities, cycles_simple) = run_analyze(&graph, weights, thresholds);
     assign_community_ids(&mut metrics, &communities);
     let cycles_for_report: Vec<Cycle> = cycles_simple;
     write_all_outputs(
@@ -1769,6 +1852,8 @@ fn cmd_check(
     project_filter: Option<&str>,
     force: bool,
     limits: CheckLimits,
+    hub_threshold: Option<usize>,
+    bridge_ratio: Option<f64>,
     json: bool,
     contracts_mode: ContractsMode,
     contracts_warnings_as_errors: bool,
@@ -1776,12 +1861,14 @@ fn cmd_check(
     let cfg = load_config(config_path);
     let projects = filter_projects(&cfg, project_filter);
     let out_dir = resolve_output(&cfg, output_override);
+    let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
     let mut analyzed_projects = Vec::new();
 
     for project in &projects {
         let (graph, _excludes, stats) = run_extract(project, &cfg.settings, None, force);
         print_cache_stats(&project.name, &stats);
-        let (metrics, communities, cycles) = run_analyze(&graph, &ScoringWeights::default());
+        let (metrics, communities, cycles) =
+            run_analyze(&graph, &ScoringWeights::default(), &thresholds);
         analyzed_projects.push(CheckProjectData {
             name: project.name.clone(),
             graph,
@@ -2133,7 +2220,8 @@ fn print_contract_report(c: &graphify_report::ContractCheckResult) {
 fn build_query_engine(project: &ProjectConfig, settings: &Settings) -> QueryEngine {
     let (graph, _, _stats) = run_extract(project, settings, None, false);
     let w = ScoringWeights::default();
-    let (mut metrics, communities, _cycles_simple) = run_analyze(&graph, &w);
+    let (mut metrics, communities, _cycles_simple) =
+        run_analyze(&graph, &w, &HotspotThresholds::default());
     assign_community_ids(&mut metrics, &communities);
     let cycles = find_sccs(&graph);
     QueryEngine::from_analyzed(graph, metrics, communities, cycles)
@@ -2849,6 +2937,7 @@ fn cmd_watch(
     let cfg = load_config(config_path);
     let out_dir = resolve_output(&cfg, output_override);
     let weights = resolve_weights(&cfg, None);
+    let thresholds = resolve_hotspot_thresholds(&cfg, None, None);
     let formats = resolve_formats(&cfg, format_override);
 
     if cfg.project.is_empty() {
@@ -2885,7 +2974,7 @@ fn cmd_watch(
         let proj_out = out_dir.join(&project.name);
         std::fs::create_dir_all(&proj_out).expect("create output directory");
         let _ =
-            run_pipeline_for_project(project, &cfg.settings, &proj_out, &weights, &formats, force);
+            run_pipeline_for_project(project, &cfg.settings, &proj_out, &weights, &thresholds, &formats, force);
         eprintln!("[{}] Ready.", project.name);
     }
 
@@ -2949,6 +3038,7 @@ fn cmd_watch(
                         &cfg.settings,
                         &proj_out,
                         &weights,
+                        &thresholds,
                         &formats,
                         false,
                     );
@@ -3110,13 +3200,8 @@ mod tests {
     fn metric(id: &str, score: f64) -> graphify_core::metrics::NodeMetrics {
         graphify_core::metrics::NodeMetrics {
             id: id.to_string(),
-            betweenness: 0.0,
-            pagerank: 0.0,
-            in_degree: 0,
-            out_degree: 0,
-            in_cycle: false,
             score,
-            community_id: 0,
+            ..Default::default()
         }
     }
 
