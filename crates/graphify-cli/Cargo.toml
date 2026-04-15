@@ -21,6 +21,7 @@ notify-debouncer-mini = "0.5"
 serde_yaml = { workspace = true }
 sha2 = { workspace = true }
 include_dir = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
