@@ -132,8 +132,12 @@ Binary name: `graphify-mcp`.
 | Tests | `cargo test --workspace` |
 | Targets | `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` |
 | CI | GitHub Actions on tag push `v*` — see `.github/workflows/release.yml` |
+| Workflow actions | `actions/checkout@v6`, `actions/upload-artifact@v6`, `actions/download-artifact@v5` |
 | Binary size | ~3.5 MB stripped per binary |
 | Linux static | MUSL — no glibc dependency |
+
+> [!info] Workflow maintenance
+> In April 2026 the repo was updated to Node 24-compatible GitHub Actions majors to stay ahead of the hosted-runner Node 20 deprecation.
 
 ## Versioning
 
