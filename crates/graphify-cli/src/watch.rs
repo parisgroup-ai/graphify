@@ -21,6 +21,7 @@ impl WatchFilter {
                 "typescript" => vec!["ts".to_string(), "tsx".to_string()],
                 "go" => vec!["go".to_string()],
                 "rust" => vec!["rs".to_string()],
+                "php" => vec!["php".to_string()],
                 _ => vec![],
             })
             .collect();
@@ -176,5 +177,15 @@ mod tests {
         let changed = vec![PathBuf::from("/other/path/file.py")];
         let affected = determine_affected_projects(&changed, &repos);
         assert!(affected.is_empty());
+    }
+
+    #[test]
+    fn php_language_maps_to_php_extension() {
+        let filter = WatchFilter::new(
+            &["php".to_string()],
+            &[],
+            Path::new("/out"),
+        );
+        assert!(filter.should_rebuild(Path::new("/project/app/main.php")));
     }
 }
