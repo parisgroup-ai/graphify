@@ -476,6 +476,7 @@ dependencies = [
 name = "graphify-cli"
 version = "0.6.0"
 dependencies = [
+ "chrono",
  "clap",
  "graphify-core",
  "graphify-extract",
