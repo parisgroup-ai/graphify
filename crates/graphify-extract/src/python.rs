@@ -775,7 +775,11 @@ mod tests {
             .iter()
             .filter(|(_, t, e)| e.kind == EdgeKind::Calls && t == "mod")
             .collect();
-        assert_eq!(calls.len(), 1, "`import mod as m` must resolve calls to `mod`");
+        assert_eq!(
+            calls.len(),
+            1,
+            "`import mod as m` must resolve calls to `mod`"
+        );
     }
 
     #[test]
