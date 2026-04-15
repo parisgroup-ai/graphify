@@ -21,4 +21,7 @@ pub use ts_contract::{
     TsContractParseError,
 };
 pub use typescript::TypeScriptExtractor;
-pub use walker::{detect_local_prefix, discover_files, path_to_module, DiscoveredFile};
+pub use walker::{
+    detect_local_prefix, discover_files, discover_files_with_psr4, path_to_module,
+    path_to_module_psr4, DiscoveredFile,
+};

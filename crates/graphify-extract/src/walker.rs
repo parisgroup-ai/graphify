@@ -143,6 +143,49 @@ pub fn path_to_module(base: &Path, file: &Path, local_prefix: &str) -> String {
     }
 }
 
+/// PSR-4-aware variant of [`path_to_module`]. When `psr4_mappings` contains a
+/// `(namespace_prefix, dir_prefix)` pair whose `dir_prefix` matches the start
+/// of the file's path relative to `base`, applies the namespace translation.
+/// Longest-matching `dir_prefix` wins. Falls back to [`path_to_module`] when no
+/// mapping applies or when `psr4_mappings` is empty.
+pub fn path_to_module_psr4(
+    base: &Path,
+    file: &Path,
+    local_prefix: &str,
+    psr4_mappings: &[(String, String)],
+) -> String {
+    if psr4_mappings.is_empty() {
+        return path_to_module(base, file, local_prefix);
+    }
+
+    let rel = file.strip_prefix(base).unwrap_or(file);
+    let rel_str = rel.to_string_lossy();
+
+    // Find the longest `dir_prefix` that is a prefix of `rel_str`.
+    let best = psr4_mappings
+        .iter()
+        .filter(|(_, dir)| rel_str.starts_with(dir.as_str()))
+        .max_by_key(|(_, dir)| dir.len());
+
+    let (ns_prefix, dir_prefix) = match best {
+        Some(pair) => pair,
+        None => return path_to_module(base, file, local_prefix),
+    };
+
+    let remainder = &rel_str[dir_prefix.len()..];
+    let remainder_no_ext = remainder.strip_suffix(".php").unwrap_or(remainder);
+
+    let ns_prefix_clean = ns_prefix.trim_end_matches('\\');
+
+    let combined = if ns_prefix_clean.is_empty() {
+        remainder_no_ext.to_owned()
+    } else {
+        format!("{}/{}", ns_prefix_clean.replace('\\', "/"), remainder_no_ext)
+    };
+
+    combined.replace(['/', '\\'], ".")
+}
+
 /// Recursively walk `root`, skip excluded directories, and collect all source
 /// files whose extension is handled by at least one entry in `languages`.
 ///
@@ -157,11 +200,31 @@ pub fn discover_files(
     local_prefix: &str,
     extra_excludes: &[&str],
 ) -> Vec<DiscoveredFile> {
+    discover_files_with_psr4(root, languages, local_prefix, extra_excludes, &[])
+}
+
+/// PSR-4-aware variant of [`discover_files`]. When `psr4_mappings` is empty,
+/// behaves identically to the non-PSR-4 call.
+pub fn discover_files_with_psr4(
+    root: &Path,
+    languages: &[Language],
+    local_prefix: &str,
+    extra_excludes: &[&str],
+    psr4_mappings: &[(String, String)],
+) -> Vec<DiscoveredFile> {
     let mut excludes: Vec<&str> = DEFAULT_EXCLUDES.to_vec();
     excludes.extend_from_slice(extra_excludes);
 
     let mut results = Vec::new();
-    walk_dir(root, root, languages, local_prefix, &excludes, &mut results);
+    walk_dir(
+        root,
+        root,
+        languages,
+        local_prefix,
+        &excludes,
+        psr4_mappings,
+        &mut results,
+    );
     results.sort_by(|a, b| a.path.cmp(&b.path));
     results
 }
@@ -253,6 +316,7 @@ fn walk_dir(
     languages: &[Language],
     local_prefix: &str,
     excludes: &[&str],
+    psr4_mappings: &[(String, String)],
     out: &mut Vec<DiscoveredFile>,
 ) {
     let entries = match std::fs::read_dir(dir) {
@@ -268,10 +332,23 @@ fn walk_dir(
             if excludes.contains(&name) {
                 continue;
             }
-            walk_dir(base, &path, languages, local_prefix, excludes, out);
+            walk_dir(
+                base,
+                &path,
+                languages,
+                local_prefix,
+                excludes,
+                psr4_mappings,
+                out,
+            );
         } else if path.is_file() {
             if let Some(lang) = is_eligible_source_file(&path, languages) {
-                let module_name = path_to_module(base, &path, local_prefix);
+                // PSR-4 translation only applies to PHP files.
+                let module_name = if lang == Language::Php && !psr4_mappings.is_empty() {
+                    path_to_module_psr4(base, &path, local_prefix, psr4_mappings)
+                } else {
+                    path_to_module(base, &path, local_prefix)
+                };
                 let is_package = name == "__init__.py"
                     || name == "index.ts"
                     || name == "index.tsx"
@@ -803,9 +880,9 @@ mod tests {
         assert!(is_test_file("LlmTest.php"));
         assert!(!is_test_file("User.php"));
         assert!(!is_test_file("TestingHelper.php")); // "Testing" prefix is not a test
-        // Note: bare "Test.php" also matches ends_with("Test.php") and is treated
-        // as a test. In practice, production files are never literally named Test.php,
-        // so the false-positive is acceptable and not asserted here.
+                                                     // Note: bare "Test.php" also matches ends_with("Test.php") and is treated
+                                                     // as a test. In practice, production files are never literally named Test.php,
+                                                     // so the false-positive is acceptable and not asserted here.
     }
 
     #[test]
@@ -821,5 +898,57 @@ mod tests {
         assert_eq!(files[0].module_name, "src.Service");
         assert_eq!(files[0].language, Language::Php);
         assert!(!files[0].is_package, "PHP files are never packages");
+    }
+
+    // -----------------------------------------------------------------------
+    // PSR-4 path translation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn path_to_module_php_with_psr4_mapping() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/Services/Llm.php");
+        let mappings = &[("App\\".to_string(), "src/".to_string())][..];
+        assert_eq!(
+            path_to_module_psr4(base, file, "", mappings),
+            "App.Services.Llm"
+        );
+    }
+
+    #[test]
+    fn path_to_module_php_without_composer_falls_back() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/Services/Llm.php");
+        let mappings: &[(String, String)] = &[];
+        assert_eq!(
+            path_to_module_psr4(base, file, "", mappings),
+            "src.Services.Llm"
+        );
+    }
+
+    #[test]
+    fn path_to_module_php_longest_prefix_wins() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/src/legacy/Old/Dto.php");
+        let mappings = &[
+            ("App\\".to_string(), "src/".to_string()),
+            ("App\\Legacy\\".to_string(), "src/legacy/".to_string()),
+        ][..];
+        // Longest-prefix wins: src/legacy/ → App\Legacy\
+        assert_eq!(
+            path_to_module_psr4(base, file, "", mappings),
+            "App.Legacy.Old.Dto"
+        );
+    }
+
+    #[test]
+    fn path_to_module_php_non_matching_path_falls_back() {
+        let base = Path::new("/repo");
+        let file = Path::new("/repo/scripts/seed.php");
+        let mappings = &[("App\\".to_string(), "src/".to_string())][..];
+        assert_eq!(
+            path_to_module_psr4(base, file, "", mappings),
+            "scripts.seed"
+        );
     }
 }
