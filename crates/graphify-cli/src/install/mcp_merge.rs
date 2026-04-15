@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde_json::{Map, Value};
 
 /// Merges a graphify MCP server entry into an existing Claude Code config.
@@ -27,23 +25,13 @@ pub fn merge_claude_config(existing: &str, graphify_binary: &str) -> Result<Stri
 }
 
 /// Returns true if the existing `graphify` entry (if any) is ours.
+// TODO(feat-018-follow-up): use during install to warn on foreign graphify entries
+#[allow(dead_code)]
 pub fn is_self_managed(existing: &str) -> bool {
     let Ok(v) = serde_json::from_str::<Value>(existing) else { return false };
     v.pointer("/mcpServers/graphify/_graphify_managed")
         .and_then(Value::as_bool)
         .unwrap_or(false)
-}
-
-#[derive(Debug, Clone)]
-pub struct McpTarget {
-    pub path: PathBuf,
-    pub kind: McpTargetKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum McpTargetKind {
-    ClaudeCode,
-    Codex,
 }
 
 #[cfg(test)]
@@ -110,6 +98,8 @@ pub fn merge_codex_config(existing: &str, graphify_binary: &str) -> Result<Strin
     Ok(toml::to_string_pretty(&root).expect("serialize TOML"))
 }
 
+// TODO(feat-018-follow-up): use during install to warn on foreign graphify entries
+#[allow(dead_code)]
 pub fn is_self_managed_codex(existing: &str) -> bool {
     let Ok(v) = existing.parse::<toml::Value>() else { return false };
     v.get("mcp_servers")

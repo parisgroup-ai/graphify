@@ -11,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::install::copy_plan::{build_plan, execute, INTEGRATIONS};
-use crate::install::manifest::{Manifest, McpEntry, McpRecord};
+use crate::install::manifest::{Manifest, ManifestFile, McpEntry, McpRecord};
 
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
@@ -220,7 +220,15 @@ pub fn run_install(opts: &InstallOptions) -> std::io::Result<InstallReport> {
             match bridge {
                 Some(script) => codex_bridge::run_bridge(&script, &codex_install_root(opts))?,
                 None => {
-                    codex_bridge::write_inline_wrappers(&codex_install_root(opts))?;
+                    let wrappers = codex_bridge::write_inline_wrappers(&codex_install_root(opts))?;
+                    for path in wrappers {
+                        let bytes = fs::read(&path)?;
+                        all_manifest_files.push(ManifestFile {
+                            path,
+                            sha256: manifest::sha256_of_bytes(&bytes),
+                            kind: "codex-agent-wrapper".into(),
+                        });
+                    }
                 }
             }
         }
@@ -263,7 +271,11 @@ pub fn run_uninstall(opts: &InstallOptions) -> std::io::Result<()> {
             let current = fs::read(&f.path)?;
             let current_sha = manifest::sha256_of_bytes(&current);
             if current_sha == f.sha256 {
-                fs::remove_file(&f.path)?;
+                if opts.dry_run {
+                    println!("would remove: {}", f.path.display());
+                } else {
+                    fs::remove_file(&f.path)?;
+                }
             } else {
                 eprintln!(
                     "graphify uninstall: {} was modified, skipping (edit sha: {}, expected: {})",
@@ -274,10 +286,19 @@ pub fn run_uninstall(opts: &InstallOptions) -> std::io::Result<()> {
             }
         }
         if let Some(mcp) = &manifest.mcp {
-            if let Some(entry) = &mcp.claude_code { remove_mcp_entry_json(&entry.path)?; }
-            if let Some(entry) = &mcp.codex       { remove_mcp_entry_toml(&entry.path)?; }
+            if !opts.dry_run {
+                if let Some(entry) = &mcp.claude_code { remove_mcp_entry_json(&entry.path)?; }
+                if let Some(entry) = &mcp.codex       { remove_mcp_entry_toml(&entry.path)?; }
+            } else {
+                if let Some(entry) = &mcp.claude_code { println!("would remove MCP entry in: {}", entry.path.display()); }
+                if let Some(entry) = &mcp.codex       { println!("would remove MCP entry in: {}", entry.path.display()); }
+            }
         }
-        fs::remove_file(&manifest_path)?;
+        if opts.dry_run {
+            println!("would remove manifest: {}", manifest_path.display());
+        } else {
+            fs::remove_file(&manifest_path)?;
+        }
     }
     Ok(())
 }

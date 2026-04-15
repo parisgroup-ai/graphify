@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use include_dir::{include_dir, Dir};
 
@@ -69,10 +69,6 @@ pub fn execute(plan: &PlanResult, dry_run: bool) -> std::io::Result<Vec<Manifest
         }
     }
     Ok(manifest_files)
-}
-
-pub fn render_graphify_mcp_binary_path(template: &str, binary: &Path) -> String {
-    template.replace("{{GRAPHIFY_MCP_BINARY}}", &binary.display().to_string())
 }
 
 #[cfg(test)]
@@ -184,14 +180,5 @@ mod tests {
         let manifest = execute(&plan, true).unwrap();
         assert_eq!(manifest.len(), 1); // manifest shape reported
         assert!(!dest.exists());       // but nothing written
-    }
-
-    #[test]
-    fn binary_path_template_replacement() {
-        let rendered = render_graphify_mcp_binary_path(
-            r#"{"command":"{{GRAPHIFY_MCP_BINARY}}"}"#,
-            Path::new("/opt/bin/graphify-mcp"),
-        );
-        assert_eq!(rendered, r#"{"command":"/opt/bin/graphify-mcp"}"#);
     }
 }

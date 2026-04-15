@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+// TODO(feat-018-follow-up): wire min_graphify_version check into run_install
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Frontmatter {
     pub name: String,
@@ -18,6 +20,7 @@ pub struct Frontmatter {
     pub extra: BTreeMap<String, serde_yaml::Value>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum FrontmatterError {
     #[error("missing frontmatter delimiters (expected `---` at top of file)")]
@@ -28,6 +31,8 @@ pub enum FrontmatterError {
     InvalidYaml(#[from] serde_yaml::Error),
 }
 
+// TODO(feat-018-follow-up): wire min_graphify_version check into run_install
+#[allow(dead_code)]
 pub fn parse(content: &str) -> Result<(Frontmatter, String), FrontmatterError> {
     let mut lines = content.lines();
     let first = lines.next().ok_or(FrontmatterError::Missing)?;
