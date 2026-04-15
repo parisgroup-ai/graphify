@@ -403,34 +403,67 @@ Fails the build if architectural constraints are violated.
 
 ## AI Integrations
 
-Graphify ships ready-to-install integrations for Claude Code and Codex.
+Graphify ships ready-to-install integrations for Claude Code and Codex: 5 slash commands, 3 skills, 2 agents, and the MCP server, all registered in one command.
 
-### Install
+### Solo install
 
 ```bash
 graphify install-integrations
 ```
 
-Auto-detects `~/.claude/` and `~/.agents/skills/`. Use `--claude-code` / `--codex` to target explicitly, `--project-local` to install into the current repo's `.claude/`, `--skip-mcp` to opt out of MCP registration, `--dry-run` to preview, `--uninstall` to reverse.
+Auto-detects `~/.claude/` and `~/.agents/skills/`. Then restart the client and run `/gf-setup` from inside it to verify and finish onboarding.
+
+### Team install (shared repo)
+
+Commit the `.claude/` directory so every teammate gets the skills on `git clone`:
+
+```bash
+# Maintainer, once
+graphify install-integrations --project-local
+git add .claude/ .mcp.json
+git commit -m "chore: install graphify AI integrations"
+
+# Teammates — inside Claude Code after pulling
+/gf-setup
+```
+
+The `/gf-setup` slash command is the single entry point for install, upgrade, and diagnostics. It drives the AI through 6 checks: binary on PATH, `graphify.toml` present, artifacts installed, MCP registered, reload notice, and a compact status report.
+
+Full team flow (patterns, CI, troubleshooting): [`docs/01-Getting-Started/AI Integrations.md`](docs/01-Getting-Started/AI%20Integrations.md).
+
+### Flags
+
+| Flag | Purpose |
+|---|---|
+| `--claude-code` / `--codex` | Target one client explicitly |
+| `--project-local` | Install Claude Code artifacts to `./.claude/` (Codex ignores this flag) |
+| `--skip-mcp` | Don't touch the client's MCP config |
+| `--dry-run` | Preview changes |
+| `--force` | Overwrite edited files |
+| `--uninstall` | Reverse manifest-tracked changes |
 
 ### What gets installed
 
-| Kind | Name | Invocation |
+| Kind | Name | Purpose |
 |---|---|---|
 | Agent | `graphify-analyst` | Polyvalent analyst (MCP-preferred) |
-| Agent | `graphify-ci-guardian` | Deterministic CI gate |
+| Agent | `graphify-ci-guardian` | Deterministic CI gate (CLI-only) |
 | Skill | `graphify-onboarding` | Architecture tour |
 | Skill | `graphify-refactor-plan` | Phased refactor plan |
 | Skill | `graphify-drift-check` | CI drift gate |
+| Command | `/gf-setup` | Self-configure + diagnose + upgrade |
 | Command | `/gf-analyze` | Full-pipeline summary |
 | Command | `/gf-onboard` | Invoke onboarding skill |
 | Command | `/gf-refactor-plan` | Invoke refactor plan skill |
 | Command | `/gf-drift-check` | Invoke drift check skill |
 
+> [!note]
+> Slash commands and skills hot-reload, but the **MCP server loads only at client boot** — restart Claude Code / Codex after running `install-integrations` for the first time.
+
 ### CI usage (drift gate)
 
 ```yaml
-- run: graphify install-integrations --claude-code
+- run: graphify install-integrations --claude-code --skip-mcp
 - run: graphify run --config graphify.toml
 - run: graphify check --config graphify.toml --json
 - run: graphify diff --before report/baseline/analysis.json --after report/<project>/analysis.json

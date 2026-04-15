@@ -233,7 +233,7 @@ Source in `integrations/`; installed via `graphify install-integrations`.
 
 - Agents: `graphify-analyst` (Opus, MCP-preferred), `graphify-ci-guardian` (Haiku, CLI-only)
 - Skills: `graphify-onboarding`, `graphify-refactor-plan`, `graphify-drift-check`
-- Commands: `/gf-analyze`, `/gf-onboard`, `/gf-refactor-plan`, `/gf-drift-check`
+- Commands: `/gf-setup`, `/gf-analyze`, `/gf-onboard`, `/gf-refactor-plan`, `/gf-drift-check`
 - Spec: `docs/superpowers/specs/2026-04-15-feat-018-ai-integrations-design.md`
 
 ## Task tracking
