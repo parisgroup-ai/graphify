@@ -470,6 +470,32 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Install Graphify AI-assistant integrations (agents, skills, commands, MCP)
+    /// into ~/.claude and ~/.agents (or project-local) directories.
+    InstallIntegrations {
+        /// Install Claude Code artifacts (auto-detected if ~/.claude exists)
+        #[arg(long)]
+        claude_code: bool,
+        /// Install Codex artifacts (auto-detected if ~/.agents/skills exists)
+        #[arg(long)]
+        codex: bool,
+        /// Install to ./.claude (Codex artifacts always global)
+        #[arg(long)]
+        project_local: bool,
+        /// Skip MCP server registration in client configs
+        #[arg(long)]
+        skip_mcp: bool,
+        /// Show what would be done without writing
+        #[arg(long)]
+        dry_run: bool,
+        /// Overwrite existing files with different content
+        #[arg(long)]
+        force: bool,
+        /// Remove manifest-tracked artifacts and MCP entries
+        #[arg(long)]
+        uninstall: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -913,6 +939,26 @@ fn main() {
 
         Commands::PrSummary { dir } => {
             run_pr_summary(&dir);
+        }
+
+        Commands::InstallIntegrations {
+            claude_code,
+            codex,
+            project_local,
+            skip_mcp,
+            dry_run,
+            force,
+            uninstall,
+        } => {
+            cmd_install_integrations(
+                claude_code,
+                codex,
+                project_local,
+                skip_mcp,
+                dry_run,
+                force,
+                uninstall,
+            );
         }
     }
 }
@@ -3157,6 +3203,112 @@ fn load_optional_json<T: for<'de> serde::Deserialize<'de>>(
             eprintln!("warning: failed to read {}, skipping section: {}", label, e);
             None
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// install-integrations command
+// ---------------------------------------------------------------------------
+
+fn cmd_install_integrations(
+    claude_code: bool,
+    codex: bool,
+    project_local: bool,
+    skip_mcp: bool,
+    dry_run: bool,
+    force: bool,
+    uninstall: bool,
+) {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            eprintln!("graphify install-integrations: cannot determine $HOME");
+            std::process::exit(1);
+        }
+    };
+    let project_root = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("graphify install-integrations: cannot determine working directory: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Auto-detect when no explicit flags
+    let mut claude = claude_code;
+    let mut cdx = codex;
+    if !claude && !cdx {
+        claude = home.join(".claude").exists();
+        cdx = home.join(".agents/skills").exists();
+        if !claude && !cdx {
+            eprintln!(
+                "graphify install-integrations: no supported AI client detected \
+                 (expected ~/.claude/ or ~/.agents/skills/). \
+                 Create the directory or pass --claude-code / --codex explicitly."
+            );
+            std::process::exit(1);
+        }
+    }
+
+    let graphify_mcp_binary = which::which("graphify-mcp").unwrap_or_else(|_| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("graphify-mcp")))
+            .unwrap_or_else(|| PathBuf::from("graphify-mcp"))
+    });
+
+    let opts = install::InstallOptions {
+        claude_code: claude,
+        codex: cdx,
+        project_local,
+        skip_mcp,
+        dry_run,
+        force,
+        home,
+        project_root,
+        graphify_version: env!("CARGO_PKG_VERSION").to_string(),
+        graphify_mcp_binary,
+    };
+
+    if uninstall {
+        match install::run_uninstall(&opts) {
+            Ok(()) => println!("Uninstall complete."),
+            Err(e) => {
+                eprintln!("graphify install-integrations: uninstall failed: {e}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    let report = match install::run_install(&opts) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("graphify install-integrations: install failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    println!(
+        "Installed {} files ({} skipped as identical, {} conflicts).",
+        report.manifest.files.len(),
+        report.skipped_identical.len(),
+        report.conflicts.len(),
+    );
+    if !report.conflicts.is_empty() {
+        eprintln!("Conflicts (use --force to overwrite):");
+        for p in &report.conflicts {
+            eprintln!("  {}", p.display());
+        }
+    }
+    if !report.mcp_changes.is_empty() {
+        println!("MCP registered in:");
+        for p in &report.mcp_changes {
+            println!("  {}", p.display());
+        }
+    }
+    if dry_run {
+        println!("(dry-run: nothing was written)");
     }
 }
 
