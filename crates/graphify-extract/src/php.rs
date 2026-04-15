@@ -249,7 +249,68 @@ fn extract_symbol(
 
     result.nodes.push(Node::symbol(
         &symbol_id,
-        kind,
+        kind.clone(),
+        path,
+        Language::Php,
+        line,
+        true,
+    ));
+    result
+        .edges
+        .push((module_name.to_owned(), symbol_id.clone(), Edge::defines(line)));
+
+    // Walk body: method declarations emit Method nodes (only for class/trait/enum).
+    // Functions don't contain methods, so short-circuit for NodeKind::Function.
+    if matches!(kind, NodeKind::Function) {
+        return;
+    }
+
+    if let Some(body) = node.child_by_field_name("body") {
+        extract_methods_in_body(&body, source, path, module_name, name, result);
+    }
+}
+
+/// Walk a class/trait/enum body and emit `Method` nodes for each
+/// `method_declaration`. Nested types (inner class) are not expected in PHP;
+/// do not recurse past method bodies.
+fn extract_methods_in_body(
+    body: &tree_sitter::Node,
+    source: &[u8],
+    path: &Path,
+    module_name: &str,
+    owner_name: &str,
+    result: &mut ExtractionResult,
+) {
+    let mut cursor = body.walk();
+    for child in body.children(&mut cursor) {
+        if child.kind() == "method_declaration" {
+            emit_method(&child, source, path, module_name, owner_name, result);
+        }
+    }
+}
+
+fn emit_method(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &Path,
+    module_name: &str,
+    owner_name: &str,
+    result: &mut ExtractionResult,
+) {
+    let line = node.start_position().row + 1;
+    let Some(name_node) = node.child_by_field_name("name") else {
+        return;
+    };
+    let method_name = name_node.utf8_text(source).unwrap_or("");
+    if method_name.is_empty() {
+        return;
+    }
+
+    let symbol_id = format!("{}.{}.{}", module_name, owner_name, method_name);
+
+    result.nodes.push(Node::symbol(
+        &symbol_id,
+        NodeKind::Method,
         path,
         Language::Php,
         line,
@@ -459,5 +520,50 @@ mod tests {
             .expect("Defines edge");
         assert_eq!(def.2.confidence, 1.0);
         assert_eq!(def.2.confidence_kind, ConfidenceKind::Extracted);
+    }
+
+    #[test]
+    fn method_declaration_inside_class_creates_method_node() {
+        use graphify_core::types::{EdgeKind, NodeKind};
+        let r = extract(
+            r#"<?php
+class Llm {
+    public function call(): string { return "x"; }
+}
+"#,
+        );
+
+        let method = r
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Method)
+            .expect("Method node");
+        assert_eq!(method.id, "App.Main.Llm.call");
+
+        let defines: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Defines && e.1 == "App.Main.Llm.call")
+            .collect();
+        assert_eq!(defines.len(), 1);
+        assert_eq!(defines[0].0, "App.Main", "Defines edge must come from module");
+    }
+
+    #[test]
+    fn method_inside_trait_creates_method_node() {
+        use graphify_core::types::NodeKind;
+        let r = extract(
+            r#"<?php
+trait Loggable {
+    public function log(string $m): void {}
+}
+"#,
+        );
+        let method = r
+            .nodes
+            .iter()
+            .find(|n| n.kind == NodeKind::Method && n.id == "App.Main.Loggable.log")
+            .expect("Method node inside trait");
+        assert_eq!(method.language, Language::Php);
     }
 }
