@@ -1,82 +1,28 @@
-# Session Brief — 2026-04-15
+# Session Brief — Next Session (post-2026-04-15)
 
-**Mode:** Autonomous LLM execution
-**Last session:** Session 10 — shipped FEAT-017 (hotspot classification) and FEAT-018 (AI integrations); bumped workspace to `0.7.0` in commit `c67fdd1`. Release tag never pushed — CI release did not fire.
+**Last session:** 2026-04-15 — shipped v0.7.0 tag (CI release green), fixed BUG-014 (trend-snapshot error message), and un-gated CI clippy by resolving 3 pre-existing Rust 1.94 lints from FEAT-017/018. Discovered `cargo fmt --all -- --check` is still red on `main` from pre-existing FEAT-018 fmt violations — captured as CHORE-001.
 
-## Entry State
+## Current State
 
-- `main` @ `c67fdd1 chore(release): prepare v0.7.0` (pushed, `origin/main..HEAD` is empty)
-- Release binary prints `graphify 0.7.0`; remote tags cap at `v0.6.0`
-- Working tree: only `.obsidian/workspace.json` (noise) + stale `target/` deletions
-- Open tasks in `tn`: **BUG-014** only (low-pri, Option A recommended — clearer error for trend-format snapshots passed to `diff`)
-- `tn sprint summary` is stale vs `sprint.md` (FEAT-015/017/018 need marking done)
+- Branch: `main` @ `b1ce4d9 fix(clippy): resolve pre-existing Rust 1.94 lints blocking CI on main`
+- Release: `v0.7.0` tagged, 4 binaries on GitHub Release (macOS Intel/ARM, Linux x86/ARM MUSL)
+- CI: clippy green; **fmt still red** (CHORE-001)
+- Tests: 493 workspace tests passing (cargo test --workspace)
+- Clippy: clean on CI's exact cmd (`cargo clippy --workspace -- -D warnings`); `--all-targets` still has 3 test-only lints left for future cleanup
 
-## Work Graph
+## Open Items (tasks)
 
-```mermaid
-graph TD
-    START[Session Start<br/>main @ c67fdd1, v0.7.0 untagged] --> GATE1{{GATE-1: push v0.7.0 tag<br/>risk: medium, irreversible}}
-    GATE1 -->|approved| WAIT1[WAIT-1: CI release<br/>~5-10 min, 4 targets]
+- **CHORE-001** — Apply `cargo fmt --all` to fix pre-existing rustfmt violations blocking CI (normal priority, ~10 min mechanical)
 
-    START --> LANE_A[Lane A: during CI wait]
-    LANE_A --> TA1[TA1: fix BUG-014<br/>trend-snapshot error message]
-    TA1 --> TA2[TA2: cargo test --workspace]
+## Suggested Next Steps
 
-    START --> LANE_B[Lane B: coordination]
-    LANE_B --> TB1[TB1: sync tn state with sprint.md]
-
-    WAIT1 --> VERIFY[Verify release assets on GitHub]
-    TA2 --> GATE2{{GATE-2: push BUG-014 fix<br/>risk: low}}
-    TB1 --> GATE2
-    GATE2 -->|approved| DONE[Session close]
-    VERIFY --> DONE
-```
-
-## Approval Gates (STOP and ask user)
-
-1. **GATE-1** — Push `v0.7.0` tag to trigger CI release
-   - Risk: medium (builds + uploads 4 binaries; irreversible once CI runs)
-   - Status: ready (commit already on `main`, binary confirms `0.7.0`)
-   - Command:
-     ```bash
-     git tag v0.7.0 c67fdd1 && git push origin v0.7.0
-     ```
-
-2. **GATE-2** — Push BUG-014 fix + tn housekeeping commit(s)
-   - Risk: low (isolated error-path change + test; tn JSON only)
-   - Status: blocked on Lane A + Lane B
-   - Command: `git push origin main`
-
-## External Waits
-
-- **WAIT-1** — GitHub Actions `Release` workflow
-  - Trigger: `v0.7.0` tag push
-  - Est. duration: 5–10 min
-  - Readiness signal: green check on `Release` workflow for tag `v0.7.0`; 4 binary assets attached to the GitHub Release
-
-## Parallel Lanes (run during WAIT-1)
-
-### Lane A — BUG-014 fix
-
-- **TA1** — Implement Option A from tasknote
-  - Mode: `mechanical` | Context: `S` (2–3 files)
-  - Team dispatch: **direct** — spec is clear, scope small
-  - Pre-reads: `docs/TaskNotes/Tasks/BUG-014-*.md`, `crates/graphify-core/src/diff.rs`, `crates/graphify-core/src/history.rs`
-  - Done when: helper `is_trend_snapshot` exists; `cmd_diff` branches on it; `--help` mentions requirement; CLI test asserts the new message; workspace tests green
-- **TA2** — `cargo test --workspace` regression check (expect ≥442 tests passing, any new BUG-014 tests added)
-
-### Lane B — Housekeeping
-
-- **TB1** — Sync `tn` state with `sprint.md`
-  - Mode: `coordination` | Context: `S`
-  - Steps: mark FEAT-015, FEAT-017, FEAT-018 as `done` in `tn` (verb TBD — consult `tn --help` or `tn update --help` at runtime)
-  - Done when: `tn sprint summary` matches `sprint.md` Done section
-
-## Sequential Chains
-
-- `GATE-1 → WAIT-1 → VERIFY` — release path (blocks nothing else; runs in background)
-- `TA1 → TA2 → GATE-2` — BUG-014 ships only after local tests pass
-- `TB1 → GATE-2` — housekeeping batched into same push as BUG-014 fix
+1. **CHORE-001** — run `cargo fmt --all`, verify tests+clippy, commit, push. Will flip main CI green.
+2. **Post-release hygiene** — add a `.gitignore` rule for `tests/fixtures/contract_drift/monorepo/report/` (test-run output currently untracked).
+3. **Pre-existing `--all-targets` clippy lints** (low priority, 3 lints in test targets only — not CI-gating):
+   - `crates/graphify-cli/tests/install_integrations.rs:61` — `unused_mut`
+   - `crates/graphify-mcp/tests/integration.rs:447-448` — `if_let_iter_ok`
+   - `crates/graphify-extract/src/python.rs:547` — `iter().any()` vs `contains()`
+4. Untracked exploratory docs (`docs/00-Index/`, `docs/01-Getting-Started/`, `docs/02-Architecture/`, `docs/03-API/`, `docs/06-ADRs/`, `docs/08-Glossary/`) and `.tasknotes.toml` appear to be in-progress work — don't commit until confirmed with user.
 
 ## Decisions Made (don't re-debate)
 
@@ -84,49 +30,41 @@ graph TD
 - Rust over Python; petgraph; Louvain + Label Propagation; tree-sitter Parser per call
 - `is_package` boolean, workspace alias preservation, singleton merging
 - QueryEngine in graphify-core, re-extract on the fly
-- CI strict clippy `-D warnings`
 - MCP separate binary with rmcp, Arc-wrapped QueryEngine
 - Confidence: resolver tuple; bare calls 0.7/Inferred; non-local downgrade 0.5/Ambiguous
 - Cache on by default, `.graphify-cache.json` per project
-- Louvain tie-breaking deterministic
-- Integration test harness builds graphify binary on demand (OnceLock guard)
-- Contract drift uses Drizzle schema + TS interface/type as paired sources
-- Reports use `is_empty()` (clippy-clean)
 - FEAT-015 surface: CLI-only `graphify pr-summary <DIR>`
 - `graphify check` writes unified `check-report.json`; `CheckReport` types in public `graphify-report::check_report`
 - CLI error-exit convention: `exit(1)` everywhere
 - Content philosophy: delta-first; drift-report.json primary; check-report.json appended only when errors exist
-- Exhaustive `match` (no `_ =>`) on `ContractViolation` in `summarize_contract_violation`
 
-*(added this session)*
-- BUG-014 fix: **Option A** (clearer error message + `is_trend_snapshot` helper) — not Option B (full-schema history, disk cost) nor Option C (auto-reextract, infeasible without graph)
+*(added 2026-04-15)*
+- BUG-014 fix: **Option A** (`is_trend_snapshot_json` discriminator + explanatory error). Option B (upgrade history to full analysis schema) rejected due to ~4.5× disk cost.
+- Cost-routing for error disambiguation: run discriminator only on the serde-failure path. Keeps the happy path at one read, one parse.
+- **CI uses strict `cargo clippy --workspace -- -D warnings`** (no `--all-targets`) — so test-target lints don't gate CI. Lib+bin lints do.
+- **CI ALSO uses `cargo fmt --all -- --check`** — and has been red on fmt since FEAT-018 landed. Whoever lands code in the FEAT-017/018 stack should run `cargo fmt` locally before pushing.
+- `v0.7.0` tag pins to commit `c67fdd1` (the version-bump commit). Future tags: `git tag vX.Y.Z <commit>` explicitly, don't rely on `HEAD`.
 
-## Out of Scope
+## Out of Scope (for this next session unless lifted)
 
-- Any new FEAT beyond what's already Done
-- BUG-014 Option B (upgrade history to full analysis schema) — revisit only if cross-session drift becomes a common workflow
-- Companion GitHub Action / SARIF / PR auto-post (deferred per FEAT-015 spec §9)
-- Pre-existing clippy lints from Rust 1.94 (`manual_flatten`, `manual_contains`) in `graphify-mcp`/`graphify-extract` — separate cleanup
-
-## Context Budget Plan
-
-- **Start**: this brief + BUG-014 tasknote + `diff.rs` + `history.rs` ≈ 5–8k tok
-- **After GATE-1**: no `/clear` — CI runs in background; continue Lane A
-- **Mid-Lane A**: expect ~15–25% context used; no checkpoint needed
-- **Before GATE-2**: should still be under 40%; `/clear` unnecessary
+- New features beyond what's already Done — repo is feature-complete at v0.7.0
+- BUG-014 Option B (upgrade history format) — revisit only if cross-session drift becomes a common workflow
+- The untracked exploratory docs vault under `docs/00-Index/` etc. — user's in-progress work
+- `--all-targets` test-only clippy lints (3 spots) unless explicitly requested
 
 ## Re-Entry Hints (survive compaction)
 
-If context resets mid-session:
-1. Re-read `.claude/session-brief.md` (this file)
-2. `git log origin/main..HEAD --oneline` — see unpushed work
-3. `git tag --list 'v0.7*' --sort=-v:refname` — if `v0.7.0` exists, GATE-1 done; check GitHub Release assets
-4. `tn list --status in_progress` — any task mid-flight
-5. `cargo test --workspace` last status — if red, fix before GATE-2
-6. Resume from the first unchecked node in the work graph
+1. Re-read `.claude/session-brief.md` (this file) + `CLAUDE.md`
+2. `git log origin/main..HEAD --oneline` — see any unpushed work
+3. `git status --short` — look for modified `.obsidian/workspace.json` (noise) and new untracked (may be user's in-progress docs)
+4. `tn list --status open` — should show only CHORE-001 if no new work started
+5. `gh run list --workflow=ci.yml --limit 3` — is CI green yet?
 
 ## Team Dispatch Recommendations
 
-- **Lane A (BUG-014)**: direct solo — Option A spec is explicit; 1 helper + 1 branch + 1 test
-- **Lane B (tn sync)**: direct solo — pure CLI calls
-- **No subagent dispatch warranted.** Session should take ≤45 min LLM time including CI wait.
+- **CHORE-001**: direct solo — `cargo fmt --all` + verify + commit + push. ~10 min.
+
+## Context Budget Plan
+
+- **Start**: read this brief + CLAUDE.md + CHORE-001 tasknote ≈ 3k tok
+- **No `/clear` needed**: CHORE-001 is a single-shot mechanical task.

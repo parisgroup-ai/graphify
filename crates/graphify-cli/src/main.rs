@@ -1223,30 +1223,18 @@ fn load_snapshot(path: &Path) -> AnalysisSnapshot {
                     path.display()
                 );
                 eprintln!();
-                eprintln!(
-                    "History snapshots under `report/<project>/history/` are consumable only by"
-                );
-                eprintln!(
-                    "`graphify trend`. `graphify diff` requires a full `analysis.json`."
-                );
+                eprintln!("History snapshots under `report/<project>/history/` are consumable only by");
+                eprintln!("`graphify trend`. `graphify diff` requires a full `analysis.json`.");
                 eprintln!();
-                eprintln!(
-                    "To diff before/after a refactor, copy the current analysis as a baseline"
-                );
+                eprintln!("To diff before/after a refactor, copy the current analysis as a baseline");
                 eprintln!("before starting the refactor:");
                 eprintln!();
-                eprintln!(
-                    "    cp report/<project>/analysis.json report/<project>/baseline.json"
-                );
+                eprintln!("    cp report/<project>/analysis.json report/<project>/baseline.json");
                 eprintln!();
                 eprintln!("Then, after the refactor:");
                 eprintln!();
-                eprintln!(
-                    "    graphify diff --before report/<project>/baseline.json \\"
-                );
-                eprintln!(
-                    "                  --after  report/<project>/analysis.json"
-                );
+                eprintln!("    graphify diff --before report/<project>/baseline.json \\");
+                eprintln!("                  --after  report/<project>/analysis.json");
             } else {
                 eprintln!("Invalid analysis JSON {:?}: {e}", path);
             }

@@ -185,7 +185,8 @@ For each [[project]]:
 - `graphify check` writes `<project_out>/check-report.json` unconditionally (unified: project rules + contract violations) — introduced by FEAT-015 so `pr-summary` can consume it
 - `graphify pr-summary <DIR>` — pure renderer over `analysis.json` (required) + `drift-report.json` / `check-report.json` (optional); Markdown to stdout, warnings to stderr, exit 1 on required-input errors, exit 0 otherwise (gating is `graphify check`'s job)
 - CLI error-exit convention: `exit(1)` for all error paths (not exit 2) — matches `cmd_diff`/`cmd_trend` pattern; keeps graphify CLI uniform
-- Tests: 442 unit + integration tests (`cargo test --workspace`)
+- `graphify diff` error routing: on `AnalysisSnapshot` deserialize failure, `graphify-cli::main::load_snapshot` calls `graphify_core::history::is_trend_snapshot_json` (discriminator: requires `captured_at` + `project` at root) to emit an explanatory message with the baseline-copy recipe instead of the raw serde error — pattern: run discriminator only on the error path, so happy path stays at one read + one parse
+- Tests: 493 unit + integration tests (`cargo test --workspace`)
 
 ## Build & Release
 
@@ -193,6 +194,12 @@ For each [[project]]:
 - CI: GitHub Actions on tag push (`v*`), builds 4 targets (macOS Intel/ARM, Linux x86/ARM)
 - Static binaries for Linux (MUSL), universal binaries for macOS
 - Release binary ~3.5MB
+- **CI gates** (`.github/workflows/ci.yml`, strict):
+  - `cargo fmt --all -- --check` — run `cargo fmt --all` locally before every push
+  - `cargo clippy --workspace -- -D warnings` — note: no `--all-targets`, so test-only lints are not gated (lib+bin only)
+  - `cargo test --workspace`
+- **Release workflow** (`.github/workflows/release.yml`) triggers only on `v*` tag push; builds binaries but does NOT run clippy/fmt/test — use CI (ci.yml) to catch those before tagging
+- When tagging a release: `git tag vX.Y.Z <commit>` explicitly (not `HEAD`) so the tag pins to the intended version-bump commit even if later commits land
 
 ### Version bump
 
