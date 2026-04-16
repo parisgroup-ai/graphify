@@ -1594,6 +1594,11 @@ fn run_extract(
 
     // Resolve edges and add them.
     for (src_id, raw_target, mut edge) in all_raw_edges {
+        if edge.kind == graphify_core::types::EdgeKind::Defines {
+            graph.add_edge(&src_id, &raw_target, edge);
+            continue;
+        }
+
         let is_package = package_modules.contains(src_id.as_str());
         let (resolved_target, is_local, resolver_confidence) =
             resolver.resolve(&raw_target, &src_id, is_package);
