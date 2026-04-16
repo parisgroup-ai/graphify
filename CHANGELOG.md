@@ -2,6 +2,12 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## [0.8.2] - 2026-04-16
+
+### Fixed
+- fix(extract): resolve TypeScript path aliases from the nearest `tsconfig.json`, including layouts where the configured repo points at `src/`
+- fix(extract): model Go modules as package-scoped nodes so local import resolution and graph metrics no longer fragment across file-scoped IDs
+
 ## [0.8.1] - 2026-04-15
 
 ### Fixed

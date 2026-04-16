@@ -495,7 +495,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-cli"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -520,7 +520,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-core"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "petgraph",
  "rand",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-extract"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "graphify-core",
  "rayon",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-integration-tests"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "graphify-core",
  "graphify-report",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-mcp"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "clap",
  "graphify-core",
@@ -575,7 +575,7 @@ dependencies = [
 
 [[package]]
 name = "graphify-report"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "csv",
  "graphify-core",
