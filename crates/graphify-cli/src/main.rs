@@ -154,7 +154,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Generate a graphify.toml template in the current directory
+    #[command(
+        about = "Generate a graphify.toml template in the current directory",
+        long_about = "Generate a graphify.toml template in the current directory.\n\nThis command only creates graphify.toml. It does not install AI assistant integrations such as slash commands, skills, agents, or MCP registration.",
+        after_help = "Next steps:\n  graphify install-integrations --project-local\n  graphify run"
+    )]
     Init,
 
     /// Extract dependency graph from source files (produces graph.json)
@@ -1009,6 +1013,12 @@ local_prefix = "app"
     }
     std::fs::write(dest, template).expect("write graphify.toml");
     println!("Created graphify.toml — edit it to point at your repo.");
+    println!();
+    println!("Next steps:");
+    println!("  Install AI assistant integrations (slash commands, agents, skills, MCP):");
+    println!("    graphify install-integrations --project-local");
+    println!("  Generate your first analysis:");
+    println!("    graphify run");
 }
 
 // ---------------------------------------------------------------------------

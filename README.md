@@ -21,9 +21,10 @@ cargo install --path crates/graphify-cli
 ## Quick Start
 
 ```bash
-graphify init          # generate graphify.toml
+graphify init                                 # generate graphify.toml only
+graphify install-integrations --project-local # install slash commands, skills, agents, MCP config
 # edit graphify.toml to point at your project(s)
-graphify run           # extract → analyze → report
+graphify run                                  # extract → analyze → report
 ```
 
 ## Configuration
@@ -77,7 +78,7 @@ Policy selectors support:
 
 | Command | Description |
 |---------|-------------|
-| `graphify init` | Generate a `graphify.toml` template |
+| `graphify init` | Generate a `graphify.toml` template only (integrations are separate) |
 | `graphify extract` | Extract dependency graph (produces `graph.json`) |
 | `graphify analyze` | Extract + compute metrics (produces `analysis.json`, CSV) |
 | `graphify report` | Full pipeline with all outputs |
@@ -411,6 +412,8 @@ Graphify ships ready-to-install integrations for Claude Code and Codex: 5 slash 
 graphify install-integrations
 ```
 
+Run this after `graphify init` if you want Graphify's slash commands, skills, agents, and MCP registration. `init` only creates `graphify.toml`.
+
 Auto-detects `~/.claude/` and `~/.agents/skills/`. Then restart the client and run `/gf-setup` from inside it to verify and finish onboarding.
 
 ### Team install (shared repo)
@@ -506,6 +509,8 @@ If `graphify.toml` does not exist yet:
 
 ```bash
 graphify init
+# `init` only creates graphify.toml
+graphify install-integrations --project-local
 # Then edit graphify.toml with the correct project settings
 graphify run --config graphify.toml
 ```
