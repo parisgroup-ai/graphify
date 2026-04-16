@@ -109,6 +109,10 @@ pub fn path_to_module(base: &Path, file: &Path, local_prefix: &str) -> String {
     // Make the path relative to base.
     let rel = file.strip_prefix(base).unwrap_or(file);
 
+    if rel.extension().and_then(|s| s.to_str()) == Some("go") {
+        return path_to_go_package(base, file, local_prefix);
+    }
+
     // Collect path components (excluding the filename itself for now).
     let mut parts: Vec<String> = rel
         .parent()
@@ -140,6 +144,38 @@ pub fn path_to_module(base: &Path, file: &Path, local_prefix: &str) -> String {
         module
     } else {
         format!("{}.{}", local_prefix, module)
+    }
+}
+
+fn path_to_go_package(base: &Path, file: &Path, local_prefix: &str) -> String {
+    let rel = file.strip_prefix(base).unwrap_or(file);
+    let parts: Vec<String> = rel
+        .parent()
+        .map(|p| {
+            p.components()
+                .filter_map(|c| c.as_os_str().to_str().map(|s| s.to_owned()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let package = if parts.is_empty() {
+        if local_prefix.is_empty() {
+            rel.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_owned()
+        } else {
+            local_prefix.to_owned()
+        }
+    } else {
+        parts.join(".")
+    };
+
+    if local_prefix.is_empty() || package.starts_with(local_prefix) {
+        package
+    } else {
+        format!("{}.{}", local_prefix, package)
     }
 }
 
@@ -672,14 +708,14 @@ mod tests {
     fn path_to_module_go_regular_file() {
         let base = Path::new("/repo");
         let file = Path::new("/repo/cmd/server/main.go");
-        assert_eq!(path_to_module(base, file, ""), "cmd.server.main");
+        assert_eq!(path_to_module(base, file, ""), "cmd.server");
     }
 
     #[test]
     fn path_to_module_go_with_prefix() {
         let base = Path::new("/repo");
         let file = Path::new("/repo/pkg/handler.go");
-        assert_eq!(path_to_module(base, file, "pkg"), "pkg.handler");
+        assert_eq!(path_to_module(base, file, "daemon"), "daemon.pkg");
     }
 
     #[test]
@@ -701,7 +737,7 @@ mod tests {
 
         let files = discover_files(tmp.path(), &[Language::Go], "", &[]);
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].module_name, "pkg.handler");
+        assert_eq!(files[0].module_name, "pkg");
         assert_eq!(files[0].language, Language::Go);
     }
 
@@ -717,7 +753,7 @@ mod tests {
 
         let files = discover_files(tmp.path(), &[Language::Go], "", &[]);
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].module_name, "cmd.main");
+        assert_eq!(files[0].module_name, "cmd");
     }
 
     // -----------------------------------------------------------------------

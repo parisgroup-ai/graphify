@@ -1,5 +1,12 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+
+#[derive(Clone, Debug)]
+struct TsAliasContext {
+    alias_pattern: String,
+    target_pattern: String,
+    base_dir: PathBuf,
+}
 
 // ---------------------------------------------------------------------------
 // ModuleResolver
@@ -16,9 +23,14 @@ use std::path::{Path, PathBuf};
 pub struct ModuleResolver {
     /// All module names that are part of the local project, keyed by name.
     known_modules: HashMap<String, String>,
+    /// Optional path-based lookup keys for discovered modules.
+    module_lookup_paths: HashMap<PathBuf, String>,
     /// TypeScript tsconfig path aliases: `(alias_pattern, target_pattern)`.
     /// Example: `("@/*", "src/*")`.
     ts_aliases: Vec<(String, String)>,
+    /// Per-source-module TypeScript alias contexts loaded from the nearest
+    /// tsconfig file for that module.
+    ts_aliases_by_module: HashMap<String, Vec<TsAliasContext>>,
     /// Go module path from `go.mod` (e.g. `github.com/user/repo`).
     go_module_path: Option<String>,
     /// PSR-4 autoload mappings from `composer.json`: `(namespace_prefix, dir_prefix)`.
@@ -38,10 +50,12 @@ impl ModuleResolver {
     pub fn new(root: &Path) -> Self {
         Self {
             known_modules: HashMap::new(),
+            module_lookup_paths: HashMap::new(),
             ts_aliases: Vec::new(),
+            ts_aliases_by_module: HashMap::new(),
             go_module_path: None,
             psr4_mappings: Vec::new(),
-            root: root.to_path_buf(),
+            root: normalize_path(root),
         }
     }
 
@@ -49,6 +63,23 @@ impl ModuleResolver {
     pub fn register_module(&mut self, module_name: &str) {
         self.known_modules
             .insert(module_name.to_owned(), module_name.to_owned());
+    }
+
+    /// Register a module together with its discovered source path so later
+    /// path-based resolution can canonicalize back to the module ID.
+    pub fn register_module_path(&mut self, module_name: &str, file_path: &Path, is_package: bool) {
+        self.register_module(module_name);
+
+        let lookup_path = path_without_extension(file_path);
+        self.module_lookup_paths
+            .insert(normalize_path(&lookup_path), module_name.to_owned());
+
+        if is_package {
+            if let Some(parent) = file_path.parent() {
+                self.module_lookup_paths
+                    .insert(normalize_path(parent), module_name.to_owned());
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -73,68 +104,34 @@ impl ModuleResolver {
     /// }
     /// ```
     pub fn load_tsconfig(&mut self, tsconfig_path: &Path) {
-        let text = match std::fs::read_to_string(tsconfig_path) {
-            Ok(t) => t,
-            Err(_) => return,
-        };
-
-        // Find "paths" section — locate the key then capture between { }.
-        let paths_start = match find_paths_section(&text) {
-            Some(pos) => pos,
-            None => return,
-        };
-
-        // Extract the brace-delimited block that follows "paths": {…}.
-        let slice = &text[paths_start..];
-        let block = match extract_brace_block(slice) {
-            Some(b) => b,
-            None => return,
-        };
-
-        // Parse key-value pairs inside the block.
-        // Each pair looks like:  "alias": ["target", ...]
-        let mut pos = 0;
-        while pos < block.len() {
-            // Find the next quoted key.
-            let key = match extract_quoted_string(&block[pos..]) {
-                Some((k, end)) => {
-                    pos += end;
-                    k
-                }
-                None => break,
-            };
-
-            // Skip past ':' then whitespace.
-            if let Some(colon) = block[pos..].find(':') {
-                pos += colon + 1;
-            } else {
-                break;
-            }
-
-            // Skip optional whitespace.
-            while pos < block.len() && block.as_bytes()[pos].is_ascii_whitespace() {
-                pos += 1;
-            }
-
-            // Expect '[' for the array of targets.
-            if pos >= block.len() || block.as_bytes()[pos] != b'[' {
-                continue;
-            }
-            pos += 1; // skip '['
-
-            // Extract the first quoted string inside the array.
-            let target = match extract_quoted_string(&block[pos..]) {
-                Some((t, end)) => {
-                    pos += end;
-                    t
-                }
-                None => continue,
-            };
-
-            if !key.is_empty() && !target.is_empty() {
-                self.ts_aliases.push((key, target));
-            }
+        for (key, target) in parse_tsconfig_paths(tsconfig_path) {
+            self.ts_aliases.push((key, target));
         }
+    }
+
+    /// Load a tsconfig alias set for a specific source module. The alias
+    /// targets remain path-based and are resolved relative to the tsconfig
+    /// directory during `resolve`.
+    pub fn load_tsconfig_for_module(&mut self, module_name: &str, tsconfig_path: &Path) {
+        let base_dir = tsconfig_path
+            .parent()
+            .map(normalize_path)
+            .unwrap_or_else(|| self.root.clone());
+        let aliases: Vec<_> = parse_tsconfig_paths(tsconfig_path)
+            .into_iter()
+            .map(|(alias_pattern, target_pattern)| TsAliasContext {
+                alias_pattern,
+                target_pattern,
+                base_dir: base_dir.clone(),
+            })
+            .collect();
+        if aliases.is_empty() {
+            return;
+        }
+        self.ts_aliases_by_module
+            .entry(module_name.to_owned())
+            .or_default()
+            .extend(aliases);
     }
 
     // -----------------------------------------------------------------------
@@ -215,7 +212,23 @@ impl ModuleResolver {
             return (resolved, is_local, 0.9);
         }
 
-        // 2. TypeScript path aliases (e.g. `@/lib/api`).
+        // 2. TypeScript path aliases loaded from the source module's nearest
+        // tsconfig (e.g. `@/lib/api`).
+        if let Some(contexts) = self.ts_aliases_by_module.get(from_module) {
+            for ctx in contexts {
+                if let Some(resolved) = self.apply_ts_alias_with_context(
+                    raw,
+                    &ctx.alias_pattern,
+                    &ctx.target_pattern,
+                    &ctx.base_dir,
+                ) {
+                    let is_local = self.known_modules.contains_key(&resolved);
+                    return (resolved, is_local, 0.85);
+                }
+            }
+        }
+
+        // 3. Global TypeScript path aliases (backward-compatible path-free mode).
         for (alias_pat, target_pat) in &self.ts_aliases {
             if let Some(resolved) = apply_ts_alias(raw, alias_pat, target_pat) {
                 let is_local = self.known_modules.contains_key(&resolved);
@@ -223,26 +236,29 @@ impl ModuleResolver {
             }
         }
 
-        // 3. TypeScript / generic relative imports (`./foo`, `../bar`).
+        // 4. TypeScript / generic relative imports (`./foo`, `../bar`).
         if raw.starts_with("./") || raw.starts_with("../") {
             let resolved = resolve_ts_relative(raw, from_module);
             let is_local = self.known_modules.contains_key(&resolved);
             return (resolved, is_local, 0.9);
         }
 
-        // 4. Go module-path imports (strip go.mod module prefix).
+        // 5. Go module-path imports (strip go.mod module prefix).
         if let Some(ref go_mod) = self.go_module_path {
             if let Some(rest) = raw.strip_prefix(go_mod.as_str()) {
                 let rest = rest.strip_prefix('/').unwrap_or(rest);
                 if !rest.is_empty() {
-                    let resolved = rest.replace('/', ".");
+                    let relative = rest.replace('/', ".");
+                    let resolved = self
+                        .canonicalize_known_module(&relative)
+                        .unwrap_or(relative);
                     let is_local = self.known_modules.contains_key(&resolved);
                     return (resolved, is_local, 0.9);
                 }
             }
         }
 
-        // 5. Rust `crate::`, `super::`, `self::` imports.
+        // 6. Rust `crate::`, `super::`, `self::` imports.
         if let Some(rest) = raw.strip_prefix("crate::") {
             let resolved = rest.replace("::", ".");
             let is_local = self.known_modules.contains_key(&resolved);
@@ -254,16 +270,67 @@ impl ModuleResolver {
             return (resolved, is_local, 0.9);
         }
 
-        // 6. PHP `use` targets (contain a backslash separator).
+        // 7. PHP `use` targets (contain a backslash separator).
         if raw.contains('\\') {
             let normalized = raw.trim_start_matches('\\').replace('\\', ".");
             let is_local = self.known_modules.contains_key(&normalized);
             return (normalized, is_local, 1.0);
         }
 
-        // 7. Direct module name — check against known modules.
+        // 8. Direct module name — check against known modules.
         let is_local = self.known_modules.contains_key(raw);
         (raw.to_owned(), is_local, 1.0)
+    }
+
+    fn apply_ts_alias_with_context(
+        &self,
+        raw: &str,
+        alias_pat: &str,
+        target_pat: &str,
+        base_dir: &Path,
+    ) -> Option<String> {
+        let resolved_path = match_alias_target(raw, alias_pat, target_pat)?;
+        let candidate = normalize_path(&base_dir.join(resolved_path));
+
+        if let Some(module) = self.lookup_module_by_path(&candidate) {
+            return Some(module);
+        }
+
+        if !candidate.starts_with(&self.root) {
+            return Some(raw.to_owned());
+        }
+
+        let relative = candidate.strip_prefix(&self.root).ok()?;
+        let clean = relative.to_string_lossy().replace('\\', "/");
+        Some(path_to_dot_notation(clean.trim_start_matches('/')))
+    }
+
+    fn lookup_module_by_path(&self, candidate: &Path) -> Option<String> {
+        let key = normalize_path(candidate);
+        if let Some(module) = self.module_lookup_paths.get(&key) {
+            return Some(module.clone());
+        }
+
+        let without_ext = normalize_path(&path_without_extension(&key));
+        self.module_lookup_paths.get(&without_ext).cloned()
+    }
+
+    fn canonicalize_known_module(&self, relative: &str) -> Option<String> {
+        if let Some(module) = self.known_modules.get(relative) {
+            return Some(module.clone());
+        }
+
+        let suffix = format!(".{relative}");
+        let mut matches = self
+            .known_modules
+            .keys()
+            .filter(|module| module.ends_with(&suffix))
+            .cloned();
+        let first = matches.next()?;
+        if matches.next().is_some() {
+            return None;
+        }
+        Some(first.to_owned())
     }
 }
 
@@ -339,12 +406,26 @@ fn resolve_python_relative(raw: &str, from_module: &str, is_package: bool) -> St
 /// preserved as the node identifier rather than producing a mangled dot-notation
 /// name.
 fn apply_ts_alias(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String> {
+    let resolved_path = match_alias_target(raw, alias_pat, target_pat)?;
+
+    // If the resolved path traverses outside the project, keep the original
+    // import string as the node identifier (BUG-007).
+    if resolved_path.contains("..") {
+        return Some(raw.to_owned());
+    }
+
+    // Strip leading "./" before converting to dot notation.
+    let clean = resolved_path.strip_prefix("./").unwrap_or(&resolved_path);
+    Some(path_to_dot_notation(clean))
+}
+
+fn match_alias_target(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String> {
     // Keep the separator before `*` intact so `@/*` matches only `@/foo`,
     // not external scoped packages like `@repo/foo` (BUG-011).
     let alias_prefix = alias_pat.strip_suffix('*');
     let target_prefix = target_pat.strip_suffix('*');
 
-    let resolved_path = match (alias_prefix, target_prefix) {
+    match (alias_prefix, target_prefix) {
         (Some(ap), Some(tp)) => {
             // Wildcard alias: raw must start with ap.
             raw.strip_prefix(ap).map(|rest| format!("{}{}", tp, rest))
@@ -357,17 +438,7 @@ fn apply_ts_alias(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String
                 None
             }
         }
-    }?;
-
-    // If the resolved path traverses outside the project, keep the original
-    // import string as the node identifier (BUG-007).
-    if resolved_path.contains("..") {
-        return Some(raw.to_owned());
     }
-
-    // Strip leading "./" before converting to dot notation.
-    let clean = resolved_path.strip_prefix("./").unwrap_or(&resolved_path);
-    Some(path_to_dot_notation(clean))
 }
 
 // ---------------------------------------------------------------------------
@@ -478,6 +549,86 @@ fn resolve_rust_path(raw: &str, from_module: &str, _is_package: bool) -> String 
 /// Convert a slash-separated path string to dot notation.
 fn path_to_dot_notation(path: &str) -> String {
     path.replace('/', ".")
+}
+
+fn path_without_extension(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_stem()) {
+        (Some(parent), Some(stem)) => parent.join(stem),
+        _ => path.to_path_buf(),
+    }
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn parse_tsconfig_paths(tsconfig_path: &Path) -> Vec<(String, String)> {
+    let text = match std::fs::read_to_string(tsconfig_path) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+
+    let paths_start = match find_paths_section(&text) {
+        Some(pos) => pos,
+        None => return Vec::new(),
+    };
+
+    let slice = &text[paths_start..];
+    let block = match extract_brace_block(slice) {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+
+    let mut aliases = Vec::new();
+    let mut pos = 0;
+    while pos < block.len() {
+        let key = match extract_quoted_string(&block[pos..]) {
+            Some((k, end)) => {
+                pos += end;
+                k
+            }
+            None => break,
+        };
+
+        if let Some(colon) = block[pos..].find(':') {
+            pos += colon + 1;
+        } else {
+            break;
+        }
+
+        while pos < block.len() && block.as_bytes()[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+
+        if pos >= block.len() || block.as_bytes()[pos] != b'[' {
+            continue;
+        }
+        pos += 1;
+
+        let target = match extract_quoted_string(&block[pos..]) {
+            Some((t, end)) => {
+                pos += end;
+                t
+            }
+            None => continue,
+        };
+
+        if !key.is_empty() && !target.is_empty() {
+            aliases.push((key, target));
+        }
+    }
+
+    aliases
 }
 
 /// Find the position of the opening `{` that begins the `"paths"` value
@@ -926,6 +1077,43 @@ mod tests {
         assert!(!is_local);
     }
 
+    #[test]
+    fn resolve_ts_alias_from_parent_tsconfig_maps_to_registered_module() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_root = tmp.path().join("menubar");
+        let src_root = repo_root.join("src");
+        let types_dir = src_root.join("types");
+        let components_dir = src_root.join("components");
+        std::fs::create_dir_all(&types_dir).unwrap();
+        std::fs::create_dir_all(&components_dir).unwrap();
+
+        let tsconfig_path = repo_root.join("tsconfig.json");
+        std::fs::write(
+            &tsconfig_path,
+            r#"{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}"#,
+        )
+        .unwrap();
+
+        let mut r = ModuleResolver::new(&src_root);
+        r.register_module_path("menubar.types", &types_dir.join("index.ts"), true);
+        r.register_module_path(
+            "menubar.components.Foo",
+            &components_dir.join("Foo.tsx"),
+            false,
+        );
+        r.load_tsconfig_for_module("menubar.components.Foo", &tsconfig_path);
+
+        let (id, is_local, _) = r.resolve("@/types", "menubar.components.Foo", false);
+        assert_eq!(id, "menubar.types");
+        assert!(is_local);
+    }
+
     // -----------------------------------------------------------------------
     // TypeScript relative imports
     // -----------------------------------------------------------------------
@@ -1085,7 +1273,7 @@ mod tests {
     fn make_go_resolver() -> ModuleResolver {
         let mut r = ModuleResolver::new(Path::new("/repo"));
         r.go_module_path = Some("github.com/test/myapp".to_owned());
-        for m in &["cmd.server", "pkg.handler", "pkg.db"] {
+        for m in &["myapp.cmd.server", "myapp.pkg.handler", "myapp.pkg.db"] {
             r.register_module(m);
         }
         r
@@ -1096,7 +1284,7 @@ mod tests {
         let r = make_go_resolver();
         let (id, is_local, confidence) =
             r.resolve("github.com/test/myapp/pkg/handler", "cmd.server", false);
-        assert_eq!(id, "pkg.handler");
+        assert_eq!(id, "myapp.pkg.handler");
         assert!(is_local);
         assert!((confidence - 0.9).abs() < f64::EPSILON);
     }
@@ -1105,7 +1293,7 @@ mod tests {
     fn resolve_go_local_nested_import() {
         let r = make_go_resolver();
         let (id, is_local, _) = r.resolve("github.com/test/myapp/pkg/db", "cmd.server", false);
-        assert_eq!(id, "pkg.db");
+        assert_eq!(id, "myapp.pkg.db");
         assert!(is_local);
     }
 

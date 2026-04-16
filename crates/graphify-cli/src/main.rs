@@ -1459,14 +1459,16 @@ fn run_extract(
     // Build resolver.
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
     for file in &files {
-        resolver.register_module(&file.module_name);
+        resolver.register_module_path(&file.module_name, &file.path, file.is_package);
     }
 
-    // Load tsconfig if TypeScript is in the language list.
+    // Load the nearest tsconfig for each TypeScript source file. This handles
+    // common `repo=./src` layouts where tsconfig.json lives in a parent dir.
     if languages.contains(&Language::TypeScript) {
-        let tsconfig = repo_path.join("tsconfig.json");
-        if tsconfig.exists() {
-            resolver.load_tsconfig(&tsconfig);
+        for file in files.iter().filter(|f| f.language == Language::TypeScript) {
+            if let Some(tsconfig) = find_nearest_ancestor_file(&file.path, "tsconfig.json") {
+                resolver.load_tsconfig_for_module(&file.module_name, &tsconfig);
+            }
         }
     }
 
@@ -1615,6 +1617,24 @@ fn run_extract(
     }
 
     (graph, extra_owned, stats)
+}
+
+fn find_nearest_ancestor_file(start_path: &Path, file_name: &str) -> Option<PathBuf> {
+    let mut current = if start_path.is_dir() {
+        Some(start_path)
+    } else {
+        start_path.parent()
+    };
+
+    while let Some(dir) = current {
+        let candidate = dir.join(file_name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        current = dir.parent();
+    }
+
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -3484,6 +3504,34 @@ mod tests {
             &violations[1],
             CheckViolation::Limit { kind, .. } if kind == "max_hotspot_score"
         ));
+    }
+
+    #[test]
+    fn find_nearest_ancestor_file_walks_above_repo_root_layouts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo_root = tmp.path().join("menubar");
+        let src = repo_root.join("src/components");
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("Foo.tsx");
+        let tsconfig = repo_root.join("tsconfig.json");
+        std::fs::write(&file, "export const Foo = 1;\n").unwrap();
+        std::fs::write(&tsconfig, "{}").unwrap();
+
+        assert_eq!(
+            find_nearest_ancestor_file(&file, "tsconfig.json"),
+            Some(tsconfig)
+        );
+    }
+
+    #[test]
+    fn find_nearest_ancestor_file_returns_none_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src/components");
+        std::fs::create_dir_all(&src).unwrap();
+        let file = src.join("Foo.tsx");
+        std::fs::write(&file, "export const Foo = 1;\n").unwrap();
+
+        assert_eq!(find_nearest_ancestor_file(&file, "tsconfig.json"), None);
     }
 }
 
