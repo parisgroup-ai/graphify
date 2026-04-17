@@ -58,30 +58,29 @@ pub fn write_report(
     //   - per-node incoming-edge mean drives the hotspot Confidence column
     let all_edges = graph.edges();
     let total = all_edges.len();
-    let (extracted, inferred, ambiguous, mean_conf) = if total > 0 {
-        let extracted = all_edges
-            .iter()
-            .filter(|(_, _, e)| {
-                matches!(
-                    e.confidence_kind,
-                    graphify_core::types::ConfidenceKind::Extracted
-                )
-            })
-            .count();
-        let inferred = all_edges
-            .iter()
-            .filter(|(_, _, e)| {
-                matches!(
-                    e.confidence_kind,
-                    graphify_core::types::ConfidenceKind::Inferred
-                )
-            })
-            .count();
-        let ambiguous = total - extracted - inferred;
+    let (extracted, inferred, ambiguous, expected_external, mean_conf) = if total > 0 {
+        let mut extracted = 0usize;
+        let mut inferred = 0usize;
+        let mut ambiguous = 0usize;
+        let mut expected_external = 0usize;
+        for (_, _, e) in &all_edges {
+            match e.confidence_kind {
+                graphify_core::types::ConfidenceKind::Extracted => extracted += 1,
+                graphify_core::types::ConfidenceKind::Inferred => inferred += 1,
+                graphify_core::types::ConfidenceKind::Ambiguous => ambiguous += 1,
+                graphify_core::types::ConfidenceKind::ExpectedExternal => expected_external += 1,
+            }
+        }
         let mean: f64 = all_edges.iter().map(|(_, _, e)| e.confidence).sum::<f64>() / total as f64;
-        (extracted, inferred, ambiguous, Some(mean))
+        (
+            extracted,
+            inferred,
+            ambiguous,
+            expected_external,
+            Some(mean),
+        )
     } else {
-        (0, 0, 0, None)
+        (0, 0, 0, 0, None)
     };
     let ambiguous_pct = if total > 0 {
         ambiguous as f64 / total as f64 * 100.0
@@ -126,15 +125,29 @@ pub fn write_report(
     writeln!(buf, "| Circular dependencies | {} |", cycles.len()).unwrap();
 
     if let Some(mean) = mean_conf {
-        writeln!(
-            buf,
-            "| Confidence | {:.1}% extracted, {:.1}% inferred, {:.1}% ambiguous (mean: {:.2}) |",
-            extracted as f64 / total as f64 * 100.0,
-            inferred as f64 / total as f64 * 100.0,
-            ambiguous_pct,
-            mean,
-        )
-        .unwrap();
+        let expected_external_pct = expected_external as f64 / total as f64 * 100.0;
+        if expected_external > 0 {
+            writeln!(
+                buf,
+                "| Confidence | {:.1}% extracted, {:.1}% inferred, {:.1}% ambiguous, {:.1}% expected-external (mean: {:.2}) |",
+                extracted as f64 / total as f64 * 100.0,
+                inferred as f64 / total as f64 * 100.0,
+                ambiguous_pct,
+                expected_external_pct,
+                mean,
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                buf,
+                "| Confidence | {:.1}% extracted, {:.1}% inferred, {:.1}% ambiguous (mean: {:.2}) |",
+                extracted as f64 / total as f64 * 100.0,
+                inferred as f64 / total as f64 * 100.0,
+                ambiguous_pct,
+                mean,
+            )
+            .unwrap();
+        }
     }
 
     writeln!(buf).unwrap();
@@ -486,6 +499,62 @@ mod tests {
         assert!(
             content.contains("| `src` | mixed | 0.1000") && content.contains("| — |"),
             "'src' should be labeled '—', got:\n{content}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Issue #12 — ExpectedExternal surfaces in the confidence-mix row
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn confidence_mix_includes_expected_external_when_present() {
+        use graphify_core::types::ConfidenceKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report_expected_external.md");
+        let metrics = make_metrics();
+        let communities = make_communities();
+        let cycles: Vec<Cycle> = vec![];
+
+        let mut graph = CodeGraph::new();
+        graph.add_node(Node::module("a", "a.ts", Language::TypeScript, 1, true));
+        graph.add_node(Node::module(
+            "drizzle-orm",
+            "",
+            Language::TypeScript,
+            0,
+            false,
+        ));
+        graph.add_edge(
+            "a",
+            "drizzle-orm",
+            Edge::imports(1).with_confidence(0.5, ConfidenceKind::ExpectedExternal),
+        );
+
+        write_report("ee", &metrics, &communities, &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("expected-external"),
+            "confidence row should mention expected-external, got:\n{content}"
+        );
+    }
+
+    #[test]
+    fn confidence_mix_omits_expected_external_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report_no_ee.md");
+        let metrics = make_metrics();
+        let communities = make_communities();
+        let cycles: Vec<Cycle> = vec![];
+        let graph = make_graph();
+
+        write_report("no-ee", &metrics, &communities, &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("expected-external"),
+            "row should not mention expected-external when count is zero, got:\n{content}"
         );
     }
 }

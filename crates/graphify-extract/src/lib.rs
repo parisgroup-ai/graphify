@@ -6,6 +6,7 @@ pub mod php;
 pub mod python;
 pub mod resolver;
 pub mod rust_lang;
+pub mod stubs;
 pub mod ts_contract;
 pub mod typescript;
 pub mod walker;
@@ -16,6 +17,7 @@ pub use lang::{ExtractionResult, LanguageExtractor};
 pub use php::PhpExtractor;
 pub use python::PythonExtractor;
 pub use rust_lang::RustExtractor;
+pub use stubs::ExternalStubs;
 pub use ts_contract::{
     extract_ts_contract, extract_ts_contract_at, parse_all_ts_contracts, parse_all_ts_contracts_at,
     TsContractParseError,

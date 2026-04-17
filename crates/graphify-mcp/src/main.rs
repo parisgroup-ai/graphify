@@ -16,8 +16,8 @@ use graphify_core::{
     types::Language,
 };
 use graphify_extract::{
-    walker::discover_files, ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor,
-    PythonExtractor, RustExtractor, TypeScriptExtractor,
+    walker::discover_files, ExternalStubs, ExtractionResult, GoExtractor, LanguageExtractor,
+    PhpExtractor, PythonExtractor, RustExtractor, TypeScriptExtractor,
 };
 
 use crate::server::GraphifyServer;
@@ -50,6 +50,8 @@ struct ProjectConfig {
     repo: String,
     lang: Vec<String>,
     local_prefix: Option<String>,
+    #[serde(default)]
+    external_stubs: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +282,8 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
         .map(|f| f.module_name.as_str())
         .collect();
 
+    let external_stubs = ExternalStubs::new(project.external_stubs.iter().cloned());
+
     for (src_id, raw_target, mut edge) in all_raw_edges {
         let is_package = package_modules.contains(src_id.as_str());
         let (resolved_target, is_local, resolver_confidence) =
@@ -298,10 +302,16 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
             edge.confidence = final_confidence;
         }
 
-        // Step 3: Downgrade edges to non-local targets.
+        // Step 3: Downgrade edges to non-local targets — unless target matches
+        // an `external_stubs` prefix (issue #12).
         if !is_local {
             let capped = edge.confidence.min(0.5);
-            edge = edge.with_confidence(capped, graphify_core::types::ConfidenceKind::Ambiguous);
+            let kind = if external_stubs.matches(&resolved_target) {
+                graphify_core::types::ConfidenceKind::ExpectedExternal
+            } else {
+                graphify_core::types::ConfidenceKind::Ambiguous
+            };
+            edge = edge.with_confidence(capped, kind);
         }
 
         graph.add_edge(&src_id, &resolved_target, edge);

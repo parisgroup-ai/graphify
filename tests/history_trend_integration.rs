@@ -38,6 +38,8 @@ fn make_snapshot(
             inferred_pct: 20.0,
             ambiguous_count: 0,
             ambiguous_pct: 0.0,
+            expected_external_count: 0,
+            expected_external_pct: 0.0,
             mean_confidence: 0.92,
         },
         nodes: nodes

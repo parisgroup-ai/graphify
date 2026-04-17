@@ -105,6 +105,11 @@ pub enum ConfidenceKind {
     Extracted,
     Inferred,
     Ambiguous,
+    /// Target resolves to a package the project declares as intentionally
+    /// external (e.g. `drizzle-orm`, `zod`). Semantically it would be
+    /// `Ambiguous`, but the consumer has opted it out of the ambiguity
+    /// signal via `[[project]].external_stubs` in `graphify.toml`.
+    ExpectedExternal,
 }
 
 // ---------------------------------------------------------------------------
@@ -362,11 +367,20 @@ mod tests {
             (ConfidenceKind::Extracted, "\"Extracted\""),
             (ConfidenceKind::Inferred, "\"Inferred\""),
             (ConfidenceKind::Ambiguous, "\"Ambiguous\""),
+            (ConfidenceKind::ExpectedExternal, "\"ExpectedExternal\""),
         ];
         for (kind, expected) in kinds {
             let json = serde_json::to_string(&kind).expect("serialize");
             assert_eq!(json, expected);
         }
+    }
+
+    #[test]
+    fn confidence_kind_expected_external_roundtrips() {
+        let json = serde_json::to_string(&ConfidenceKind::ExpectedExternal).expect("serialize");
+        assert_eq!(json, "\"ExpectedExternal\"");
+        let back: ConfidenceKind = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, ConfidenceKind::ExpectedExternal);
     }
 
     #[test]

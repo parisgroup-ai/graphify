@@ -23,8 +23,8 @@ use graphify_core::{
 use graphify_extract::{
     cache::{sha256_hex, CacheStats, ExtractionCache},
     walker::detect_local_prefix,
-    ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor, PythonExtractor, RustExtractor,
-    TypeScriptExtractor,
+    ExternalStubs, ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor, PythonExtractor,
+    RustExtractor, TypeScriptExtractor,
 };
 use graphify_report::{
     check_report::{
@@ -135,6 +135,11 @@ struct ProjectConfig {
     repo: String,
     lang: Vec<String>,
     local_prefix: Option<String>,
+    /// Package prefixes the project declares as intentionally external.
+    /// Matching edges get `ConfidenceKind::ExpectedExternal` instead of
+    /// `Ambiguous`, so the ambiguity metric reflects real extraction noise.
+    #[serde(default)]
+    external_stubs: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -991,6 +996,11 @@ repo = "./src"
 lang = ["python"]           # Options: python, typescript, go, rust, php
 local_prefix = "app"
 
+# Optional: declare packages that are intentionally external. Edges to these
+# are tagged `ExpectedExternal` instead of `Ambiguous`, so the ambiguity
+# metric reflects real extraction noise, not legitimate external imports.
+# external_stubs = ["drizzle-orm", "zod", "@repo/types"]
+
 # Optional policy rules for graphify check:
 #
 # [[policy.group]]
@@ -1592,6 +1602,10 @@ fn run_extract(
         .map(|f| f.module_name.as_str())
         .collect();
 
+    // Compile external-stub prefixes (issue #12): edges resolving to these
+    // packages are tagged `ExpectedExternal` instead of `Ambiguous`.
+    let external_stubs = ExternalStubs::new(project.external_stubs.iter().cloned());
+
     // Resolve edges and add them.
     for (src_id, raw_target, mut edge) in all_raw_edges {
         if edge.kind == graphify_core::types::EdgeKind::Defines {
@@ -1616,10 +1630,17 @@ fn run_extract(
             edge.confidence = final_confidence;
         }
 
-        // Step 3: Downgrade edges to non-local targets.
+        // Step 3: Downgrade edges to non-local targets — unless the target
+        // matches an `external_stubs` prefix, in which case it's classified
+        // as `ExpectedExternal` so it doesn't inflate the ambiguity metric.
         if !is_local {
             let capped = edge.confidence.min(0.5);
-            edge = edge.with_confidence(capped, graphify_core::types::ConfidenceKind::Ambiguous);
+            let kind = if external_stubs.matches(&resolved_target) {
+                graphify_core::types::ConfidenceKind::ExpectedExternal
+            } else {
+                graphify_core::types::ConfidenceKind::Ambiguous
+            };
+            edge = edge.with_confidence(capped, kind);
         }
 
         graph.add_edge(&src_id, &resolved_target, edge);

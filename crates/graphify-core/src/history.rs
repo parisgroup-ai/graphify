@@ -43,6 +43,10 @@ pub struct ConfidenceSummary {
     pub inferred_pct: f64,
     pub ambiguous_count: usize,
     pub ambiguous_pct: f64,
+    #[serde(default)]
+    pub expected_external_count: usize,
+    #[serde(default)]
+    pub expected_external_pct: f64,
     pub mean_confidence: f64,
 }
 
@@ -188,6 +192,7 @@ fn build_confidence_summary(graph: &CodeGraph) -> ConfidenceSummary {
     let mut extracted = 0usize;
     let mut inferred = 0usize;
     let mut ambiguous = 0usize;
+    let mut expected_external = 0usize;
     let mut confidence_sum = 0.0f64;
 
     for (_, _, edge) in &all_edges {
@@ -195,6 +200,7 @@ fn build_confidence_summary(graph: &CodeGraph) -> ConfidenceSummary {
             ConfidenceKind::Extracted => extracted += 1,
             ConfidenceKind::Inferred => inferred += 1,
             ConfidenceKind::Ambiguous => ambiguous += 1,
+            ConfidenceKind::ExpectedExternal => expected_external += 1,
         }
         confidence_sum += edge.confidence;
     }
@@ -214,6 +220,8 @@ fn build_confidence_summary(graph: &CodeGraph) -> ConfidenceSummary {
         inferred_pct: pct(inferred),
         ambiguous_count: ambiguous,
         ambiguous_pct: pct(ambiguous),
+        expected_external_count: expected_external,
+        expected_external_pct: pct(expected_external),
         mean_confidence: if total_edge_count > 0 {
             confidence_sum / total_edge_count as f64
         } else {
@@ -550,6 +558,8 @@ mod tests {
                 inferred_pct: 0.0,
                 ambiguous_count: 0,
                 ambiguous_pct: 0.0,
+                expected_external_count: 0,
+                expected_external_pct: 0.0,
                 mean_confidence: 1.0,
             },
             nodes,

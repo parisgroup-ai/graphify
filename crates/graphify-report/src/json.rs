@@ -126,6 +126,8 @@ struct ConfidenceSummary {
     inferred_pct: f64,
     ambiguous_count: usize,
     ambiguous_pct: f64,
+    expected_external_count: usize,
+    expected_external_pct: f64,
     mean_confidence: f64,
 }
 
@@ -199,6 +201,7 @@ pub fn write_analysis_json(
     let mut extracted = 0usize;
     let mut inferred = 0usize;
     let mut ambiguous = 0usize;
+    let mut expected_external = 0usize;
     let mut confidence_sum = 0.0f64;
 
     for (_, _, edge) in &all_edges {
@@ -206,6 +209,7 @@ pub fn write_analysis_json(
             graphify_core::types::ConfidenceKind::Extracted => extracted += 1,
             graphify_core::types::ConfidenceKind::Inferred => inferred += 1,
             graphify_core::types::ConfidenceKind::Ambiguous => ambiguous += 1,
+            graphify_core::types::ConfidenceKind::ExpectedExternal => expected_external += 1,
         }
         confidence_sum += edge.confidence;
     }
@@ -225,6 +229,8 @@ pub fn write_analysis_json(
         inferred_pct: pct(inferred),
         ambiguous_count: ambiguous,
         ambiguous_pct: pct(ambiguous),
+        expected_external_count: expected_external,
+        expected_external_pct: pct(expected_external),
         mean_confidence: if total_edge_count > 0 {
             confidence_sum / total_edge_count as f64
         } else {
