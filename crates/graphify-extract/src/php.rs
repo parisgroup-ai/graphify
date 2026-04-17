@@ -180,10 +180,8 @@ fn emit_use_clause(
     let mut cursor = clause.walk();
     for sub in clause.children(&mut cursor) {
         match sub.kind() {
-            "qualified_name" | "name" => {
-                if qualified.is_none() {
-                    qualified = Some(sub.utf8_text(source).unwrap_or("").to_owned());
-                }
+            "qualified_name" | "name" if qualified.is_none() => {
+                qualified = Some(sub.utf8_text(source).unwrap_or("").to_owned());
             }
             _ => {}
         }
