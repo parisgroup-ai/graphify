@@ -9,6 +9,9 @@ projects:
 contexts:
   - analysis
   - ci
+tags:
+  - task
+  - feature
 ---
 
 # Architectural drift detection

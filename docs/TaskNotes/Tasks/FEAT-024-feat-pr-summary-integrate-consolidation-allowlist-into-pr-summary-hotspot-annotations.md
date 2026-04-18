@@ -1,10 +1,19 @@
 ---
 uid: feat-024
-status: open
+status: done
 priority: low
 scheduled: 2026-04-18
+completed: 2026-04-18
 timeEstimate: 30
 pomodoros: 0
+timeSpent: 28
+timeEntries:
+- date: 2026-04-18
+  minutes: 28
+  note: source=<usage>
+  type: manual
+  executor: claude-solo
+  tokens: 104156
 contexts:
 - consolidation
 - pr-summary

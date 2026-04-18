@@ -1,10 +1,19 @@
 ---
 uid: feat-025
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-18
+completed: 2026-04-18
 timeEstimate: 45
 pomodoros: 0
+timeSpent: 38
+timeEntries:
+- date: 2026-04-18
+  minutes: 38
+  note: source=<usage>
+  type: manual
+  executor: claude-solo
+  tokens: 136306
 tags:
 - task
 - feat

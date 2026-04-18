@@ -1,6 +1,7 @@
 ---
 uid: feat-020
-status: in-progress
+status: done
+completed: 2026-04-18
 priority: normal
 pomodoros: 0
 timeSpent: 45
@@ -20,6 +21,13 @@ tags:
 ---
 
 # Native consolidation-allowlist in graphify.toml
+
+> **Closed 2026-04-18.** Core slice landed in `25eabc8`; deferred subtasks shipped
+> as [[FEAT-022]] (consolidation subcommand, `1be5225`), [[FEAT-023]]
+> (intentional_mirrors drift suppression), [[FEAT-024]] (pr-summary hotspot
+> annotations, `d6f916e`), and [[DOC-001]] (README migration note, `15fdccf`).
+> The subtask checkboxes below remain unchecked as a historical record of the
+> original scope before it was decomposed; the work itself is complete.
 
 ## Description
 

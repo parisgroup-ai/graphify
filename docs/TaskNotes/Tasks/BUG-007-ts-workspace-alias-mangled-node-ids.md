@@ -1,6 +1,6 @@
 ---
 status: done
-priority: critical
+priority: high
 timeEstimate: 180
 pomodoros: 0
 projects:

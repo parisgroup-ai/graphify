@@ -2,7 +2,7 @@
 uid: feat-011
 status: done
 completed: 2026-04-13
-priority: medium
+priority: normal
 timeEstimate: 240
 tags:
   - task

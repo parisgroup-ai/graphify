@@ -1,7 +1,8 @@
 ---
 uid: feat-021
-status: open
+status: done
 priority: low
+completed: 2026-04-18
 pomodoros: 0
 timeSpent: 66
 timeEntries:
