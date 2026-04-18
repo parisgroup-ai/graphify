@@ -183,6 +183,7 @@ mod tests {
                 true,
             )],
             edges: vec![("app.main".to_string(), "os".to_string(), Edge::imports(1))],
+            reexports: Vec::new(),
         }
     }
 

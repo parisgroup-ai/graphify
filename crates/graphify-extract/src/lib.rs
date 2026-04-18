@@ -4,6 +4,7 @@ pub mod go;
 pub mod lang;
 pub mod php;
 pub mod python;
+pub mod reexport_graph;
 pub mod resolver;
 pub mod rust_lang;
 pub mod stubs;
@@ -13,9 +14,12 @@ pub mod walker;
 
 pub use drizzle::{extract_drizzle_contract, extract_drizzle_contract_at, DrizzleParseError};
 pub use go::GoExtractor;
-pub use lang::{ExtractionResult, LanguageExtractor};
+pub use lang::{ExtractionResult, LanguageExtractor, ReExportEntry, ReExportSpec};
 pub use php::PhpExtractor;
 pub use python::PythonExtractor;
+pub use reexport_graph::{
+    CanonicalResolution, NamedReExport, ReExportGraph, ResolveFn, StarReExport,
+};
 pub use rust_lang::RustExtractor;
 pub use stubs::ExternalStubs;
 pub use ts_contract::{

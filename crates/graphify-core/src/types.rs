@@ -40,6 +40,21 @@ pub struct Node {
     pub language: Language,
     pub line: usize,
     pub is_local: bool,
+    /// Alternative module paths through which this node is reachable.
+    ///
+    /// FEAT-021: populated for TypeScript nodes that are re-exported through
+    /// one or more barrel chains (e.g. `export { Course } from './entities'`
+    /// inside `./domain/index.ts`). The canonical declaration's `id` is
+    /// kept; each extra path the consumer could have imported via is recorded
+    /// here so `analysis.json` consumers can see the aliases without the
+    /// graph counting them as distinct nodes.
+    ///
+    /// Empty for other extractors (Python/Go/Rust/PHP) and for TypeScript
+    /// nodes that are not reached through any barrel re-export. The field is
+    /// `#[serde(skip_serializing_if = "Vec::is_empty", default)]` so the
+    /// legacy JSON shape is preserved when no alternatives exist.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternative_paths: Vec<String>,
 }
 
 impl Node {
@@ -58,6 +73,7 @@ impl Node {
             language,
             line,
             is_local,
+            alternative_paths: Vec::new(),
         }
     }
 
@@ -81,7 +97,27 @@ impl Node {
             language,
             line,
             is_local,
+            alternative_paths: Vec::new(),
         }
+    }
+
+    /// Builder-style setter: attach one or more alternative import paths.
+    ///
+    /// Duplicates are deduplicated in insertion order so the list stays
+    /// stable across reruns. Intended for the TypeScript barrel-collapse
+    /// pass (FEAT-021); other extractors leave this empty.
+    pub fn with_alternative_paths<I, S>(mut self, paths: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        for p in paths {
+            let s = p.into();
+            if !self.alternative_paths.contains(&s) {
+                self.alternative_paths.push(s);
+            }
+        }
+        self
     }
 }
 
@@ -447,6 +483,107 @@ mod tests {
             true,
         );
         assert_eq!(node.kind, NodeKind::Enum);
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-021: alternative_paths
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn node_default_alternative_paths_is_empty() {
+        let node = Node::module("app.main", "app/main.py", Language::Python, 1, true);
+        assert!(node.alternative_paths.is_empty());
+    }
+
+    #[test]
+    fn node_with_alternative_paths_preserves_insertion_order() {
+        let node = Node::symbol(
+            "src.entities.Course",
+            NodeKind::Class,
+            "src/entities/course.ts",
+            Language::TypeScript,
+            1,
+            true,
+        )
+        .with_alternative_paths(["src.domain.Course", "src.presentation.Course"]);
+        assert_eq!(
+            node.alternative_paths,
+            vec!["src.domain.Course", "src.presentation.Course"]
+        );
+    }
+
+    #[test]
+    fn node_with_alternative_paths_deduplicates() {
+        let node = Node::symbol(
+            "src.entities.Course",
+            NodeKind::Class,
+            "src/entities/course.ts",
+            Language::TypeScript,
+            1,
+            true,
+        )
+        .with_alternative_paths(["a", "b", "a", "c", "b"]);
+        assert_eq!(node.alternative_paths, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn node_without_alternatives_does_not_serialize_field() {
+        // Legacy shape — writers consuming analysis.json must continue to
+        // parse snapshots produced before FEAT-021.
+        let node = Node::module("app.main", "app/main.py", Language::Python, 1, true);
+        let json = serde_json::to_string(&node).expect("serialize");
+        assert!(
+            !json.contains("alternative_paths"),
+            "empty alternative_paths must not appear in JSON, got {json}"
+        );
+    }
+
+    #[test]
+    fn node_with_alternatives_serializes_field() {
+        let node = Node::symbol(
+            "src.entities.Course",
+            NodeKind::Class,
+            "src/entities/course.ts",
+            Language::TypeScript,
+            5,
+            true,
+        )
+        .with_alternative_paths(["src.domain.Course"]);
+        let json = serde_json::to_string(&node).expect("serialize");
+        assert!(json.contains("\"alternative_paths\":[\"src.domain.Course\"]"));
+    }
+
+    #[test]
+    fn node_alternatives_roundtrip() {
+        let node = Node::symbol(
+            "src.entities.Course",
+            NodeKind::Class,
+            "src/entities/course.ts",
+            Language::TypeScript,
+            5,
+            true,
+        )
+        .with_alternative_paths(["a", "b"]);
+        let json = serde_json::to_string(&node).expect("serialize");
+        let restored: Node = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.alternative_paths, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn node_deserializes_legacy_shape_without_alternatives() {
+        // Older snapshots (pre-FEAT-021) lack the field entirely — must still
+        // deserialize into an empty Vec.
+        let legacy = r#"{
+            "id": "app.main",
+            "kind": "Module",
+            "file_path": "app/main.py",
+            "language": "Python",
+            "line": 1,
+            "is_local": true
+        }"#;
+        let node: Node = serde_json::from_str(legacy).expect("legacy node must parse");
+        assert_eq!(node.id, "app.main");
+        assert!(node.alternative_paths.is_empty());
     }
 
     #[test]

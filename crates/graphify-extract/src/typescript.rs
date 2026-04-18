@@ -1,4 +1,4 @@
-use crate::lang::{ExtractionResult, LanguageExtractor};
+use crate::lang::{ExtractionResult, LanguageExtractor, ReExportEntry, ReExportSpec};
 use graphify_core::types::{Edge, Language, Node, NodeKind};
 use std::collections::HashSet;
 use std::path::Path;
@@ -333,23 +333,48 @@ fn extract_export_statement(
             ));
         }
 
-        // Also emit Defines edges for each re-exported symbol.
+        // FEAT-021: detect `export * from '…'` — it has no export_clause child,
+        // just a `*` token directly under the export_statement.
+        let mut is_star = false;
+        {
+            let mut c = node.walk();
+            for ch in node.children(&mut c) {
+                if ch.kind() == "*" {
+                    is_star = true;
+                    break;
+                }
+            }
+        }
+
+        // Also emit Defines edges for each re-exported symbol AND record the
+        // re-export metadata for the project-wide barrel-collapse pass.
         // `export { foo, bar as baz } from './mod'` defines `foo` and `baz`
         // in the current module's public API.
+        let mut specs: Vec<ReExportSpec> = Vec::new();
+
         let mut outer = node.walk();
         for child in node.children(&mut outer) {
             if child.kind() == "export_clause" {
                 let mut inner = child.walk();
                 for specifier in child.children(&mut inner) {
                     if specifier.kind() == "export_specifier" {
-                        // Use the alias if present, otherwise the original name.
+                        // `name` field holds the exported-from-source name;
+                        // `alias` field (when present) holds the renamed
+                        // publication name. Fall back gracefully when the
+                        // grammar omits `name`.
                         let exported_name = specifier
-                            .child_by_field_name("alias")
-                            .or_else(|| specifier.child_by_field_name("name"))
+                            .child_by_field_name("name")
                             .and_then(|n| n.utf8_text(source).ok())
-                            .unwrap_or("");
-                        if !exported_name.is_empty() {
-                            let symbol_id = format!("{}.{}", module_name, exported_name);
+                            .unwrap_or("")
+                            .to_owned();
+                        let local_name = specifier
+                            .child_by_field_name("alias")
+                            .and_then(|n| n.utf8_text(source).ok())
+                            .unwrap_or(&exported_name)
+                            .to_owned();
+
+                        if !local_name.is_empty() {
+                            let symbol_id = format!("{}.{}", module_name, local_name);
                             result.nodes.push(Node::symbol(
                                 &symbol_id,
                                 NodeKind::Function,
@@ -364,9 +389,26 @@ fn extract_export_statement(
                                 Edge::defines(line),
                             ));
                         }
+
+                        if !exported_name.is_empty() && !local_name.is_empty() {
+                            specs.push(ReExportSpec {
+                                exported_name,
+                                local_name,
+                            });
+                        }
                     }
                 }
             }
+        }
+
+        if !target.is_empty() && (is_star || !specs.is_empty()) {
+            result.reexports.push(ReExportEntry {
+                from_module: module_name.to_owned(),
+                raw_target: target.to_owned(),
+                line,
+                specs,
+                is_star,
+            });
         }
 
         return;
@@ -1029,6 +1071,69 @@ mod tests {
     // -----------------------------------------------------------------------
     // Extensions
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // FEAT-021: re-export metadata capture
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn named_reexport_captures_reexport_entry() {
+        let result = extract("export { foo, bar } from './baz';\n");
+        assert_eq!(result.reexports.len(), 1, "expected exactly one reexport");
+        let entry = &result.reexports[0];
+        assert_eq!(entry.from_module, "module");
+        assert_eq!(entry.raw_target, "./baz");
+        assert!(!entry.is_star);
+        assert_eq!(entry.specs.len(), 2);
+        assert_eq!(entry.specs[0].exported_name, "foo");
+        assert_eq!(entry.specs[0].local_name, "foo");
+        assert_eq!(entry.specs[1].exported_name, "bar");
+        assert_eq!(entry.specs[1].local_name, "bar");
+    }
+
+    #[test]
+    fn aliased_reexport_records_both_names() {
+        let result = extract("export { foo as Bar } from './baz';\n");
+        let entry = result.reexports.first().expect("reexport captured");
+        assert_eq!(entry.specs.len(), 1);
+        assert_eq!(entry.specs[0].exported_name, "foo");
+        assert_eq!(entry.specs[0].local_name, "Bar");
+        // The existing Defines edge behaviour (alias wins) must still hold.
+        let defines: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "module.Bar")
+            .collect();
+        assert_eq!(defines.len(), 1, "alias becomes the published symbol");
+    }
+
+    #[test]
+    fn star_reexport_captures_star_entry_with_no_specs() {
+        let result = extract("export * from './barrel';\n");
+        let entry = result
+            .reexports
+            .first()
+            .expect("star reexport must be captured");
+        assert!(entry.is_star);
+        assert!(entry.specs.is_empty());
+        assert_eq!(entry.raw_target, "./barrel");
+    }
+
+    #[test]
+    fn plain_imports_do_not_produce_reexport_entries() {
+        let result = extract("import { foo } from './bar';\n");
+        assert!(
+            result.reexports.is_empty(),
+            "plain imports should not populate reexports"
+        );
+    }
+
+    #[test]
+    fn local_export_does_not_produce_reexport_entry() {
+        // `export function foo() {}` is not a re-export — no `from` clause.
+        let result = extract("export function foo() {}\n");
+        assert!(result.reexports.is_empty());
+    }
 
     #[test]
     fn extensions_returns_ts_and_tsx() {
