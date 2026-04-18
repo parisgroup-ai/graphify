@@ -1,4 +1,5 @@
 pub mod community;
+pub mod consolidation;
 pub mod contract;
 pub mod cycles;
 pub mod diff;

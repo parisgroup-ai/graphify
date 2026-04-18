@@ -29,7 +29,7 @@ pub use diff_json::write_diff_json;
 pub use diff_markdown::write_diff_markdown;
 pub use graphml::write_graphml;
 pub use html::write_html;
-pub use json::{write_analysis_json, write_graph_json};
+pub use json::{write_analysis_json, write_analysis_json_with_allowlist, write_graph_json};
 pub use markdown::write_report;
 pub use neo4j::write_cypher;
 pub use obsidian::write_obsidian_vault;

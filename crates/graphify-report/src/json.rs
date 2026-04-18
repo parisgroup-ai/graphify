@@ -138,6 +138,11 @@ struct AnalysisJson<'a> {
     cycles: &'a [Cycle],
     summary: Summary,
     confidence_summary: ConfidenceSummary,
+    /// Node IDs matched by the `[consolidation].allowlist` in `graphify.toml`.
+    /// Empty array when no allowlist is configured; omitted nothing so
+    /// downstream consumers can rely on the key being present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowlisted_symbols: Option<&'a [String]>,
 }
 
 /// Writes the analysis results to `path` in JSON format.
@@ -149,6 +154,25 @@ pub fn write_analysis_json(
     communities: &[Community],
     cycles: &[Cycle],
     graph: &CodeGraph,
+    path: &Path,
+) {
+    write_analysis_json_with_allowlist(metrics, communities, cycles, graph, None, path);
+}
+
+/// Like [`write_analysis_json`] but also emits `allowlisted_symbols` when
+/// a consolidation allowlist is configured.
+///
+/// Pass `None` (or an empty slice wrapped in `Some`) to preserve the previous
+/// shape — the field is only serialized when `allowlisted_symbols` is `Some`.
+///
+/// # Panics
+/// Panics if serialization or file I/O fails.
+pub fn write_analysis_json_with_allowlist(
+    metrics: &[NodeMetrics],
+    communities: &[Community],
+    cycles: &[Cycle],
+    graph: &CodeGraph,
+    allowlisted_symbols: Option<&[String]>,
     path: &Path,
 ) {
     let nodes: Vec<MetricsRecord<'_>> = metrics
@@ -244,6 +268,7 @@ pub fn write_analysis_json(
         cycles,
         summary,
         confidence_summary,
+        allowlisted_symbols,
     };
 
     let json = serde_json::to_string_pretty(&payload).expect("serialize analysis JSON");
@@ -393,6 +418,39 @@ mod tests {
         let nodes = value["nodes"].as_array().unwrap();
         assert_eq!(nodes[0]["hotspot_type"], "bridge");
         assert_eq!(nodes[1]["hotspot_type"], "hub");
+    }
+
+    #[test]
+    fn write_analysis_json_emits_allowlisted_symbols_when_some() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let graph = make_graph();
+        let metrics = make_metrics();
+        let cycles: Vec<Cycle> = vec![];
+        let allow = vec!["app.main".to_string()];
+
+        write_analysis_json_with_allowlist(&metrics, &[], &cycles, &graph, Some(&allow), &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let out = value["allowlisted_symbols"].as_array().unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0], "app.main");
+    }
+
+    #[test]
+    fn write_analysis_json_omits_allowlisted_symbols_when_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let graph = make_graph();
+        let metrics = make_metrics();
+        let cycles: Vec<Cycle> = vec![];
+
+        write_analysis_json(&metrics, &[], &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(value.get("allowlisted_symbols").is_none());
     }
 
     #[test]

@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 use rayon::prelude::*;
 use serde::Deserialize;
 
+use graphify_core::consolidation::{ConsolidationConfig, ConsolidationConfigRaw};
 use graphify_core::contract::{
     CaseRule, FieldAlias, FieldType, GlobalContractConfig, PairConfig, PrimitiveType, Severity,
 };
@@ -31,9 +32,10 @@ use graphify_report::{
         CheckLimits, CheckReport, CheckViolation, PolicyCheckSummary, ProjectCheckResult,
         ProjectCheckSummary,
     },
-    write_analysis_json, write_cypher, write_diff_json, write_diff_markdown, write_edges_csv,
-    write_graph_json, write_graphml, write_html, write_nodes_csv, write_obsidian_vault,
-    write_report, write_trend_json, write_trend_markdown, Cycle,
+    write_analysis_json, write_analysis_json_with_allowlist, write_cypher, write_diff_json,
+    write_diff_markdown, write_edges_csv, write_graph_json, write_graphml, write_html,
+    write_nodes_csv, write_obsidian_vault, write_report, write_trend_json, write_trend_markdown,
+    Cycle,
 };
 
 mod install;
@@ -55,6 +57,27 @@ struct Config {
     contract: ContractConfigRaw,
     #[serde(default)]
     hotspots: HotspotsConfig,
+    #[serde(default)]
+    consolidation: ConsolidationConfigToml,
+}
+
+/// TOML wire format for `[consolidation]` — compiled to
+/// [`graphify_core::consolidation::ConsolidationConfig`] at `load_config` time.
+#[derive(Deserialize, Default)]
+struct ConsolidationConfigToml {
+    #[serde(default)]
+    allowlist: Vec<String>,
+    #[serde(default)]
+    intentional_mirrors: HashMap<String, Vec<String>>,
+}
+
+impl From<ConsolidationConfigToml> for ConsolidationConfigRaw {
+    fn from(v: ConsolidationConfigToml) -> Self {
+        ConsolidationConfigRaw {
+            allowlist: v.allowlist,
+            intentional_mirrors: v.intentional_mirrors,
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -237,6 +260,11 @@ enum Commands {
         /// Force full rebuild, ignoring extraction cache
         #[arg(long)]
         force: bool,
+
+        /// Skip the `[consolidation].allowlist` section (debug flag — run as
+        /// if no allowlist were configured).
+        #[arg(long, default_value_t = false)]
+        ignore_allowlist: bool,
     },
 
     /// Run full pipeline: extract → analyze → report (alias for report)
@@ -260,6 +288,11 @@ enum Commands {
         /// Force full rebuild, ignoring extraction cache
         #[arg(long)]
         force: bool,
+
+        /// Skip the `[consolidation].allowlist` section (debug flag — run as
+        /// if no allowlist were configured).
+        #[arg(long, default_value_t = false)]
+        ignore_allowlist: bool,
     },
 
     /// Check architectural quality gates for CI
@@ -312,6 +345,11 @@ enum Commands {
         /// Treat contract warnings (UnmappedOrmType) as errors
         #[arg(long, default_value_t = false)]
         contracts_warnings_as_errors: bool,
+
+        /// Skip the `[consolidation].allowlist` section (debug flag — run as
+        /// if no allowlist were configured).
+        #[arg(long, default_value_t = false)]
+        ignore_allowlist: bool,
     },
 
     /// Search nodes by pattern (glob matching on node IDs)
@@ -594,12 +632,14 @@ fn main() {
             bridge_ratio,
             format,
             force,
+            ignore_allowlist,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
             let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
             let formats = resolve_formats(&cfg, format.as_deref());
+            let consolidation = resolve_consolidation(&cfg, ignore_allowlist);
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
@@ -612,6 +652,7 @@ fn main() {
                     &thresholds,
                     &formats,
                     force,
+                    &consolidation,
                 );
                 println!(
                     "[{}] Report written to {}",
@@ -632,12 +673,14 @@ fn main() {
             hub_threshold,
             bridge_ratio,
             force,
+            ignore_allowlist,
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, None);
             let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
             let formats = resolve_formats(&cfg, None);
+            let consolidation = resolve_consolidation(&cfg, ignore_allowlist);
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
@@ -650,6 +693,7 @@ fn main() {
                     &thresholds,
                     &formats,
                     force,
+                    &consolidation,
                 );
                 println!(
                     "[{}] Pipeline complete → {}",
@@ -677,6 +721,7 @@ fn main() {
             contracts,
             no_contracts,
             contracts_warnings_as_errors,
+            ignore_allowlist,
         } => {
             cmd_check(
                 &config,
@@ -692,6 +737,7 @@ fn main() {
                 json,
                 ContractsMode::from_flags(contracts, no_contracts),
                 contracts_warnings_as_errors,
+                ignore_allowlist,
             );
         }
 
@@ -1014,6 +1060,21 @@ local_prefix = "app"
 # from = ["group:feature"]
 # to = ["group:feature"]
 # allow_same_partition = true
+
+# Optional consolidation allowlist — regex patterns (anchored ^...$) matched
+# against the *leaf* symbol name. Matching nodes are treated as intentional
+# duplicates: they are excluded from consolidation candidates, hotspot gates,
+# and drift output. Absent section = no allowlist.
+#
+# [consolidation]
+# allowlist = [
+#   "TokenUsage",
+#   "(Guided|SemiGuided|Challenging)Exercise",
+#   ".*(Response|Output|Dto)",
+# ]
+#
+# [consolidation.intentional_mirrors]
+# TokenUsage = ["ana-service:app.models.tokens", "pkg-types:src.tokens"]
 "#;
 
     let dest = Path::new("graphify.toml");
@@ -1278,13 +1339,45 @@ fn load_config(path: &Path) -> Config {
             std::process::exit(1);
         }
     };
-    match toml::from_str::<Config>(&text) {
+    let cfg = match toml::from_str::<Config>(&text) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Invalid config {:?}: {e}", path);
             std::process::exit(1);
         }
+    };
+    // Fail fast on malformed consolidation regex patterns so the pipeline
+    // never runs with a half-valid allowlist. The compiled value is thrown
+    // away here — `resolve_consolidation` compiles again downstream. Keeping
+    // a separate validation pass keeps `Config` TOML-only (no compiled state).
+    let raw: ConsolidationConfigRaw = ConsolidationConfigToml {
+        allowlist: cfg.consolidation.allowlist.clone(),
+        intentional_mirrors: cfg.consolidation.intentional_mirrors.clone(),
     }
+    .into();
+    if let Err(err) = ConsolidationConfig::compile(raw) {
+        eprintln!("Invalid [consolidation] section in {:?}: {err}", path);
+        std::process::exit(1);
+    }
+    cfg
+}
+
+/// Compiles the `[consolidation]` section into a live [`ConsolidationConfig`].
+///
+/// `ignore_allowlist`, when true, returns an empty config so downstream stages
+/// run as if no allowlist were declared — useful when debugging "why is this
+/// symbol missing from the report?".
+fn resolve_consolidation(cfg: &Config, ignore_allowlist: bool) -> ConsolidationConfig {
+    if ignore_allowlist {
+        return ConsolidationConfig::default();
+    }
+    let raw: ConsolidationConfigRaw = ConsolidationConfigToml {
+        allowlist: cfg.consolidation.allowlist.clone(),
+        intentional_mirrors: cfg.consolidation.intentional_mirrors.clone(),
+    }
+    .into();
+    // Safe: validated during load_config.
+    ConsolidationConfig::compile(raw).expect("consolidation config validated by load_config")
 }
 
 fn resolve_output(cfg: &Config, override_path: Option<&Path>) -> PathBuf {
@@ -1713,6 +1806,7 @@ fn run_analyze(
 /// Runs the full pipeline for a single project: extract → analyze → write outputs.
 ///
 /// Returns a `ProjectData` struct for use in cross-project summaries.
+#[allow(clippy::too_many_arguments)]
 fn run_pipeline_for_project(
     project: &ProjectConfig,
     settings: &Settings,
@@ -1721,6 +1815,7 @@ fn run_pipeline_for_project(
     thresholds: &HotspotThresholds,
     formats: &[String],
     force: bool,
+    consolidation: &ConsolidationConfig,
 ) -> ProjectData {
     let (graph, _, stats) = run_extract(project, settings, Some(proj_out), force);
     print_cache_stats(&project.name, &stats);
@@ -1735,6 +1830,7 @@ fn run_pipeline_for_project(
         &cycles_for_report,
         proj_out,
         formats,
+        consolidation,
     );
     persist_historical_snapshot(
         &project.name,
@@ -1808,14 +1904,21 @@ fn evaluate_quality_gates(
     communities: &[graphify_core::community::Community],
     cycles: &[Cycle],
     limits: &CheckLimits,
+    consolidation: &ConsolidationConfig,
 ) -> (ProjectCheckSummary, Vec<CheckViolation>) {
     // Deterministic tie-break: highest score wins; ties broken by smaller id.
-    let top_hotspot = metrics.iter().max_by(|a, b| {
-        a.score
-            .partial_cmp(&b.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.id.cmp(&a.id))
-    });
+    // Nodes matched by the consolidation allowlist are excluded from the
+    // hotspot gate — they are intentional mirrors and should not drive
+    // `max_hotspot_score` failures. Cycle count is unaffected.
+    let top_hotspot = metrics
+        .iter()
+        .filter(|m| !consolidation.matches(&m.id))
+        .max_by(|a, b| {
+            a.score
+                .partial_cmp(&b.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| b.id.cmp(&a.id))
+        });
 
     let summary = ProjectCheckSummary {
         nodes: graph.node_count(),
@@ -2009,11 +2112,13 @@ fn cmd_check(
     json: bool,
     contracts_mode: ContractsMode,
     contracts_warnings_as_errors: bool,
+    ignore_allowlist: bool,
 ) {
     let cfg = load_config(config_path);
     let projects = filter_projects(&cfg, project_filter);
     let out_dir = resolve_output(&cfg, output_override);
     let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
+    let consolidation = resolve_consolidation(&cfg, ignore_allowlist);
     let mut analyzed_projects = Vec::new();
 
     for project in &projects {
@@ -2065,6 +2170,7 @@ fn cmd_check(
             &project.communities,
             &project.cycles,
             &limits,
+            &consolidation,
         );
         let policy_result =
             policy_by_name
@@ -2692,6 +2798,7 @@ fn assign_community_ids(
 // Write outputs based on format list
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn write_all_outputs(
     project_name: &str,
     graph: &CodeGraph,
@@ -2700,16 +2807,32 @@ fn write_all_outputs(
     cycles: &[Cycle],
     out_dir: &Path,
     formats: &[String],
+    consolidation: &ConsolidationConfig,
 ) {
+    // Compute allowlisted node ids once; reused across formats that consume it.
+    let allowlisted: Vec<String> = if consolidation.is_empty() {
+        Vec::new()
+    } else {
+        consolidation.allowlisted(metrics.iter().map(|m| m.id.as_str()))
+    };
+    // Only emit the `allowlisted_symbols` field when a section is actually
+    // configured — absent section = current JSON shape.
+    let allow_ref: Option<&[String]> = if consolidation.is_empty() {
+        None
+    } else {
+        Some(allowlisted.as_slice())
+    };
+
     for fmt in formats {
         match fmt.as_str() {
             "json" => {
                 write_graph_json(graph, &out_dir.join("graph.json"));
-                write_analysis_json(
+                write_analysis_json_with_allowlist(
                     metrics,
                     communities,
                     cycles,
                     graph,
+                    allow_ref,
                     &out_dir.join("analysis.json"),
                 );
             }
@@ -3091,6 +3214,10 @@ fn cmd_watch(
     let weights = resolve_weights(&cfg, None);
     let thresholds = resolve_hotspot_thresholds(&cfg, None, None);
     let formats = resolve_formats(&cfg, format_override);
+    // Watch mode always honours the configured allowlist — there is no
+    // debug-flag opt-out, since `graphify watch` has no CLI surface beyond
+    // existing flags.
+    let consolidation = resolve_consolidation(&cfg, false);
 
     if cfg.project.is_empty() {
         eprintln!("Error: no projects configured in config file.");
@@ -3133,6 +3260,7 @@ fn cmd_watch(
             &thresholds,
             &formats,
             force,
+            &consolidation,
         );
         eprintln!("[{}] Ready.", project.name);
     }
@@ -3200,6 +3328,7 @@ fn cmd_watch(
                         &thresholds,
                         &formats,
                         false,
+                        &consolidation,
                     );
                     eprintln!("[{}] Rebuilt.", project.name);
                 }
@@ -3495,6 +3624,7 @@ mod tests {
             &[],
             &[],
             &CheckLimits::default(),
+            &ConsolidationConfig::default(),
         );
 
         assert!(violations.is_empty(), "expected no violations");
@@ -3511,6 +3641,7 @@ mod tests {
             &[],
             &[],
             &CheckLimits::default(),
+            &ConsolidationConfig::default(),
         );
 
         assert_eq!(summary.max_hotspot_id.as_deref(), Some("a"));
@@ -3529,6 +3660,7 @@ mod tests {
                 max_cycles: Some(0),
                 max_hotspot_score: Some(0.8),
             },
+            &ConsolidationConfig::default(),
         );
 
         assert_eq!(violations.len(), 2, "expected two violations");
@@ -3540,6 +3672,36 @@ mod tests {
             &violations[1],
             CheckViolation::Limit { kind, .. } if kind == "max_hotspot_score"
         ));
+    }
+
+    #[test]
+    fn evaluate_quality_gates_skips_allowlisted_hotspot() {
+        use graphify_core::consolidation::{ConsolidationConfig, ConsolidationConfigRaw};
+        let graph = sample_graph();
+        // `a` would be the max hotspot, but the allowlist marks it as
+        // intentional — so `b` should be selected instead.
+        let allow = ConsolidationConfig::compile(ConsolidationConfigRaw {
+            allowlist: vec!["a".into()],
+            ..Default::default()
+        })
+        .unwrap();
+        let (summary, violations) = evaluate_quality_gates(
+            &graph,
+            &[metric("a", 0.91), metric("b", 0.65)],
+            &[],
+            &[],
+            &CheckLimits {
+                max_cycles: None,
+                max_hotspot_score: Some(0.8),
+            },
+            &allow,
+        );
+
+        assert_eq!(summary.max_hotspot_id.as_deref(), Some("b"));
+        assert!(
+            violations.is_empty(),
+            "allowlisted hotspot should not trip the gate"
+        );
     }
 
     #[test]
