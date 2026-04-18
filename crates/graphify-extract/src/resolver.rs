@@ -172,6 +172,14 @@ impl ModuleResolver {
         &self.psr4_mappings
     }
 
+    /// Returns `true` if `module_id` is a registered local (in-project)
+    /// module. Used by FEAT-021's barrel-collapse pass, which needs to
+    /// decide whether to follow an `export * from …` chain into the
+    /// upstream module or stop at the package boundary.
+    pub fn is_local_module(&self, module_id: &str) -> bool {
+        self.known_modules.contains_key(module_id)
+    }
+
     /// Parse `composer.json` and load `autoload.psr-4` + `autoload-dev.psr-4`
     /// mappings. Tolerates missing files and malformed JSON — failures leave
     /// the mappings empty without panicking.
@@ -238,7 +246,7 @@ impl ModuleResolver {
 
         // 4. TypeScript / generic relative imports (`./foo`, `../bar`).
         if raw.starts_with("./") || raw.starts_with("../") {
-            let resolved = resolve_ts_relative(raw, from_module);
+            let resolved = resolve_ts_relative(raw, from_module, is_package);
             let is_local = self.known_modules.contains_key(&resolved);
             return (resolved, is_local, 0.9);
         }
@@ -450,10 +458,16 @@ fn match_alias_target(raw: &str, alias_pat: &str, target_pat: &str) -> Option<St
 /// Examples:
 /// - `"./services/user"` from `"src.index"` → `"src.services.user"`
 /// - `"../lib/api"` from `"src.services.user"` → `"src.lib.api"`
-fn resolve_ts_relative(raw: &str, from_module: &str) -> String {
-    // Split from_module and drop the leaf (current file).
+fn resolve_ts_relative(raw: &str, from_module: &str, is_package: bool) -> String {
+    // Split from_module and drop the leaf (current file) — UNLESS `from_module`
+    // is a package entry point (`index.ts`), in which case the module id
+    // already collapses to the containing directory. Popping the leaf a second
+    // time would over-climb and send `./entities` from `src/domain/index.ts`
+    // to `src.entities` instead of `src.domain.entities` (FEAT-021 discovered
+    // this hiding as a symptom of the barrel-collapse pass failing to resolve
+    // re-export chains into the same-directory canonical target).
     let mut parts: Vec<&str> = from_module.split('.').collect();
-    if !parts.is_empty() {
+    if !is_package && !parts.is_empty() {
         parts.pop();
     }
 

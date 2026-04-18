@@ -1230,3 +1230,105 @@ allow_same_partition = true
         "expected successful output, got:\n{stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// FEAT-021 Part B: barrel re-exports collapse to canonical declaration
+// ---------------------------------------------------------------------------
+
+/// The `ts_barrel_project` fixture has a 2-level barrel chain:
+///
+/// ```text
+/// consumer.ts  ── import { Course } from './domain'
+/// domain/index.ts         ── export { Course } from './entities'
+/// domain/entities/index.ts ── export { Course } from './course'
+/// domain/entities/course.ts (canonical declaration)
+/// ```
+///
+/// Before Part B each barrel minted its own `Course` Function node
+/// (`domain.Course`, `domain.entities.Course`), inflating the symbol count
+/// and splitting fan-in. After Part B, only `domain.entities.course.Course`
+/// should remain, and it should carry the dropped barrel ids as
+/// `alternative_paths`.
+#[test]
+fn feat_021_part_b_collapses_barrel_chain_to_canonical_node() {
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_barrel_project");
+
+    let tmp = TempDir::new().expect("create temp dir");
+    let out_dir = tmp.path().join("output");
+
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "barrel_fixture"
+repo = "{repo}"
+lang = ["typescript"]
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        repo = fixture_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    );
+
+    let config_path = tmp.path().join("graphify.toml");
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let status = Command::new(graphify_bin())
+        .arg("run")
+        .arg("--config")
+        .arg(&config_path)
+        .status()
+        .expect("launch graphify binary");
+    assert!(status.success(), "graphify run exited with non-zero status");
+
+    let graph_json_path = out_dir.join("barrel_fixture").join("graph.json");
+    let raw = std::fs::read_to_string(&graph_json_path).expect("read graph.json");
+    let graph: serde_json::Value = serde_json::from_str(&raw).expect("parse graph.json");
+
+    let nodes = graph["nodes"].as_array().expect("nodes must be an array");
+    let node_ids: Vec<&str> = nodes.iter().filter_map(|n| n["id"].as_str()).collect();
+
+    // Canonical declaration survives.
+    assert!(
+        node_ids.contains(&"src.domain.entities.course.Course"),
+        "canonical Course node must exist, got {:?}",
+        node_ids
+    );
+    // Barrel-scoped duplicates must have been collapsed away.
+    assert!(
+        !node_ids.contains(&"src.domain.Course"),
+        "outer barrel Course node must have been collapsed, got {:?}",
+        node_ids
+    );
+    assert!(
+        !node_ids.contains(&"src.domain.entities.Course"),
+        "inner barrel Course node must have been collapsed, got {:?}",
+        node_ids
+    );
+
+    // Canonical node carries the dropped barrel ids on `alternative_paths`.
+    let canonical = nodes
+        .iter()
+        .find(|n| n["id"] == "src.domain.entities.course.Course")
+        .expect("canonical node present");
+    let alts = canonical["alternative_paths"]
+        .as_array()
+        .expect("alternative_paths array on canonical node");
+    let alt_strs: Vec<&str> = alts.iter().filter_map(|v| v.as_str()).collect();
+
+    assert!(
+        alt_strs.contains(&"src.domain.Course"),
+        "outer barrel id must appear on alternative_paths, got {:?}",
+        alt_strs
+    );
+    assert!(
+        alt_strs.contains(&"src.domain.entities.Course"),
+        "inner barrel id must appear on alternative_paths, got {:?}",
+        alt_strs
+    );
+}

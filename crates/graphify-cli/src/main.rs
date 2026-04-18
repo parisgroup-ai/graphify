@@ -1734,9 +1734,132 @@ fn run_extract(
     // Merge results sequentially into graph.
     let mut all_nodes = Vec::new();
     let mut all_raw_edges: Vec<(String, String, graphify_core::types::Edge)> = Vec::new();
+    let mut all_reexports: Vec<graphify_extract::ReExportEntry> = Vec::new();
     for result in results {
         all_nodes.extend(result.nodes);
         all_raw_edges.extend(result.edges);
+        all_reexports.extend(result.reexports);
+    }
+
+    // Build a set of module names that are package entry points (__init__.py,
+    // index.ts), so the resolver knows not to pop the leaf for relative imports.
+    let package_modules: HashSet<&str> = files
+        .iter()
+        .filter(|f| f.is_package)
+        .map(|f| f.module_name.as_str())
+        .collect();
+
+    // -----------------------------------------------------------------------
+    // FEAT-021 Part B: barrel collapse for TypeScript re-exports.
+    //
+    // Build a project-wide re-export graph from the collected `export ... from`
+    // statements, then walk each barrel-scoped symbol node back to its
+    // canonical declaration. Nodes that resolve to a canonical upstream
+    // sibling are folded in: the canonical node absorbs the barrel id into
+    // its `alternative_paths`, and the barrel node is dropped so it no
+    // longer inflates hotspot / fan-in metrics.
+    //
+    // Edge-level rewrite (rewriting import-path targets to canonical symbol
+    // ids) is intentionally not wired here — Imports edges key on module
+    // paths, not symbol names, so the incremental win comes from the node
+    // dedupe alone. Expanding to edge rewrite is tracked as a follow-up.
+    // -----------------------------------------------------------------------
+    let mut barrel_to_canonical: HashMap<String, String> = HashMap::new();
+    let mut canonical_to_alt_paths: HashMap<String, Vec<String>> = HashMap::new();
+    if !all_reexports.is_empty() && languages.contains(&Language::TypeScript) {
+        let package_modules_owned: HashSet<String> =
+            package_modules.iter().map(|s| (*s).to_owned()).collect();
+        let reexport_resolver = &resolver;
+        let resolve_cb = |raw: &str, from_module: &str| -> (String, bool) {
+            let is_package = package_modules_owned.contains(from_module);
+            let (resolved, is_local, _conf) =
+                reexport_resolver.resolve(raw, from_module, is_package);
+            (resolved, is_local)
+        };
+        let reexport_graph = graphify_extract::ReExportGraph::build(&all_reexports, &resolve_cb);
+
+        let is_local_fn = |module: &str| reexport_resolver.is_local_module(module);
+
+        for entry in &all_reexports {
+            for spec in &entry.specs {
+                let barrel_id = format!("{}.{}", entry.from_module, spec.local_name);
+                let outcome = reexport_graph.resolve_canonical(
+                    &entry.from_module,
+                    &spec.local_name,
+                    &is_local_fn,
+                );
+                match outcome {
+                    graphify_extract::CanonicalResolution::Canonical {
+                        canonical_id,
+                        alternative_paths,
+                        ..
+                    } => {
+                        if canonical_id == barrel_id {
+                            continue;
+                        }
+                        // Register the barrel → canonical rewrite; accumulate
+                        // every barrel-scoped id reached along the walk on
+                        // the canonical's alternative_paths list.
+                        barrel_to_canonical
+                            .entry(barrel_id.clone())
+                            .or_insert_with(|| canonical_id.clone());
+                        let alts = canonical_to_alt_paths.entry(canonical_id).or_default();
+                        for p in alternative_paths {
+                            if !alts.contains(&p) {
+                                alts.push(p);
+                            }
+                        }
+                        if !alts.contains(&barrel_id) {
+                            alts.push(barrel_id);
+                        }
+                    }
+                    graphify_extract::CanonicalResolution::Cycle {
+                        at_module, at_name, ..
+                    } => {
+                        eprintln!(
+                            "Warning: [{}] cyclic re-export detected for symbol '{}' from '{}' (chain revisits {}.{}); leaving barrel nodes in place.",
+                            project.name,
+                            spec.local_name,
+                            entry.from_module,
+                            at_module,
+                            at_name,
+                        );
+                    }
+                    graphify_extract::CanonicalResolution::Unresolved { .. } => {
+                        // Chain terminated at a non-local module (external
+                        // package, missing file). Keep the barrel symbol
+                        // node; downstream confidence handling will take
+                        // over for import edges.
+                    }
+                }
+            }
+        }
+    }
+
+    // Collapse barrel symbol nodes into their canonical counterparts.
+    // Order: first dedupe the node list (drop any barrel id that maps to a
+    // canonical), then fan out `alternative_paths` onto canonical nodes.
+    // Also rewrites the raw edges' source / target strings so the
+    // subsequent edge-merge step sees canonical ids only.
+    if !barrel_to_canonical.is_empty() {
+        all_nodes.retain(|n| !barrel_to_canonical.contains_key(&n.id));
+        for node in &mut all_nodes {
+            if let Some(alts) = canonical_to_alt_paths.get(&node.id) {
+                for p in alts {
+                    if &node.id != p && !node.alternative_paths.contains(p) {
+                        node.alternative_paths.push(p.clone());
+                    }
+                }
+            }
+        }
+        for (src_id, raw_target, _edge) in all_raw_edges.iter_mut() {
+            if let Some(canonical) = barrel_to_canonical.get(src_id) {
+                *src_id = canonical.clone();
+            }
+            if let Some(canonical) = barrel_to_canonical.get(raw_target) {
+                *raw_target = canonical.clone();
+            }
+        }
     }
 
     // Build graph: add all nodes first.
@@ -1752,14 +1875,6 @@ fn run_extract(
     for node in all_nodes {
         graph.add_node(node);
     }
-
-    // Build a set of module names that are package entry points (__init__.py,
-    // index.ts), so the resolver knows not to pop the leaf for relative imports.
-    let package_modules: HashSet<&str> = files
-        .iter()
-        .filter(|f| f.is_package)
-        .map(|f| f.module_name.as_str())
-        .collect();
 
     // Compile external-stub prefixes (issue #12): edges resolving to these
     // packages are tagged `ExpectedExternal` instead of `Ambiguous`.

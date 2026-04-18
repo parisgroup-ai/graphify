@@ -21,6 +21,10 @@ struct NodeRecord<'a> {
     language: String,
     line: usize,
     is_local: bool,
+    /// FEAT-021: extra import paths reachable for the same declaration.
+    /// Omitted from the JSON when empty to preserve the legacy shape.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    alternative_paths: Vec<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -57,6 +61,7 @@ pub fn write_graph_json(graph: &CodeGraph, path: &Path) {
             language: format!("{:?}", n.language),
             line: n.line,
             is_local: n.is_local,
+            alternative_paths: n.alternative_paths.iter().map(String::as_str).collect(),
         })
         .collect();
 
