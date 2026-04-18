@@ -2,8 +2,14 @@
 uid: feat-021
 status: open
 priority: low
-scheduled:
 pomodoros: 0
+timeSpent: 28
+timeEntries:
+- date: 2026-04-18
+  minutes: 28
+  type: manual
+  executor: claude-solo
+  tokens: 100000
 contexts:
 - extract
 - typescript

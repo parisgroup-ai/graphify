@@ -1,10 +1,18 @@
 ---
 uid: chore-002
-status: open
+status: done
 priority: low
 scheduled: 2026-04-18
+completed: 2026-04-18
 timeEstimate: 20
 pomodoros: 0
+timeSpent: 6
+timeEntries:
+- date: 2026-04-18
+  minutes: 6
+  type: manual
+  executor: claude-solo
+  tokens: 42000
 contexts:
 - tn
 - tasknotes

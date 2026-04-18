@@ -1,10 +1,18 @@
 ---
 uid: feat-023
-status: in-progress
+status: done
 priority: normal
 scheduled: 2026-04-18
+completed: 2026-04-18
 timeEstimate: 60
 pomodoros: 0
+timeSpent: 20
+timeEntries:
+- date: 2026-04-18
+  minutes: 20
+  type: manual
+  executor: claude-solo
+  tokens: 70000
 contexts:
 - consolidation
 - drift
@@ -136,37 +144,37 @@ omitted from JSON.
 
 ## Subtasks
 
-- [ ] Extend the drift engine in `graphify-core::diff` to accept an
+- [x] Extend the drift engine in `graphify-core::diff` to accept an
       optional `ConsolidationConfig` reference; add
       `compute_diff_with_config` (leave `compute_diff` intact as a
       pass-through with an empty config).
-- [ ] Build a node-id → mirror-group-name index from
+- [x] Build a node-id → mirror-group-name index from
       `ConsolidationConfig::intentional_mirrors()` once per diff call
       (cheap HashMap build, avoid per-ScoreChange scans).
-- [ ] Add `intentional_mirror: Option<String>` to `ScoreChange` with
+- [x] Add `intentional_mirror: Option<String>` to `ScoreChange` with
       `#[serde(skip_serializing_if = "Option::is_none")]` so absent
       config preserves the legacy JSON shape byte-for-byte.
-- [ ] Populate the annotation on every `ScoreChange` in `rising`,
+- [x] Populate the annotation on every `ScoreChange` in `rising`,
       `falling`, `new_hotspots`, `removed_hotspots` when its id is
       present in the index.
-- [ ] Update the JSON writer in `graphify-report::diff_json` so the new
+- [x] Update the JSON writer in `graphify-report::diff_json` so the new
       field round-trips end-to-end.
-- [ ] Update the Markdown writer in `graphify-report::diff_markdown` to
+- [x] Update the Markdown writer in `graphify-report::diff_markdown` to
       render an `### Intentional mirrors` subsection under Hotspots,
       listing annotated entries grouped by mirror name and omitting
       them from the main rising/falling lists.
-- [ ] Thread `ConsolidationConfig` through the CLI pipeline from
+- [x] Thread `ConsolidationConfig` through the CLI pipeline from
       `load_config` into `cmd_diff` and `cmd_run --baseline`.
-- [ ] Make `--ignore-allowlist` on `diff` pass an empty
+- [x] Make `--ignore-allowlist` on `diff` pass an empty
       `ConsolidationConfig` to the engine, matching the convention
       already used on `run` / `check` / `pr-summary`.
-- [ ] Unit fixture: two-snapshot pair where `TokenUsage` rises in a node
+- [x] Unit fixture: two-snapshot pair where `TokenUsage` rises in a node
       listed under `intentional_mirrors.TokenUsage`; assert
       `intentional_mirror == Some("TokenUsage")`.
-- [ ] Unit fixture: same rising symbol when no config is supplied;
+- [x] Unit fixture: same rising symbol when no config is supplied;
       assert `intentional_mirror == None` and JSON shape matches a
       pre-FEAT-023 golden sample.
-- [ ] CLI-level fixture: `graphify diff` with a `graphify.toml` that
+- [x] CLI-level fixture: `graphify diff` with a `graphify.toml` that
       declares mirrors produces Markdown containing the new
       subsection.
 
