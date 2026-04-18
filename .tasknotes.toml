@@ -1,0 +1,14 @@
+# tasknotes-cli (tn) project config.
+# Schema: rust/crates/tasknotes-core/src/config.rs (tn >= 0.2.0).
+
+tasks_dir   = "docs/TaskNotes/Tasks"
+sprint_file = "docs/TaskNotes/Tasks/sprint.md"
+archive_dir = "docs/TaskNotes/Tasks/archive"
+
+[defaults]
+task_type     = "TASK"
+priority      = "normal"
+required_tags = ["task"]
+
+[id]
+padding = 3

@@ -1,9 +1,15 @@
 ---
 uid: feat-020
-status: backlog
+status: in-progress
 priority: normal
-scheduled:
 pomodoros: 0
+timeSpent: 45
+timeEntries:
+- date: 2026-04-18
+  minutes: 45
+  type: manual
+  executor: claude-solo
+  tokens: 72000
 contexts:
 - consolidation
 - config
@@ -86,11 +92,11 @@ Backward compatible: absent section = current behavior.
   (optional, serde default).
 - Pipe the config through the pipeline orchestrator to the report stage.
 - Thread the allowlist into:
-  - `graphify-report/src/check_report.rs` (suppress flagged symbols from
+  - `crates/graphify-report/src/check_report.rs` (suppress flagged symbols from
     violations where appropriate)
-  - `graphify-report/src/pr_summary.rs` (strip from hotspot annotations)
-  - A new `graphify-report/src/consolidation.rs` module that renders
-    `consolidation-candidates.json`
+  - `crates/graphify-report/src/pr_summary.rs` (strip from hotspot annotations)
+  - A new consolidation module under `crates/graphify-report/src/` that
+    renders `consolidation-candidates.json`
 - New CLI subcommand `graphify consolidation --config graphify.toml`.
 - New `--ignore-allowlist` flag on `run`, `check`, `pr-summary`.
 - Documentation: README section + example block in `graphify.toml`

@@ -196,6 +196,12 @@ For each [[project]]:
 - PHP method id scheme: `{module}.{ClassName}.{method}`
 - PhpExtractor never sets `is_package = true` (PHP has no package entry-point equivalent)
 - `graphify_extract::walker::discover_files_with_psr4` is the PSR-4-aware discovery entry; `discover_files` remains a thin wrapper for non-PHP projects
+- `[consolidation]` section in `graphify.toml` (FEAT-020 slice landed in 25eabc8): `allowlist = ["pattern", …]` — regex anchored `^…$`, matched against the **leaf symbol name** (last dot-segment of a node id), not the full id; so `TokenUsage` hits `app.models.TokenUsage` but not `app.models.TokenUsageAdapter`
+- Consolidation regex validation is fail-fast at config load; invalid pattern aborts `load_config` with the offending pattern surfaced
+- `analysis.json` gains `allowlisted_symbols: [...]` only when a `[consolidation]` section is present (absent section = legacy JSON shape, backward compatible)
+- `--ignore-allowlist` debug flag on `run` / `report` / `check` bypasses the allowlist for troubleshooting
+- `check`'s `max_hotspot_score` gate skips allowlisted nodes when picking candidates — intentional mirrors never trip CI on their own score
+- FEAT-020 deferred subtasks (tracked as FEAT-022/023/024/DOC-001): `graphify consolidation` subcommand, `[consolidation.intentional_mirrors]` drift suppression, `pr-summary` annotation strip, README migration note
 
 ## Build & Release
 
