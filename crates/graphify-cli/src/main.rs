@@ -10,7 +10,7 @@ use graphify_core::consolidation::{ConsolidationConfig, ConsolidationConfigRaw};
 use graphify_core::contract::{
     CaseRule, FieldAlias, FieldType, GlobalContractConfig, PairConfig, PrimitiveType, Severity,
 };
-use graphify_core::diff::{compute_diff, AnalysisSnapshot};
+use graphify_core::diff::{compute_diff_with_config, AnalysisSnapshot};
 use graphify_core::{
     community::detect_communities,
     cycles::{find_sccs, find_simple_cycles},
@@ -492,6 +492,12 @@ enum Commands {
         /// Minimum score delta to report as significant (default: 0.05)
         #[arg(long, default_value = "0.05")]
         threshold: f64,
+
+        /// Skip the `[consolidation].allowlist` and
+        /// `[consolidation.intentional_mirrors]` sections when a config is
+        /// supplied (debug flag — emits un-annotated hotspot entries).
+        #[arg(long, default_value_t = false)]
+        ignore_allowlist: bool,
     },
 
     /// Render a PR-ready Markdown summary from a project's Graphify output directory.
@@ -1002,6 +1008,7 @@ fn main() {
             project,
             output,
             threshold,
+            ignore_allowlist,
         } => {
             cmd_diff(
                 before.as_deref(),
@@ -1011,6 +1018,7 @@ fn main() {
                 project.as_deref(),
                 output.as_deref(),
                 threshold,
+                ignore_allowlist,
             );
         }
 
@@ -1139,6 +1147,7 @@ local_prefix = "app"
 // diff command
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_diff(
     before: Option<&Path>,
     after: Option<&Path>,
@@ -1147,22 +1156,31 @@ fn cmd_diff(
     project: Option<&str>,
     output: Option<&Path>,
     threshold: f64,
+    ignore_allowlist: bool,
 ) {
-    let (before_snapshot, after_snapshot) = match (before, after, baseline, config) {
-        // File-vs-file mode
-        (Some(before_path), Some(after_path), None, None) => {
+    // Load the config once up front when supplied — it feeds both the
+    // consolidation lookup (file-vs-file + baseline-vs-live modes) and
+    // the live extraction (baseline-vs-live only).
+    let cfg_opt = config.map(load_config);
+    let consolidation = cfg_opt
+        .as_ref()
+        .map(|cfg| resolve_consolidation(cfg, ignore_allowlist));
+
+    let (before_snapshot, after_snapshot) = match (before, after, baseline, cfg_opt.as_ref()) {
+        // File-vs-file mode (config is optional; when present it supplies
+        // the consolidation allowlist + intentional_mirrors).
+        (Some(before_path), Some(after_path), None, _) => {
             let b = load_snapshot(before_path);
             let a = load_snapshot(after_path);
             (b, a)
         }
         // Baseline-vs-live mode
-        (None, None, Some(baseline_path), Some(config_path)) => {
+        (None, None, Some(baseline_path), Some(cfg)) => {
             let b = load_snapshot(baseline_path);
-            let cfg = load_config(config_path);
-            let projects = filter_projects(&cfg, project);
+            let projects = filter_projects(cfg, project);
             let project_cfg = projects[0];
-            let w = resolve_weights(&cfg, None);
-            let thresholds = resolve_hotspot_thresholds(&cfg, None, None);
+            let w = resolve_weights(cfg, None);
+            let thresholds = resolve_hotspot_thresholds(cfg, None, None);
             let (graph, _, _stats) = run_extract(project_cfg, &cfg.settings, None, false);
             let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w, &thresholds);
             assign_community_ids(&mut metrics, &communities);
@@ -1211,7 +1229,12 @@ fn cmd_diff(
         }
     };
 
-    let report = compute_diff(&before_snapshot, &after_snapshot, threshold);
+    let report = compute_diff_with_config(
+        &before_snapshot,
+        &after_snapshot,
+        threshold,
+        consolidation.as_ref(),
+    );
 
     let out_dir = output.unwrap_or(Path::new("."));
     std::fs::create_dir_all(out_dir).expect("create output directory");

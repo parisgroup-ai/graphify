@@ -590,6 +590,7 @@ mod tests {
                         before,
                         after,
                         delta: after - before,
+                        intentional_mirror: None,
                     })
                     .collect(),
                 falling: vec![],
@@ -600,6 +601,7 @@ mod tests {
                         before: 0.0,
                         after,
                         delta: after,
+                        intentional_mirror: None,
                     })
                     .collect(),
                 removed_hotspots: vec![],

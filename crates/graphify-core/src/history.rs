@@ -410,6 +410,7 @@ fn compute_hotspot_delta(
                     before: *before_score,
                     after: *after_score,
                     delta,
+                    intentional_mirror: None,
                 });
             } else if delta < 0.0 {
                 falling.push(ScoreChange {
@@ -417,6 +418,7 @@ fn compute_hotspot_delta(
                     before: *before_score,
                     after: *after_score,
                     delta,
+                    intentional_mirror: None,
                 });
             }
         }

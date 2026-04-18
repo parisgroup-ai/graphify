@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
+use crate::consolidation::ConsolidationConfig;
 use crate::metrics::HotspotType;
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,12 @@ pub struct ScoreChange {
     pub before: f64,
     pub after: f64,
     pub delta: f64,
+    /// Name of the `[consolidation.intentional_mirrors]` group this node
+    /// belongs to, when one is declared. Consumers can filter on this to
+    /// collapse expected cross-project duplicates; absent when no mirror
+    /// group is declared (preserves legacy JSON shape byte-for-byte).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intentional_mirror: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +159,65 @@ pub fn compute_diff(
         cycles,
         hotspots,
         communities,
+    }
+}
+
+/// Like [`compute_diff`] but annotates hotspot entries whose node id is
+/// declared under `[consolidation.intentional_mirrors]` in `graphify.toml`.
+///
+/// Pass `None` (or an empty [`ConsolidationConfig`]) to get the exact
+/// behaviour of [`compute_diff`]. When a non-empty config is supplied,
+/// each [`ScoreChange`] in `rising`, `falling`, `new_hotspots`, and
+/// `removed_hotspots` whose id appears in the mirror index gets its
+/// [`ScoreChange::intentional_mirror`] field populated with the group
+/// name.
+pub fn compute_diff_with_config(
+    before: &AnalysisSnapshot,
+    after: &AnalysisSnapshot,
+    score_threshold: f64,
+    consolidation: Option<&ConsolidationConfig>,
+) -> DiffReport {
+    let mut report = compute_diff(before, after, score_threshold);
+    if let Some(cfg) = consolidation {
+        let index = build_mirror_index(cfg);
+        if !index.is_empty() {
+            annotate_hotspots(&mut report.hotspots, &index);
+        }
+    }
+    report
+}
+
+/// Builds a `node_id -> mirror_group_name` index from a compiled
+/// consolidation config. Endpoints are declared as `"<project>:<node_id>"`
+/// strings; the `project:` prefix is stripped (if present) because drift
+/// reports operate on a single project's analysis at a time — the project
+/// disambiguator lives outside the diff surface.
+fn build_mirror_index(cfg: &ConsolidationConfig) -> HashMap<String, String> {
+    let mut index = HashMap::new();
+    for (group, endpoints) in cfg.intentional_mirrors() {
+        for endpoint in endpoints {
+            let node_id = endpoint
+                .split_once(':')
+                .map(|(_, id)| id)
+                .unwrap_or(endpoint.as_str());
+            index.insert(node_id.to_string(), group.clone());
+        }
+    }
+    index
+}
+
+fn annotate_hotspots(hotspots: &mut HotspotDiff, index: &HashMap<String, String>) {
+    annotate_bucket(&mut hotspots.rising, index);
+    annotate_bucket(&mut hotspots.falling, index);
+    annotate_bucket(&mut hotspots.new_hotspots, index);
+    annotate_bucket(&mut hotspots.removed_hotspots, index);
+}
+
+fn annotate_bucket(bucket: &mut [ScoreChange], index: &HashMap<String, String>) {
+    for sc in bucket {
+        if let Some(group) = index.get(&sc.id) {
+            sc.intentional_mirror = Some(group.clone());
+        }
     }
 }
 
@@ -273,6 +339,7 @@ fn compute_hotspot_diff(
                     before: before_node.score,
                     after: after_node.score,
                     delta,
+                    intentional_mirror: None,
                 };
                 if delta > 0.0 {
                     rising.push(change);
@@ -327,6 +394,7 @@ fn compute_hotspot_diff(
                 before: before_score,
                 after: after_score,
                 delta: after_score - before_score,
+                intentional_mirror: None,
             }
         })
         .collect();
@@ -346,6 +414,7 @@ fn compute_hotspot_diff(
                 before: before_score,
                 after: after_score,
                 delta: after_score - before_score,
+                intentional_mirror: None,
             }
         })
         .collect();
@@ -736,6 +805,124 @@ mod tests {
         assert_eq!(report.summary_delta.nodes.change, -1);
         assert!(report.edges.added_nodes.is_empty());
         assert_eq!(report.edges.removed_nodes, vec!["a"]);
+    }
+
+    fn mirror_config(group: &str, endpoints: &[&str]) -> ConsolidationConfig {
+        use crate::consolidation::ConsolidationConfigRaw;
+        let mut mirrors = HashMap::new();
+        mirrors.insert(
+            group.to_string(),
+            endpoints.iter().map(|s| s.to_string()).collect(),
+        );
+        ConsolidationConfig::compile(ConsolidationConfigRaw {
+            allowlist: vec![],
+            intentional_mirrors: mirrors,
+        })
+        .expect("mirror_config compiles")
+    }
+
+    fn rising_snapshots() -> (AnalysisSnapshot, AnalysisSnapshot) {
+        let before = make_snapshot(
+            vec![node("app.models.tokens.TokenUsage", 0.30, 5, 3, 0)],
+            vec![],
+            vec![],
+            8,
+        );
+        let after = make_snapshot(
+            vec![node("app.models.tokens.TokenUsage", 0.50, 5, 3, 0)],
+            vec![],
+            vec![],
+            8,
+        );
+        (before, after)
+    }
+
+    #[test]
+    fn compute_diff_with_none_config_matches_plain_compute_diff() {
+        let (before, after) = rising_snapshots();
+        let plain = compute_diff(&before, &after, 0.05);
+        let annotated = compute_diff_with_config(&before, &after, 0.05, None);
+
+        assert_eq!(plain.hotspots.rising.len(), 1);
+        assert_eq!(annotated.hotspots.rising.len(), 1);
+        assert_eq!(plain.hotspots.rising[0].id, annotated.hotspots.rising[0].id);
+        assert_eq!(plain.hotspots.rising[0].intentional_mirror, None);
+        assert_eq!(annotated.hotspots.rising[0].intentional_mirror, None);
+    }
+
+    #[test]
+    fn compute_diff_with_empty_config_leaves_entries_unannotated() {
+        let (before, after) = rising_snapshots();
+        let cfg = ConsolidationConfig::default();
+        let report = compute_diff_with_config(&before, &after, 0.05, Some(&cfg));
+        assert_eq!(report.hotspots.rising[0].intentional_mirror, None);
+    }
+
+    #[test]
+    fn compute_diff_with_config_annotates_declared_mirror() {
+        let (before, after) = rising_snapshots();
+        let cfg = mirror_config(
+            "TokenUsage",
+            &[
+                "ana-service:app.models.tokens.TokenUsage",
+                "pkg-types:src.tokens.TokenUsage",
+            ],
+        );
+        let report = compute_diff_with_config(&before, &after, 0.05, Some(&cfg));
+        assert_eq!(
+            report.hotspots.rising[0].intentional_mirror,
+            Some("TokenUsage".to_string())
+        );
+    }
+
+    #[test]
+    fn compute_diff_with_config_leaves_non_mirror_leaves_alone() {
+        let (before, after) = rising_snapshots();
+        // Declares the same leaf-name `TokenUsage` but a DIFFERENT node id —
+        // the annotation must not bleed onto the unrelated node.
+        let cfg = mirror_config("TokenUsage", &["other-service:app.other.TokenUsage"]);
+        let report = compute_diff_with_config(&before, &after, 0.05, Some(&cfg));
+        assert_eq!(report.hotspots.rising[0].intentional_mirror, None);
+    }
+
+    #[test]
+    fn compute_diff_with_config_accepts_bare_node_ids_without_project_prefix() {
+        let (before, after) = rising_snapshots();
+        let cfg = mirror_config("TokenUsage", &["app.models.tokens.TokenUsage"]);
+        let report = compute_diff_with_config(&before, &after, 0.05, Some(&cfg));
+        assert_eq!(
+            report.hotspots.rising[0].intentional_mirror,
+            Some("TokenUsage".to_string())
+        );
+    }
+
+    #[test]
+    fn score_change_json_omits_mirror_field_when_none() {
+        let sc = ScoreChange {
+            id: "x".into(),
+            before: 0.1,
+            after: 0.2,
+            delta: 0.1,
+            intentional_mirror: None,
+        };
+        let json = serde_json::to_string(&sc).unwrap();
+        assert!(
+            !json.contains("intentional_mirror"),
+            "legacy JSON shape must omit the field when None, got: {json}"
+        );
+    }
+
+    #[test]
+    fn score_change_json_includes_mirror_field_when_some() {
+        let sc = ScoreChange {
+            id: "x".into(),
+            before: 0.1,
+            after: 0.2,
+            delta: 0.1,
+            intentional_mirror: Some("TokenUsage".into()),
+        };
+        let json = serde_json::to_string(&sc).unwrap();
+        assert!(json.contains("\"intentional_mirror\":\"TokenUsage\""));
     }
 
     #[test]
