@@ -1,67 +1,69 @@
-# Session Brief — Next Session (post-2026-04-18b)
+# Session Brief — Next Session (post-2026-04-18c)
 
-**Last session:** 2026-04-18 (tn session `2026-04-18-0724`) — shipped FEAT-022 `graphify consolidation` subcommand in commit `1be5225`: pure renderer in `graphify_report::consolidation`, per-project + top-level aggregate JSON/MD outputs, `--ignore-allowlist` / `--min-group-size` / `--format` flags, `schema_version: 1` with `alternative_paths: []` reserved for FEAT-021, 16 tests (6 integration + 10 unit). CI gates green. Dispatched via `/tn-plan-session` with `claude-team → claude-solo + self-review` (F2 fallback). Logged 32m / 55k tokens — calibrator now has `sample=2` for FEAT/claude-solo (ratio 0.42).
+**Last session:** 2026-04-18 (tn session `2026-04-18-0811`) — started in a blocked state (all four open candidates rejected by `tn session start --plan-only` as `body is stub`). Diagnosed the `tasknotes-core::task::is_stub_body_str` heuristic (only counts prose between `# Title` and the first `## …` — everything under `## Description` gets ignored), applied the TL;DR unblock to FEAT-021 + CHORE-002, re-planned. Dispatched CHORE-002 (done, 6m / 42k, commit `7780268`) and FEAT-021 Part A (partial, 28m / 100k, commit `e082c6a` — `Node.alternative_paths` scaffold, `ExtractionResult.reexports`, TS extractor captures named + star re-exports, new `reexport_graph` module with cycle-safe `Canonical | Unresolved | Cycle` walker, 21 unit tests, workspace fmt/clippy/test clean). After dispatch: authored FEAT-025 (Part B follow-up), DOC-001 (README migration subsection), FEAT-024 (pr-summary annotations) — all three now pass feasibility. Session-log + follow-up authoring committed in `dfff6d3`.
 
 ## Current State
 
-- Branch: `main` @ `1be5225 feat(cli): `graphify consolidation` subcommand (FEAT-022)`
-- CI: green on the 3 gated commands (`cargo fmt --all -- --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`)
-- `.gitignore` tightened this session: `tests/fixtures/*/monorepo/report/` + `.tasknotes/` (per-machine calibration) added — prior sessions kept re-surfacing these as untracked noise
-- Unstaged at session close (all legitimate, rolled into the close commit): `.gitignore`, `CLAUDE.md`, `.claude/session-brief.md`, `docs/TaskNotes/Tasks/CHORE-001-*.md` (pre-existing done→open flip from a prior session that never got committed), `docs/TaskNotes/Tasks/FEAT-022-*.md` (linter-adjusted frontmatter values: 32m/55k)
-- tn session `2026-04-18-0724` closed via `/session-close`
+- Branch: `main` @ `dfff6d3 chore(tn): log session 2026-04-18-0811 + author FEAT-025/DOC-001/FEAT-024 bodies`
+- CI: green as of `e082c6a` (Part A); `dfff6d3` is docs-only so CI gates not re-run but nothing touched Rust code
+- tn session `2026-04-18-0811` closed via `/session-close`; calibration updated (8 observations across 2 cells: CHORE/claude-solo now `sample=1`, FEAT/claude-solo now `sample=6`)
+- Unstaged at close: only `target/` build artifacts (pre-existing, gitignored-equivalent)
+- Four open tn tasks (see below); three pre-existing frontmatter-invalid files surfaced by `tn list` (BUG-007 priority `critical`, FEAT-002 missing tags, FEAT-011 priority `medium`, sprint.md missing uid) — pre-existing issues, not this session's scope
 
 ## Open Items (tn tasks)
 
-- **FEAT-020** (in-progress, normal) — core allowlist shipped (25eabc8); wrapper subtasks now mostly in FEAT-022/023/024/DOC-001
-- **FEAT-023** (open, normal, ~45m) — honour `[consolidation.intentional_mirrors]` to suppress cross-project drift entries
-- **FEAT-024** (open, low, ~30m) — integrate allowlist into `pr-summary` hotspot annotations
-- **DOC-001** (open, low, ~20m) — README section + migration note for `.consolidation-ignore` → `graphify.toml`
-- **FEAT-021** (open, low) — collapse barrel re-exports in TS extractor; still blocked by tn feasibility "body is stub" — unblock via CHORE-002
-- **CHORE-002** (open, low, ~20m) — rewrite FEAT-021 body to pass tn feasibility check
-- **BUG-014** — task file is `status: done` but `sprint.md` still lists `**open**` at row 24; reconcile next session
-
-## Suggested Next Steps
-
-1. **FEAT-023** (~45m) — highest remaining GH#13 value; structure already established by FEAT-020/022; cross-project drift suppression is the last thing blocking consumers from fully ditching `.consolidation-ignore`
-2. **DOC-001 + README migration** (~20m) — cheap docs win; users already on the shipped `[consolidation]` surface will benefit immediately
-3. **FEAT-024** (~30m) — trivial annotation strip in pr-summary; can bundle with FEAT-023 in one session
-4. **CHORE-002** (~20m) — unblocks FEAT-021 which otherwise stays frozen; low priority but keeps planning flow clean
-5. **Sprint.md reconcile** — one-line fix: BUG-014 row from `**open**` → `**done**` and move to Done section
+- **FEAT-025** (open, normal, ~45m) — **recommended first** — Part B of FEAT-021: wire `reexport_graph` resolver into edge emission, fan `alternative_paths` through 7 writers (JSON/CSV/MD/HTML/Neo4j/GraphML/Obsidian), run hotspot regression on a reference TS monorepo. Acceptance criteria explicit in body. All CI gates covered.
+- **FEAT-021** (open, low) — stays open until FEAT-025 lands. Part A's `reexport_graph` module is standalone-green; Part B wires it into the pipeline and fans the field through writers. Do NOT close FEAT-021 until both parts ship.
+- **DOC-001** (open, low, ~20m) — README migration subsection under existing "Consolidation Candidates" block. Pure docs. Scoped tight in the task body (three short paragraphs + two snippets).
+- **FEAT-024** (open, low, ~30m) — `pr-summary` renderer gains `[allowlisted]` / `[intentional mirror]` tail annotations. Reads existing `allowlisted_symbols` field from `analysis.json` (FEAT-020) + intentional-mirror matches from `drift` input (FEAT-023). Four unit fixtures.
+- **CHORE-002** — closed this session (done, 6m / 42k, `7780268`). Body now documents the tn heuristic gotcha for future reference. tn-side patch of `is_stub_body_str` explicitly deferred as a follow-up in the tasknotes-cli repo (not graphify scope).
 
 ## Decisions Made (don't re-debate)
 
 *(carried from prior sessions — see commit history + CLAUDE.md for full ledger)*
 
-*(added 2026-04-18b)*
+*(added 2026-04-18c)*
 
-- **FEAT-022 schema `alternative_paths: []` always present:** additive, future-proof. FEAT-021 can fill it in without bumping `schema_version`. Consumers that don't care about the field parse it as an empty array. Chosen over nullable (`null` is a lexical footgun in some languages).
-- **Aggregate file location = top-level `./<out>/consolidation-candidates.json`:** mirrors `graphify-summary.json` convention. Rejected a dedicated `./<out>/consolidation/` subdir — the extra nesting didn't pay off for a single file.
-- **`--format md` ships in FEAT-022, not deferred:** grouping logic is the same; only the renderer differs. Minimal markdown (header + table) was cheap; separating it would have been artificial work.
-- **FEAT-022 trust-but-verify values:** dispatcher self-reported 35m/92k; linter adjusted the frontmatter to 32m/55k. Logged to tn using the linter values (post-review source of truth). Pattern: **when frontmatter and dispatcher disagree, frontmatter wins** — the linter runs after human review.
+- **FEAT-021 split into Part A scaffold + Part B wiring:** the dispatcher took the split deliberately within the 36m/54m guardrail. Part A is standalone-green — the tree compiles and tests pass without any downstream consumer reading `ExtractionResult.reexports` or a populated `Node.alternative_paths`. Part B in FEAT-025 closes the loop. Do not backtrack and try to merge them.
+- **FEAT-025 scope includes the perf budget check:** the two-pass extraction on a large monorepo is called out in FEAT-021's Open Questions; FEAT-025 subtask list includes a back-of-envelope perf delta. If the delta exceeds 20% on the reference monorepo, STOP and plan a caching layer before shipping — don't merge a slowdown.
+- **Consolidation migration framing (DOC-001):** there was never a real `.consolidation-ignore` file format in this repo — that's historical framing from the task title. The migration subsection should explain that pre-FEAT-020 exclusions lived in shell scripts / CI grep-excludes / local conventions, and map those into `[consolidation].allowlist` + `[consolidation.intentional_mirrors]`. Do not introduce a `.consolidation-ignore` format.
+- **pr-summary annotation source (FEAT-024):** read `allowlisted_symbols` from `analysis.json` directly (already populated by FEAT-020 when `[consolidation]` is present). Do not thread `ConsolidationConfig` through as a new argument — keeps the renderer pure over JSON inputs.
+
+## Suggested Next Steps
+
+1. **FEAT-025 (~45m)** — closes the FEAT-021 loop. Highest pending-value work. Use `claude-solo` (Part A was `claude-solo` with `sample=6` → high confidence now). Likely a full session on its own given the 7-writer fan-out.
+2. **DOC-001 (~20m)** — cheap docs win. Can be bundled with FEAT-024 in one session (both <30m, unrelated code areas, `/clear` between them if token pressure).
+3. **FEAT-024 (~30m)** — trivial annotation strip. Fixture-heavy.
+4. **Sprint/frontmatter cleanup (~10m)** — fix the three invalid-frontmatter tasks (BUG-007 priority, FEAT-002 missing tags, FEAT-011 priority, sprint.md missing uid) so `tn list` stops complaining. Optional; pre-existing.
 
 ## Out of Scope (for next session unless lifted)
 
-- FEAT-021 barrel re-export collapse — v1.0 milestone; wait until FEAT-023/024/DOC-001 land first to measure how much noise the allowlist already removes
-- Restructuring `graphify_report::consolidation` — good as-is; pure renderer pattern mirrors pr-summary
-- Making `consolidation-candidates.json` a default output of `graphify run` — the subcommand is explicit-opt-in on purpose (most users don't want this noise in every report)
+- Patching `is_stub_body_str` in tasknotes-cli to count `## Description` content as description. Tracked as an explicit unchecked subtask in CHORE-002's body; lives in the sibling `tasknotes-cli` repo, not this one.
+- Updating the `tn new` template to ship with a TL;DR paragraph. Same repo as above.
+- Making `Node.alternative_paths` populate for Python barrel-equivalent (`from .foo import Bar` in `__init__.py`). Explicitly out of scope for FEAT-021/025 v1.
 
 ## Re-Entry Hints (survive compaction)
 
-1. Re-read `.claude/session-brief.md` (this file) + `CLAUDE.md` (consolidation conventions at end of `## Conventions`, including the new `graphify consolidation` line)
-2. `git log origin/main..HEAD --oneline` — see unpushed work (likely includes the session-close commit)
-3. `git status --short` — should be clean after close (CHORE-001 flip, FEAT-022 frontmatter, CLAUDE.md + brief + .gitignore all rolled in)
-4. `tn list --status open` — should show 5 tasks (FEAT-021/023/024, DOC-001, CHORE-002)
-5. `tn time --roi --week` — should show ratio 0.42 for FEAT/claude-solo (sample=2 after this session)
-6. `25eabc8` = allowlist core reference; `1be5225` = consolidation subcommand reference — read these bodies + the fixtures they introduce before touching consolidation code
+1. Re-read this file + `CLAUDE.md` (the new body-is-stub bullet sits near the end of `## Conventions`, right after the other `tn` feasibility-check heuristics bullet added in `7780268`)
+2. `git log origin/main..HEAD --oneline` — see unpushed work (includes `7780268`, `e082c6a`, `dfff6d3`, and any prior unpushed)
+3. `git status --short` — only `target/` artifacts expected
+4. `tn list --status open` — should show FEAT-025, FEAT-021, DOC-001, FEAT-024 (four rows)
+5. `tn time --roi --week` — CHORE/claude-solo `sample=1`, FEAT/claude-solo `sample=6`
+6. Start-of-session reads for FEAT-025: commit `e082c6a` diff (Part A ground truth), `crates/graphify-extract/src/reexport_graph.rs` (the walker to wire), `crates/graphify-extract/src/lib.rs` (where edge emission happens)
 
 ## Team Dispatch Recommendations
 
-- **FEAT-023** (intentional_mirrors drift): `claude-solo + self-review` — drift code is well-understood and `[consolidation]` plumbing already exists; self-review helpful because cross-project edge accounting is fiddly. 45m.
-- **FEAT-024** (pr-summary): `claude-solo` — trivial annotation strip. 30m.
+- **FEAT-025**: `claude-solo` — Part A precedent established; no new architectural risk. Alternative: `claude-team` with self-review if the 7-writer fan-out feels large, but note that F2 degrades team → solo+self-review anyway. 45m.
 - **DOC-001**: `claude-solo` — pure docs. 20m.
-- **CHORE-002**: `claude-solo` — 20m, quick.
+- **FEAT-024**: `claude-solo` — trivial. 30m.
 
 ## Context Budget Plan
 
-- **Start of next session**: brief + CLAUDE.md + commit `1be5225` body + target task's tasknote ≈ 5k tok
-- `/clear` not needed for single-task sessions. For a combined FEAT-023 + DOC-001 + FEAT-024 run (~1h35m), consider `/clear` between DOC-001 (pure docs) and the code tasks since their areas don't overlap.
+- **Start of next session**: brief + CLAUDE.md + FEAT-025 body + commit `e082c6a` body ≈ 8k tok
+- For the combined DOC-001 + FEAT-024 run (~50m): `/clear` between them is overkill — different writers/renderers but both small. Single-session fine.
+- For FEAT-025 on its own: expect 150–250k tokens (7 writers × ~4k Edit each + fixtures + resolver integration + regression script). Factor in the observable-vs-heuristic gap (~32% under-count — see below).
+
+## Calibration Observations (for CHORE-004 if it exists)
+
+- **Subagent heuristic under-counts observable by ~32%.** FEAT-021 Part A dispatch reported `tokens: 100000` via the rule-#2 heuristic (~20k baseline + 2.5k per Read + 4k per Edit + 1k per small Bash); the parent's tool-return `<usage>` block showed `total_tokens: 146956`. Matches the dispatcher spec's own caveat that the heuristic lags observable. Logged 100k per protocol (consistency with documented rule), but future calibration regressions should use the observable values when available. This is one of the samples CHORE-004 calibration convergence should account for.
+- **Planning-phase work can exhaust a meta-task's content.** CHORE-002's core value was the heuristic diagnosis — produced during `/tn-plan-session` planning, not during dispatch. The dispatched subagent only did the `CLAUDE.md` note addition (~5m of real work) even though the estimate was 8m. For future meta-tasks where the "meta" work IS the diagnosis, consider whether dispatch even makes sense or just manually logging the planning-phase time is cleaner.
