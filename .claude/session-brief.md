@@ -1,75 +1,67 @@
-# Session Brief — Next Session (post-2026-04-18)
+# Session Brief — Next Session (post-2026-04-18b)
 
-**Last session:** 2026-04-18 — landed FEAT-020 slice (commit `25eabc8`): first-class `[consolidation]` section in `graphify.toml` with anchored leaf-symbol regex matching, `allowlisted_symbols` in `analysis.json` (opt-in, backward compatible), `--ignore-allowlist` flag on `run`/`report`/`check`, hotspot gate allowlist-aware. CI gates green (fmt, clippy, test). Dispatched via `/tn-plan-session` → tn session `2026-04-18-0001`. FEAT-020 remains **in-progress** (partial); 4 follow-ups spun out.
+**Last session:** 2026-04-18 (tn session `2026-04-18-0724`) — shipped FEAT-022 `graphify consolidation` subcommand in commit `1be5225`: pure renderer in `graphify_report::consolidation`, per-project + top-level aggregate JSON/MD outputs, `--ignore-allowlist` / `--min-group-size` / `--format` flags, `schema_version: 1` with `alternative_paths: []` reserved for FEAT-021, 16 tests (6 integration + 10 unit). CI gates green. Dispatched via `/tn-plan-session` with `claude-team → claude-solo + self-review` (F2 fallback). Logged 32m / 55k tokens — calibrator now has `sample=2` for FEAT/claude-solo (ratio 0.42).
 
 ## Current State
 
-- Branch: `main` @ `25eabc8 feat(consolidation): [consolidation] allowlist in graphify.toml (FEAT-020 slice)`
+- Branch: `main` @ `1be5225 feat(cli): `graphify consolidation` subcommand (FEAT-022)`
 - CI: green on the 3 gated commands (`cargo fmt --all -- --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`)
-- Unstaged session artifacts to stage in /session-close commit: `.tasknotes.toml` (schema fix), `docs/TaskNotes/Tasks/FEAT-020*.md` (path-ref fix + tn timeEntries), `docs/TaskNotes/Tasks/FEAT-021*.md` (status backlog→open)
-- Pre-existing unstaged (not ours, leave alone): `docs/TaskNotes/Tasks/CHORE-001-*.md`, `target/**`, `tests/fixtures/contract_drift/monorepo/report/`
-- tn session `2026-04-18-0001` closed via `tn session close` at end of this session; calibration now has `sample=1` for FEAT-sized work
+- `.gitignore` tightened this session: `tests/fixtures/*/monorepo/report/` + `.tasknotes/` (per-machine calibration) added — prior sessions kept re-surfacing these as untracked noise
+- Unstaged at session close (all legitimate, rolled into the close commit): `.gitignore`, `CLAUDE.md`, `.claude/session-brief.md`, `docs/TaskNotes/Tasks/CHORE-001-*.md` (pre-existing done→open flip from a prior session that never got committed), `docs/TaskNotes/Tasks/FEAT-022-*.md` (linter-adjusted frontmatter values: 32m/55k)
+- tn session `2026-04-18-0724` closed via `/session-close`
 
 ## Open Items (tn tasks)
 
-- **FEAT-020** (in-progress, normal) — partial; next slices tracked below
-- **FEAT-021** (open, low) — blocked on tn feasibility `body is stub`; unblock via CHORE-002
-- **FEAT-022** (open, normal, ~1h) — `graphify consolidation` subcommand emits `consolidation-candidates.json`
+- **FEAT-020** (in-progress, normal) — core allowlist shipped (25eabc8); wrapper subtasks now mostly in FEAT-022/023/024/DOC-001
 - **FEAT-023** (open, normal, ~45m) — honour `[consolidation.intentional_mirrors]` to suppress cross-project drift entries
 - **FEAT-024** (open, low, ~30m) — integrate allowlist into `pr-summary` hotspot annotations
 - **DOC-001** (open, low, ~20m) — README section + migration note for `.consolidation-ignore` → `graphify.toml`
-- **CHORE-001** (pre-existing, normal) — apply `cargo fmt --all` to fix lingering rustfmt violations (status may have shifted — verify)
-- **CHORE-002** (open, low, ~20m) — rewrite FEAT-021 body to pass tn feasibility check (stub heuristic)
+- **FEAT-021** (open, low) — collapse barrel re-exports in TS extractor; still blocked by tn feasibility "body is stub" — unblock via CHORE-002
+- **CHORE-002** (open, low, ~20m) — rewrite FEAT-021 body to pass tn feasibility check
+- **BUG-014** — task file is `status: done` but `sprint.md` still lists `**open**` at row 24; reconcile next session
 
 ## Suggested Next Steps
 
-1. **FEAT-022** (~1h) — natural continuation of FEAT-020 slice; consolidation subcommand lets skill consumers drop their bash+grep+python pipeline
-2. **FEAT-023** (~45m) — `intentional_mirrors` is the bigger user-win from GH#13 (cross-project drift dedup); low risk since structure already established
-3. **DOC-001 + README migration** — before FEAT-022 if you want users to adopt the `[consolidation]` section already shipped in 25eabc8
-4. **CHORE-002** — 20m unblock of FEAT-021; low priority but keeps the planning flow clean
-5. **Meta (not in tn):** upgrade `tn` CLI from 0.2.0 → ≥0.3.0 to match the `<!-- min-tn: v0.3.0 -->` requirement in `/tn-plan-session`
+1. **FEAT-023** (~45m) — highest remaining GH#13 value; structure already established by FEAT-020/022; cross-project drift suppression is the last thing blocking consumers from fully ditching `.consolidation-ignore`
+2. **DOC-001 + README migration** (~20m) — cheap docs win; users already on the shipped `[consolidation]` surface will benefit immediately
+3. **FEAT-024** (~30m) — trivial annotation strip in pr-summary; can bundle with FEAT-023 in one session
+4. **CHORE-002** (~20m) — unblocks FEAT-021 which otherwise stays frozen; low priority but keeps planning flow clean
+5. **Sprint.md reconcile** — one-line fix: BUG-014 row from `**open**` → `**done**` and move to Done section
 
 ## Decisions Made (don't re-debate)
 
 *(carried from prior sessions — see commit history + CLAUDE.md for full ledger)*
 
-*(added 2026-04-18)*
+*(added 2026-04-18b)*
 
-- **Consolidation matching semantics:** regex `^…$`-anchored against the **leaf symbol name** (last dot-segment), not the full node id. Avoids accidental substring hits on nested modules. Ships in 25eabc8.
-- **Backward compat:** `analysis.json` omits `allowlisted_symbols` when no section configured. Do NOT make it a default-empty array — downstream consumers would have to grow a schema check they don't need today.
-- **Fail-fast regex validation:** invalid pattern aborts `load_config` with the offending pattern surfaced. Loading a bad config and silently dropping patterns would be worse than erroring at the config boundary.
-- **F2 dispatcher fallback is intentional:** `claude-team` items degrade to `claude-solo + self-review` because `TeamCreate` lands in F3. No need to plumb around it — when F3 ships, the fallback disappears automatically.
-- **`.tasknotes.toml` canonical shape for graphify:** `tasks_dir = "docs/TaskNotes/Tasks"`, `sprint_file = "docs/TaskNotes/Tasks/sprint.md"`, `archive_dir = "docs/TaskNotes/Tasks/archive"`, `[defaults]`, `[id]`. The bare `[project]` scaffold tn produces on init is **not in the schema** and is silently ignored — always use the full form.
-- **tn status vocabulary is `{open, in-progress, done}` only** — any other value (e.g. `backlog`) makes tn silently drop the file from `tn list` (the real error only surfaces via `tn show <id>`). Graphify tasks are `open` when unstarted.
-- **tn feasibility check heuristics to avoid:**
-  - Any backticked `.rs` path in a task body is stat'd; paths for *new* files must be described without a fully-qualified `.rs` filename (use `a new module under \`crates/<crate>/src/\`` phrasing instead).
-  - Paths need the `crates/` prefix — graphify's `.rs` files all live under `crates/<crate>/src/…`.
-  - "body is stub" rejection triggers on some heuristic not yet understood (FEAT-021 tripped it despite 151 lines of content) — investigate via CHORE-002.
+- **FEAT-022 schema `alternative_paths: []` always present:** additive, future-proof. FEAT-021 can fill it in without bumping `schema_version`. Consumers that don't care about the field parse it as an empty array. Chosen over nullable (`null` is a lexical footgun in some languages).
+- **Aggregate file location = top-level `./<out>/consolidation-candidates.json`:** mirrors `graphify-summary.json` convention. Rejected a dedicated `./<out>/consolidation/` subdir — the extra nesting didn't pay off for a single file.
+- **`--format md` ships in FEAT-022, not deferred:** grouping logic is the same; only the renderer differs. Minimal markdown (header + table) was cheap; separating it would have been artificial work.
+- **FEAT-022 trust-but-verify values:** dispatcher self-reported 35m/92k; linter adjusted the frontmatter to 32m/55k. Logged to tn using the linter values (post-review source of truth). Pattern: **when frontmatter and dispatcher disagree, frontmatter wins** — the linter runs after human review.
 
 ## Out of Scope (for next session unless lifted)
 
-- Full FEAT-020 breadth beyond the committed slice — each remaining piece has its own FEAT-022/023/024/DOC-001 ticket
-- Structural refactor of `graphify_core::consolidation` module — good as-is, regex-anchored approach is deliberately conservative
-- Making `allowlisted_symbols` a required field in `analysis.json` — breaks backward compat for questionable gain
+- FEAT-021 barrel re-export collapse — v1.0 milestone; wait until FEAT-023/024/DOC-001 land first to measure how much noise the allowlist already removes
+- Restructuring `graphify_report::consolidation` — good as-is; pure renderer pattern mirrors pr-summary
+- Making `consolidation-candidates.json` a default output of `graphify run` — the subcommand is explicit-opt-in on purpose (most users don't want this noise in every report)
 
 ## Re-Entry Hints (survive compaction)
 
-1. Re-read `.claude/session-brief.md` (this file) + `CLAUDE.md` (consolidation conventions at end of `## Conventions`)
-2. `git log origin/main..HEAD --oneline` — see unpushed work
-3. `git status --short` — should be clean after /session-close commit (excluding pre-existing target/ + CHORE-001 noise)
-4. `tn list` — should show FEAT-020 (in-progress), FEAT-021 (open), FEAT-022/023/024, DOC-001, CHORE-001/002 as open
-5. `tn time --roi --week` — calibration now has 1 sample (FEAT, claude-solo, 45m)
-6. `25eabc8` is the canonical reference commit for the `[consolidation]` section — read its body + the regex fixtures it introduces before touching consolidation code
+1. Re-read `.claude/session-brief.md` (this file) + `CLAUDE.md` (consolidation conventions at end of `## Conventions`, including the new `graphify consolidation` line)
+2. `git log origin/main..HEAD --oneline` — see unpushed work (likely includes the session-close commit)
+3. `git status --short` — should be clean after close (CHORE-001 flip, FEAT-022 frontmatter, CLAUDE.md + brief + .gitignore all rolled in)
+4. `tn list --status open` — should show 5 tasks (FEAT-021/023/024, DOC-001, CHORE-002)
+5. `tn time --roi --week` — should show ratio 0.42 for FEAT/claude-solo (sample=2 after this session)
+6. `25eabc8` = allowlist core reference; `1be5225` = consolidation subcommand reference — read these bodies + the fixtures they introduce before touching consolidation code
 
 ## Team Dispatch Recommendations
 
-- **FEAT-022** (consolidation subcommand): `claude-solo` — tight scope, clear API shape already fixed by 25eabc8. 1h.
 - **FEAT-023** (intentional_mirrors drift): `claude-solo + self-review` — drift code is well-understood and `[consolidation]` plumbing already exists; self-review helpful because cross-project edge accounting is fiddly. 45m.
 - **FEAT-024** (pr-summary): `claude-solo` — trivial annotation strip. 30m.
 - **DOC-001**: `claude-solo` — pure docs. 20m.
-- **CHORE-002** (FEAT-021 unblock): `claude-solo` — 20m, quick.
+- **CHORE-002**: `claude-solo` — 20m, quick.
 
 ## Context Budget Plan
 
-- **Start of next session**: brief + CLAUDE.md + commit `25eabc8` body + target task's tasknote ≈ 5k tok
-- `/clear` not needed for single-task sessions. For multi-task sessions combining FEAT-022 + FEAT-024 + DOC-001 (~1h50m), consider /clear between tasks since their code areas don't overlap.
+- **Start of next session**: brief + CLAUDE.md + commit `1be5225` body + target task's tasknote ≈ 5k tok
+- `/clear` not needed for single-task sessions. For a combined FEAT-023 + DOC-001 + FEAT-024 run (~1h35m), consider `/clear` between DOC-001 (pure docs) and the code tasks since their areas don't overlap.

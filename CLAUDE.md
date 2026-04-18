@@ -202,6 +202,8 @@ For each [[project]]:
 - `--ignore-allowlist` debug flag on `run` / `report` / `check` bypasses the allowlist for troubleshooting
 - `check`'s `max_hotspot_score` gate skips allowlisted nodes when picking candidates — intentional mirrors never trip CI on their own score
 - FEAT-020 deferred subtasks (tracked as FEAT-022/023/024/DOC-001): `graphify consolidation` subcommand, `[consolidation.intentional_mirrors]` drift suppression, `pr-summary` annotation strip, README migration note
+- `graphify consolidation --config <PATH>` (FEAT-022 landed in 1be5225): emits `consolidation-candidates.json` per project + top-level aggregate when 2+ projects configured; flags `--ignore-allowlist` (keeps hits tagged `allowlisted: true`), `--min-group-size N` (default 2), `--format json|md`; JSON schema `schema_version: 1` with `alternative_paths: []` always present (reserved for FEAT-021); pure renderer lives in `graphify_report::consolidation`
+- `tn` feasibility-check heuristics (relevant when authoring task bodies for `/tn-plan-session`): bodies fail with `body is stub` when they contain placeholder prose (`Description here.`, empty `Subtask 1/2`), and fail with `referenced file not found` when they contain fully-qualified paths to files that don't exist in the repo — including `*.rs` paths for files this task will *create*. Phrase new files as "a new module under `crates/<crate>/src/`" (directory-only) instead; JSON examples should use placeholder strings that don't end in a recognizable source-file extension
 
 ## Build & Release
 

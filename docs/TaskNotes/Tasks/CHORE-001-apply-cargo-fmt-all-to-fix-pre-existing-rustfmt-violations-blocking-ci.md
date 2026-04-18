@@ -1,8 +1,9 @@
 ---
 uid: chore-001
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-15
+completed: 2026-04-17
 pomodoros: 0
 contexts:
 - ci

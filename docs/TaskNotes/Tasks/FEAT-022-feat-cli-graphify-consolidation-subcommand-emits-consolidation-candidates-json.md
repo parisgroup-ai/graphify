@@ -1,18 +1,23 @@
 ---
 uid: feat-022
 status: done
-completed: 2026-04-18
 priority: normal
 scheduled: 2026-04-18
+completed: 2026-04-18
 timeEstimate: 60
-timeSpent: 32
+pomodoros: 0
+timeSpent: 64
 timeEntries:
 - date: 2026-04-18
   minutes: 32
   type: manual
   executor: claude-solo
   tokens: 55000
-pomodoros: 0
+- date: 2026-04-18
+  minutes: 32
+  type: manual
+  executor: claude-solo
+  tokens: 55000
 contexts:
 - consolidation
 - cli

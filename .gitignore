@@ -22,3 +22,8 @@ Thumbs.db
 
 # Graphify output
 /report/
+# Test-generated Graphify output inside fixture monorepos
+tests/fixtures/*/monorepo/report/
+
+# tn (tasknotes-cli) per-machine calibration — not shareable
+.tasknotes/
