@@ -354,6 +354,51 @@ graphify consolidation --config graphify.toml
 
 Symbols declared under `[consolidation].allowlist` in `graphify.toml` (regex patterns anchored against the *leaf* symbol name) are filtered out by default. Use `--ignore-allowlist` to inspect the unfiltered grouping while debugging. `--min-group-size <N>` tightens the threshold (default `2`). `--format md` produces a tabular Markdown report instead of JSON.
 
+### Migrating from pre-FEAT-020 exclusion lists
+
+Before the `[consolidation]` section existed, teams tracked "known-duplicate" symbols in whatever place was at hand: the `graphify-consolidation-scan.sh` shell script bundled with the `code-consolidation` skill, `grep -v` filters in CI workflows, or ad-hoc `.consolidation-ignore`-style convention files kept next to the config. None of these are understood by `graphify consolidation`, `graphify check`, or `graphify diff` — move them into `graphify.toml` so every subcommand sees the same truth.
+
+Two canonical destinations:
+
+- `[consolidation].allowlist` — regex patterns anchored (`^…$`) against the *leaf* symbol name. Use it for shapes duplicated by design across many sites, like `TokenUsage`, `LessonType`, or any `*Response`/`*Dto` family. Invalid patterns are rejected at config load (fail-fast).
+- `[consolidation.intentional_mirrors]` — explicit `LeafName = ["project:node.id", …]` map, for shared-contract DTOs that legitimately co-exist at *specific* endpoints across projects. Drift reports suppress cross-project hotspot noise for these exact node pairs (see `graphify diff` output and the `pr-summary` annotations).
+
+**Before** — grep-exclude buried in a scan script or CI step:
+
+```bash
+# graphify-consolidation-scan.sh (legacy)
+grep -E "class (TokenUsage|LessonType)" -r src/ \
+  | grep -v -E "(TokenUsage|LessonType)Adapter"
+```
+
+**After** — same intent, expressed once in `graphify.toml`:
+
+```toml
+[consolidation]
+allowlist = [
+  "TokenUsage",
+  "LessonType",
+]
+```
+
+The regex is matched against the leaf name only, so `TokenUsage` hits `app.models.TokenUsage` but not `app.models.TokenUsageAdapter` — the legacy `grep -v` for `*Adapter` becomes redundant.
+
+**Before** — hand-written ignore list for a shared DTO mirrored across services:
+
+```text
+# .consolidation-ignore (ad-hoc, not understood by graphify)
+TokenUsage  # mirrored in ana-service and pkg-types by design
+```
+
+**After** — pinned to the exact endpoints in `graphify.toml`:
+
+```toml
+[consolidation.intentional_mirrors]
+TokenUsage = ["ana-service:app.models.tokens", "pkg-types:src.tokens"]
+```
+
+Once migrated, `graphify consolidation`, `graphify check`, and the `graphify diff` / `pr-summary` pipeline all honour the same list — delete the shell script, drop the CI `grep -v`, and remove any local ignore files. Use `--ignore-allowlist` on `run` / `report` / `check` when you want to double-check that the allowlist isn't masking a real regression.
+
 This subcommand supersedes the `graphify-consolidation-scan.sh` shipped in the `code-consolidation` skill — the native command is faster, typed, and honors the same `[consolidation]` config used by `graphify check` and the PR summary.
 
 ## Common Monorepo Recipes
