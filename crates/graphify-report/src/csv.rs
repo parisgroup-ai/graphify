@@ -4,11 +4,16 @@ use graphify_core::{graph::CodeGraph, metrics::NodeMetrics};
 
 /// Writes node metrics to a CSV file.
 ///
-/// Header: `id,kind,file_path,language,line,is_local,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle`
+/// Header: `id,kind,file_path,language,line,is_local,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle,alternative_paths`
 ///
-/// Node attribute columns (`kind`, `file_path`, `language`, `line`, `is_local`)
-/// are looked up from `graph`. If a metric ID is not found in the graph (should
-/// not happen in practice), those columns are written as empty strings / zeros.
+/// Node attribute columns (`kind`, `file_path`, `language`, `line`, `is_local`,
+/// `alternative_paths`) are looked up from `graph`. If a metric ID is not
+/// found in the graph (should not happen in practice), those columns are
+/// written as empty strings / zeros.
+///
+/// The `alternative_paths` column joins entries with `|` (pipe). Empty when
+/// the node has no alternatives (the common case for non-TypeScript nodes
+/// and for TS nodes outside barrel chains — see FEAT-021).
 ///
 /// # Panics
 /// Panics if file I/O or CSV serialization fails.
@@ -28,26 +33,30 @@ pub fn write_nodes_csv(metrics: &[NodeMetrics], graph: &CodeGraph, path: &Path) 
         "score",
         "community_id",
         "in_cycle",
+        "alternative_paths",
     ])
     .expect("write nodes CSV header");
 
     for m in metrics {
-        let (kind, file_path, language, line, is_local) = match graph.get_node(&m.id) {
-            Some(node) => (
-                format!("{:?}", node.kind),
-                node.file_path.display().to_string(),
-                format!("{:?}", node.language),
-                node.line.to_string(),
-                node.is_local.to_string(),
-            ),
-            None => (
-                String::new(),
-                String::new(),
-                String::new(),
-                "0".to_string(),
-                "false".to_string(),
-            ),
-        };
+        let (kind, file_path, language, line, is_local, alternative_paths) =
+            match graph.get_node(&m.id) {
+                Some(node) => (
+                    format!("{:?}", node.kind),
+                    node.file_path.display().to_string(),
+                    format!("{:?}", node.language),
+                    node.line.to_string(),
+                    node.is_local.to_string(),
+                    node.alternative_paths.join("|"),
+                ),
+                None => (
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    "0".to_string(),
+                    "false".to_string(),
+                    String::new(),
+                ),
+            };
         wtr.write_record([
             m.id.as_str(),
             &kind,
@@ -62,6 +71,7 @@ pub fn write_nodes_csv(metrics: &[NodeMetrics], graph: &CodeGraph, path: &Path) 
             &m.score.to_string(),
             &m.community_id.to_string(),
             &m.in_cycle.to_string(),
+            &alternative_paths,
         ])
         .expect("write nodes CSV row");
     }
@@ -162,7 +172,7 @@ mod tests {
 
         assert_eq!(
             lines[0],
-            "id,kind,file_path,language,line,is_local,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle"
+            "id,kind,file_path,language,line,is_local,betweenness,pagerank,in_degree,out_degree,score,community_id,in_cycle,alternative_paths"
         );
         assert!(lines.len() >= 2, "should have at least one data row");
         assert!(lines[1].starts_with("app.main,"));
@@ -190,6 +200,70 @@ mod tests {
         // The edge is app.main → app.utils, Imports kind
         assert!(lines[1].contains("app.main") || lines[1].contains("app.utils"));
         assert!(lines[1].contains("Imports"));
+    }
+
+    #[test]
+    fn write_nodes_csv_emits_alternative_paths_column() {
+        use graphify_core::types::NodeKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nodes.csv");
+
+        let mut g = CodeGraph::new();
+        g.add_node(
+            Node::symbol(
+                "src.entities.Course",
+                NodeKind::Class,
+                "src/entities/course.ts",
+                Language::TypeScript,
+                1,
+                true,
+            )
+            .with_alternative_paths(["src.domain.Course", "src.presentation.Course"]),
+        );
+        g.add_node(Node::module(
+            "src.utils",
+            "src/utils.ts",
+            Language::TypeScript,
+            1,
+            true,
+        ));
+
+        let metrics = vec![
+            NodeMetrics {
+                id: "src.entities.Course".to_string(),
+                ..Default::default()
+            },
+            NodeMetrics {
+                id: "src.utils".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        write_nodes_csv(&metrics, &g, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        // Header has the new column last.
+        assert!(lines[0].ends_with(",alternative_paths"));
+        // Course row: pipe-joined alternatives, order-stable.
+        let course = lines
+            .iter()
+            .find(|l| l.starts_with("src.entities.Course,"))
+            .expect("Course row missing");
+        assert!(
+            course.ends_with(",src.domain.Course|src.presentation.Course"),
+            "expected pipe-joined alts, got: {course}"
+        );
+        // Utils row: empty trailing column.
+        let utils = lines
+            .iter()
+            .find(|l| l.starts_with("src.utils,"))
+            .expect("utils row missing");
+        assert!(
+            utils.ends_with(","),
+            "expected empty alts column, got: {utils}"
+        );
     }
 
     #[test]

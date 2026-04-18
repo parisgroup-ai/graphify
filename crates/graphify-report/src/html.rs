@@ -31,6 +31,10 @@ struct HtmlNodeData {
     in_cycle: bool,
     score: f64,
     community_id: usize,
+    /// FEAT-021: TS-only barrel re-export aliases. Always present in the JSON
+    /// blob (possibly empty) so `graph.js` can render a consistent inspector
+    /// block without branching on presence.
+    alternative_paths: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -175,6 +179,7 @@ fn build_data(
                 in_cycle: m.is_some_and(|m| m.in_cycle),
                 score: m.map_or(0.0, |m| m.score),
                 community_id: m.map_or(0, |m| m.community_id),
+                alternative_paths: n.alternative_paths.clone(),
             }
         })
         .collect();
@@ -361,6 +366,43 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("<title>Graphify: my-cool-project</title>"));
         assert!(content.contains("my-cool-project"));
+    }
+
+    #[test]
+    fn html_data_blob_carries_alternative_paths() {
+        use graphify_core::types::NodeKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("alts.html");
+
+        let mut g = CodeGraph::new();
+        g.add_node(
+            Node::symbol(
+                "src.entities.Course",
+                NodeKind::Class,
+                "src/entities/course.ts",
+                Language::TypeScript,
+                1,
+                true,
+            )
+            .with_alternative_paths(["src.domain.Course", "src.presentation.Course"]),
+        );
+
+        let metrics = vec![NodeMetrics {
+            id: "src.entities.Course".to_string(),
+            score: 0.9,
+            ..Default::default()
+        }];
+
+        write_html("alts", &g, &metrics, &[], &[], &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let start = content.find("GRAPHIFY_DATA = ").unwrap() + "GRAPHIFY_DATA = ".len();
+        let end = content[start..].find(";\n</script>").unwrap() + start;
+        let value: serde_json::Value = serde_json::from_str(&content[start..end]).unwrap();
+        let alts = &value["nodes"][0]["alternative_paths"];
+        assert_eq!(alts[0], "src.domain.Course");
+        assert_eq!(alts[1], "src.presentation.Course");
     }
 
     #[test]

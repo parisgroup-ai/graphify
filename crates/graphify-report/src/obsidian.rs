@@ -99,6 +99,16 @@ pub fn write_obsidian_vault(
             writeln!(buf, "community: {cid}").unwrap();
         }
 
+        // FEAT-021: record alternative import paths as a YAML sequence so
+        // users can search / filter inside Obsidian. Skipped entirely when
+        // empty so the frontmatter stays short for non-TS nodes.
+        if !node.alternative_paths.is_empty() {
+            writeln!(buf, "alternative_paths:").unwrap();
+            for alt in &node.alternative_paths {
+                writeln!(buf, "  - \"{alt}\"").unwrap();
+            }
+        }
+
         // Tags for Obsidian graph view filtering
         let kind_tag = format!("{:?}", node.kind).to_lowercase();
         writeln!(buf, "tags: [{kind_tag}, {:?}]", node.language).unwrap();
@@ -550,6 +560,61 @@ mod tests {
         assert!(content.contains("### Community 0 (2 members)"));
         assert!(content.contains("## Circular Dependencies"));
         assert!(content.contains("[[a]] → [[b]]"));
+    }
+
+    #[test]
+    fn obsidian_note_emits_alternative_paths_in_frontmatter() {
+        use graphify_core::types::NodeKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let vault_path = dir.path().join("vault");
+
+        let mut g = CodeGraph::new();
+        g.add_node(
+            Node::symbol(
+                "src.entities.Course",
+                NodeKind::Class,
+                "src/entities/course.ts",
+                Language::TypeScript,
+                1,
+                true,
+            )
+            .with_alternative_paths(["src.domain.Course", "src.presentation.Course"]),
+        );
+        g.add_node(Node::module(
+            "src.utils",
+            "src/utils.ts",
+            Language::TypeScript,
+            1,
+            true,
+        ));
+
+        let metrics = vec![
+            NodeMetrics {
+                id: "src.entities.Course".to_string(),
+                ..Default::default()
+            },
+            NodeMetrics {
+                id: "src.utils".to_string(),
+                ..Default::default()
+            },
+        ];
+
+        write_obsidian_vault(&g, &metrics, &[], &[], &vault_path);
+
+        let course = std::fs::read_to_string(vault_path.join("src.entities.Course.md")).unwrap();
+        assert!(
+            course.contains("alternative_paths:"),
+            "Course frontmatter should include alternative_paths, got:\n{course}"
+        );
+        assert!(course.contains("  - \"src.domain.Course\""));
+        assert!(course.contains("  - \"src.presentation.Course\""));
+
+        let utils = std::fs::read_to_string(vault_path.join("src.utils.md")).unwrap();
+        assert!(
+            !utils.contains("alternative_paths"),
+            "utils note should not mention alternative_paths when empty, got:\n{utils}"
+        );
     }
 
     #[test]

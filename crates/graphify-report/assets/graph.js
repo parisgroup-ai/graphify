@@ -772,6 +772,14 @@
       tip.textContent = n.label + ' | Community ' + n.community_id;
       return;
     }
+    // FEAT-021: surface re-export barrel aliases when a node has any. Shown
+    // as a suffix rather than a separate block so the single-line tooltip
+    // stays readable for the common (empty) case.
+    var altSuffix = '';
+    if (n.alternative_paths && n.alternative_paths.length > 0) {
+      altSuffix = ' | Alt paths (' + n.alternative_paths.length + '): ' +
+        n.alternative_paths.join(', ');
+    }
     tip.textContent = n.id +
       ' | ' + n.kind +
       ' | Score: ' + n.score.toFixed(4) +
@@ -780,7 +788,8 @@
       ' | In: ' + n.in_degree +
       ' | Out: ' + n.out_degree +
       ' | Community: ' + n.community_id +
-      (n.in_cycle ? ' | IN CYCLE' : '');
+      (n.in_cycle ? ' | IN CYCLE' : '') +
+      altSuffix;
   }
 
   function resetTooltip() {

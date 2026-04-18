@@ -173,7 +173,8 @@ pub fn write_report(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    for (rank, m) in sorted.iter().take(20).enumerate() {
+    let top_20: Vec<&&NodeMetrics> = sorted.iter().take(20).collect();
+    for (rank, m) in top_20.iter().enumerate() {
         let conf = per_node_in_conf.get(m.id.as_str()).copied();
         writeln!(
             buf,
@@ -202,6 +203,42 @@ pub fn write_report(
     )
     .unwrap();
     writeln!(buf).unwrap();
+
+    // FEAT-021: surface alternative module paths for any hotspot that was
+    // reached through one or more re-export barrels. Only emitted when the
+    // top-20 hotspots include at least one node with non-empty
+    // `alternative_paths`; otherwise the section is skipped to keep the
+    // report quiet for non-TS projects.
+    let hotspots_with_alts: Vec<(usize, &NodeMetrics, &[String])> = top_20
+        .iter()
+        .enumerate()
+        .filter_map(|(rank, m)| {
+            graph.get_node(&m.id).and_then(|node| {
+                if node.alternative_paths.is_empty() {
+                    None
+                } else {
+                    Some((rank + 1, **m, node.alternative_paths.as_slice()))
+                }
+            })
+        })
+        .collect();
+    if !hotspots_with_alts.is_empty() {
+        writeln!(buf, "### Alternative Import Paths").unwrap();
+        writeln!(buf).unwrap();
+        writeln!(
+            buf,
+            "_Hotspots reached through one or more re-export barrels. The canonical id is shown; each alternative path is another module the symbol could have been imported from. Reported for TypeScript only (FEAT-021)._"
+        )
+        .unwrap();
+        writeln!(buf).unwrap();
+        for (rank, m, alts) in &hotspots_with_alts {
+            writeln!(buf, "- **#{rank} `{}`**", m.id).unwrap();
+            for alt in *alts {
+                writeln!(buf, "  - `{alt}`").unwrap();
+            }
+        }
+        writeln!(buf).unwrap();
+    }
 
     // Communities
     writeln!(buf, "## Communities").unwrap();
@@ -537,6 +574,75 @@ mod tests {
         assert!(
             content.contains("expected-external"),
             "confidence row should mention expected-external, got:\n{content}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-021 — alternative_paths section
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn markdown_emits_alternative_paths_section_when_top_hotspot_has_alts() {
+        use graphify_core::types::NodeKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report_alts.md");
+
+        let mut graph = CodeGraph::new();
+        graph.add_node(
+            Node::symbol(
+                "src.entities.Course",
+                NodeKind::Class,
+                "src/entities/course.ts",
+                Language::TypeScript,
+                1,
+                true,
+            )
+            .with_alternative_paths(["src.domain.Course", "src.presentation.Course"]),
+        );
+        graph.add_node(Node::module(
+            "src.main",
+            "src/main.ts",
+            Language::TypeScript,
+            1,
+            true,
+        ));
+        graph.add_edge("src.main", "src.entities.Course", Edge::imports(1));
+
+        let metrics = vec![NodeMetrics {
+            id: "src.entities.Course".to_string(),
+            score: 0.9,
+            in_degree: 1,
+            ..Default::default()
+        }];
+
+        write_report("alts", &metrics, &[], &[], &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            content.contains("### Alternative Import Paths"),
+            "section missing, got:\n{content}"
+        );
+        assert!(content.contains("**#1 `src.entities.Course`**"));
+        assert!(content.contains("- `src.domain.Course`"));
+        assert!(content.contains("- `src.presentation.Course`"));
+    }
+
+    #[test]
+    fn markdown_omits_alternative_paths_section_when_no_alts_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report_noalts.md");
+        let metrics = make_metrics();
+        let communities = make_communities();
+        let cycles: Vec<Cycle> = vec![];
+        let graph = make_graph();
+
+        write_report("no-alts", &metrics, &communities, &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !content.contains("### Alternative Import Paths"),
+            "section should be omitted when nothing has alts, got:\n{content}"
         );
     }
 

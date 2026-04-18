@@ -36,14 +36,34 @@ pub fn write_cypher(graph: &CodeGraph, path: &Path) {
         let label = format!("{:?}", node.kind);
         let file_path = cypher_escape(&node.file_path.to_string_lossy());
         let language = format!("{:?}", node.language);
-        writeln!(
-            buf,
-            "CREATE (:{label} {{id: '{id}', file_path: '{file_path}', language: '{language}', line: {line}, is_local: {is_local}}});",
-            id = cypher_escape(&node.id),
-            line = node.line,
-            is_local = node.is_local,
-        )
-        .unwrap();
+        // FEAT-021: emit `alternative_paths` as a Cypher list literal (array
+        // of strings). Only written when non-empty so legacy-shape parity with
+        // the JSON writer is preserved.
+        if node.alternative_paths.is_empty() {
+            writeln!(
+                buf,
+                "CREATE (:{label} {{id: '{id}', file_path: '{file_path}', language: '{language}', line: {line}, is_local: {is_local}}});",
+                id = cypher_escape(&node.id),
+                line = node.line,
+                is_local = node.is_local,
+            )
+            .unwrap();
+        } else {
+            let alts = node
+                .alternative_paths
+                .iter()
+                .map(|p| format!("'{}'", cypher_escape(p)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(
+                buf,
+                "CREATE (:{label} {{id: '{id}', file_path: '{file_path}', language: '{language}', line: {line}, is_local: {is_local}, alternative_paths: [{alts}]}});",
+                id = cypher_escape(&node.id),
+                line = node.line,
+                is_local = node.is_local,
+            )
+            .unwrap();
+        }
     }
 
     writeln!(buf).unwrap();
@@ -132,6 +152,53 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("confidence: 0.85"));
         assert!(content.contains("confidence_kind: 'Inferred'"));
+    }
+
+    #[test]
+    fn write_cypher_emits_alternative_paths_as_list_literal() {
+        use graphify_core::types::NodeKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graph_alts.cypher");
+
+        let mut g = CodeGraph::new();
+        g.add_node(
+            Node::symbol(
+                "src.entities.Course",
+                NodeKind::Class,
+                "src/entities/course.ts",
+                Language::TypeScript,
+                1,
+                true,
+            )
+            .with_alternative_paths(["src.domain.Course", "src.presentation.Course"]),
+        );
+        g.add_node(Node::module(
+            "src.utils",
+            "src/utils.ts",
+            Language::TypeScript,
+            1,
+            true,
+        ));
+
+        write_cypher(&g, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // Node with alts gets the property.
+        assert!(
+            content.contains("alternative_paths: ['src.domain.Course', 'src.presentation.Course']"),
+            "Course node should carry alternative_paths list, got:\n{content}"
+        );
+        // Node without alts does not mention the property — legacy shape
+        // preserved.
+        let utils_line = content
+            .lines()
+            .find(|l| l.contains("'src.utils'"))
+            .expect("utils line missing");
+        assert!(
+            !utils_line.contains("alternative_paths"),
+            "utils node should not emit empty alts, got: {utils_line}"
+        );
     }
 
     #[test]

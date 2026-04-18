@@ -1826,11 +1826,30 @@ fn run_extract(
                             at_name,
                         );
                     }
-                    graphify_extract::CanonicalResolution::Unresolved { .. } => {
+                    graphify_extract::CanonicalResolution::Unresolved {
+                        last_module,
+                        last_name,
+                        ..
+                    } => {
                         // Chain terminated at a non-local module (external
                         // package, missing file). Keep the barrel symbol
-                        // node; downstream confidence handling will take
-                        // over for import edges.
+                        // node as-is; downstream confidence handling will
+                        // take over for import edges whose target points
+                        // at the unresolved external.
+                        //
+                        // FEAT-025: emit a stderr diagnostic for visibility.
+                        // No confidence downgrade at the node level — the
+                        // node itself wasn't created by the re-export walk,
+                        // and edge-level confidence is already capped via
+                        // the non-local rule in the resolver step below.
+                        eprintln!(
+                            "Info: [{}] unresolved re-export chain for symbol '{}' from '{}' (ends at {}.{}); leaving barrel node in place.",
+                            project.name,
+                            spec.local_name,
+                            entry.from_module,
+                            last_module,
+                            last_name,
+                        );
                     }
                 }
             }

@@ -66,6 +66,14 @@ pub fn write_graphml(graph: &CodeGraph, path: &Path) {
         r#"  <key id="is_local" for="node" attr.name="is_local" attr.type="boolean"/>"#
     )
     .unwrap();
+    // FEAT-021: alternative_paths is emitted as a pipe-separated string (`|`)
+    // because GraphML has no native list type. Consumers splitting the value
+    // recover the original Vec<String> ordering.
+    writeln!(
+        buf,
+        r#"  <key id="alternative_paths" for="node" attr.name="alternative_paths" attr.type="string"/>"#
+    )
+    .unwrap();
 
     // Key declarations — edge attributes
     writeln!(
@@ -121,6 +129,14 @@ pub fn write_graphml(graph: &CodeGraph, path: &Path) {
             node.is_local
         )
         .unwrap();
+        if !node.alternative_paths.is_empty() {
+            writeln!(
+                buf,
+                r#"      <data key="alternative_paths">{}</data>"#,
+                xml_escape(&node.alternative_paths.join("|"))
+            )
+            .unwrap();
+        }
         writeln!(buf, r#"    </node>"#).unwrap();
     }
 
@@ -252,6 +268,57 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("<data key=\"confidence\">0.85</data>"));
         assert!(content.contains("<data key=\"confidence_kind\">Inferred</data>"));
+    }
+
+    #[test]
+    fn write_graphml_emits_alternative_paths_key_and_pipe_joined_value() {
+        use graphify_core::types::NodeKind;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graph_alts.graphml");
+
+        let mut g = CodeGraph::new();
+        g.add_node(
+            Node::symbol(
+                "src.entities.Course",
+                NodeKind::Class,
+                "src/entities/course.ts",
+                Language::TypeScript,
+                1,
+                true,
+            )
+            .with_alternative_paths(["src.domain.Course", "src.presentation.Course"]),
+        );
+        g.add_node(Node::module(
+            "src.utils",
+            "src/utils.ts",
+            Language::TypeScript,
+            1,
+            true,
+        ));
+
+        write_graphml(&g, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        // Key declaration always present (schema is stable).
+        assert!(content.contains(r#"<key id="alternative_paths" for="node""#));
+        // Pipe-joined value for the node with alts.
+        assert!(content.contains(
+            "<data key=\"alternative_paths\">src.domain.Course|src.presentation.Course</data>"
+        ));
+        // Node without alts must not emit the data element (legacy-shape
+        // parity with JSON / Cypher writers).
+        let utils_section = content
+            .split(r#"<node id="src.utils""#)
+            .nth(1)
+            .expect("utils node missing")
+            .split("</node>")
+            .next()
+            .expect("node close missing");
+        assert!(
+            !utils_section.contains("alternative_paths"),
+            "utils node should not emit empty alts, got: {utils_section}"
+        );
     }
 
     #[test]
