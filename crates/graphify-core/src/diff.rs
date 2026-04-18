@@ -19,6 +19,11 @@ pub struct AnalysisSnapshot {
     pub communities: Vec<CommunitySnapshot>,
     pub cycles: Vec<Vec<String>>,
     pub summary: SummarySnapshot,
+    /// Node IDs matched by the `[consolidation].allowlist` in `graphify.toml`,
+    /// when a `[consolidation]` section is configured. Absent on legacy
+    /// analysis.json files written before the consolidation allowlist landed.
+    #[serde(default)]
+    pub allowlisted_symbols: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -585,6 +590,7 @@ mod tests {
                 total_communities,
                 total_cycles,
             },
+            allowlisted_symbols: None,
         }
     }
 

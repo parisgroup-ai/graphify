@@ -1218,6 +1218,7 @@ fn cmd_diff(
                     total_communities,
                     total_cycles,
                 },
+                allowlisted_symbols: None,
             };
             (b, a)
         }

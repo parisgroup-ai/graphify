@@ -278,6 +278,13 @@ After `graphify run` + `graphify diff` + `graphify check` populate the project o
 
 Output is optimized for solo-dev + AI-authored PR review: each finding carries an inline `graphify explain` / `graphify path` hint so the next investigation step is one copy-paste away.
 
+Hotspot rows in the `Drift in this PR` section are tail-annotated when the project has a `[consolidation]` section configured:
+
+- `[allowlisted]` — the node's id appears in `analysis.json`'s `allowlisted_symbols` (i.e. its leaf symbol matched a `[consolidation].allowlist` pattern). Reviewers can safely deprioritize these entries.
+- `[intentional mirror]` — the node is declared under `[consolidation.intentional_mirrors]` in `graphify.toml` (FEAT-023). Takes precedence over `[allowlisted]` when both apply.
+
+Both annotations are tail-appended so the row's primary content (symbol name, score, delta) stays leftmost and scannable.
+
 ## Hotspot Classification (v0.7+)
 
 Every top-20 hotspot in `architecture_report.md`, `analysis.json`, and `pr-summary` is tagged with a classification that dictates which refactor fits best:

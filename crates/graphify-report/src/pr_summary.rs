@@ -4,7 +4,7 @@
 //! project's Graphify output directory. Pure function: no I/O. Consumers are
 //! expected to load inputs separately and pass them in as structs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use graphify_core::diff::{AnalysisSnapshot, DiffReport};
 use graphify_core::metrics::HotspotType;
@@ -32,9 +32,10 @@ pub fn render(
 ) -> String {
     let mut out = String::new();
     let type_lookup = build_hotspot_type_lookup(analysis);
+    let allowlist = build_allowlist_set(analysis);
     render_header(&mut out, project_name);
     render_stats_line(&mut out, analysis, drift);
-    render_drift_section(&mut out, drift, &type_lookup);
+    render_drift_section(&mut out, drift, &type_lookup, &allowlist);
     render_outstanding_section(&mut out, check);
     render_footer(&mut out);
     out
@@ -48,6 +49,35 @@ fn build_hotspot_type_lookup(analysis: &AnalysisSnapshot) -> HashMap<String, Hot
         .iter()
         .filter_map(|n| n.hotspot_type.map(|t| (n.id.clone(), t)))
         .collect()
+}
+
+/// Builds a node-id set from the snapshot's `allowlisted_symbols` field.
+/// Returns an empty set when the field is absent (legacy snapshots written
+/// before a `[consolidation]` section was configured).
+fn build_allowlist_set(analysis: &AnalysisSnapshot) -> HashSet<String> {
+    match analysis.allowlisted_symbols.as_ref() {
+        Some(ids) => ids.iter().cloned().collect(),
+        None => HashSet::new(),
+    }
+}
+
+/// Renders ` [intentional mirror]` when the score change is tagged with an
+/// intentional-mirror group (FEAT-023), else ` [allowlisted]` when the id is
+/// listed in the snapshot's `allowlisted_symbols`. Intentional-mirror wins
+/// because it's the more specific signal. Returns an empty string when
+/// neither applies.
+fn consolidation_annotation(
+    id: &str,
+    intentional_mirror: Option<&str>,
+    allowlist: &HashSet<String>,
+) -> &'static str {
+    if intentional_mirror.is_some() {
+        " [intentional mirror]"
+    } else if allowlist.contains(id) {
+        " [allowlisted]"
+    } else {
+        ""
+    }
 }
 
 fn hotspot_type_label(t: HotspotType) -> &'static str {
@@ -104,6 +134,7 @@ fn render_drift_section(
     out: &mut String,
     drift: Option<&DiffReport>,
     type_lookup: &HashMap<String, HotspotType>,
+    allowlist: &HashSet<String>,
 ) {
     out.push_str("#### Drift in this PR\n\n");
     let Some(drift) = drift else {
@@ -125,7 +156,7 @@ fn render_drift_section(
     }
 
     render_cycle_rows(out, drift);
-    render_hotspot_rows(out, drift, type_lookup);
+    render_hotspot_rows(out, drift, type_lookup, allowlist);
     render_community_shift_row(out, drift);
     out.push('\n');
 }
@@ -150,6 +181,7 @@ fn render_hotspot_rows(
     out: &mut String,
     drift: &DiffReport,
     type_lookup: &HashMap<String, HotspotType>,
+    allowlist: &HashSet<String>,
 ) {
     if !drift.hotspots.rising.is_empty() {
         out.push_str(&format!(
@@ -158,11 +190,16 @@ fn render_hotspot_rows(
         ));
         for change in drift.hotspots.rising.iter().take(MAX_ROWS_PER_LIST) {
             out.push_str(&format!(
-                "  - `{}`{} ({:.2} → {:.2})  `→ graphify explain {}`\n",
+                "  - `{}`{} ({:.2} → {:.2}){}  `→ graphify explain {}`\n",
                 change.id,
                 type_annotation(&change.id, type_lookup),
                 change.before,
                 change.after,
+                consolidation_annotation(
+                    &change.id,
+                    change.intentional_mirror.as_deref(),
+                    allowlist,
+                ),
                 change.id,
             ));
         }
@@ -179,10 +216,15 @@ fn render_hotspot_rows(
         ));
         for change in drift.hotspots.new_hotspots.iter().take(MAX_ROWS_PER_LIST) {
             out.push_str(&format!(
-                "  - `{}`{} (score {:.2})  `→ graphify explain {}`\n",
+                "  - `{}`{} (score {:.2}){}  `→ graphify explain {}`\n",
                 change.id,
                 type_annotation(&change.id, type_lookup),
                 change.after,
+                consolidation_annotation(
+                    &change.id,
+                    change.intentional_mirror.as_deref(),
+                    allowlist,
+                ),
                 change.id,
             ));
         }
@@ -1055,5 +1097,153 @@ mod tests {
         let out = render("my-app", &a, None, Some(&c));
         assert!(out.contains("**Contract drift"));
         assert!(!out.contains("**Rules violations"));
+    }
+
+    // ---- FEAT-024: consolidation allowlist / intentional-mirror annotations ----
+
+    /// Analysis snapshot with an explicit `allowlisted_symbols` array.
+    fn analysis_with_allowlist(allowlisted: &[&str]) -> AnalysisSnapshot {
+        let entries: Vec<String> = allowlisted.iter().map(|id| format!("\"{}\"", id)).collect();
+        let json = format!(
+            r#"{{
+                "nodes": [],
+                "communities": [],
+                "cycles": [],
+                "summary": {{
+                    "total_nodes": 0,
+                    "total_edges": 0,
+                    "total_communities": 0,
+                    "total_cycles": 0
+                }},
+                "allowlisted_symbols": [{}]
+            }}"#,
+            entries.join(",")
+        );
+        serde_json::from_str(&json).expect("allowlist snapshot")
+    }
+
+    /// Drift builder that accepts an optional `intentional_mirror` group per
+    /// rising-hotspot entry, exercising the FEAT-023 annotation field that
+    /// feeds this task's "[intentional mirror]" tail.
+    fn drift_with_rising_mirrored(rising: Vec<(&str, f64, f64, Option<&str>)>) -> DiffReport {
+        use graphify_core::diff::{
+            CommunityDiff, CycleDiff, Delta, DiffReport, EdgeDiff, HotspotDiff, ScoreChange,
+            SummaryDelta,
+        };
+        DiffReport {
+            summary_delta: SummaryDelta {
+                nodes: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                edges: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                communities: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+                cycles: Delta {
+                    before: 0,
+                    after: 0,
+                    change: 0,
+                },
+            },
+            edges: EdgeDiff {
+                added_nodes: vec![],
+                removed_nodes: vec![],
+                degree_changes: vec![],
+            },
+            cycles: CycleDiff {
+                introduced: vec![],
+                resolved: vec![],
+            },
+            hotspots: HotspotDiff {
+                rising: rising
+                    .into_iter()
+                    .map(|(id, before, after, mirror)| ScoreChange {
+                        id: id.into(),
+                        before,
+                        after,
+                        delta: after - before,
+                        intentional_mirror: mirror.map(|s| s.to_string()),
+                    })
+                    .collect(),
+                falling: vec![],
+                new_hotspots: vec![],
+                removed_hotspots: vec![],
+            },
+            communities: CommunityDiff {
+                moved_nodes: vec![],
+                stable_count: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn annotates_hotspot_with_allowlisted_tail_when_id_is_in_allowlist() {
+        // FEAT-024: allowlisted hotspot gets " [allowlisted]" tail.
+        let a = analysis_with_allowlist(&["app.models.TokenUsage"]);
+        let d = drift_with_hotspots(vec![("app.models.TokenUsage", 0.71, 0.83)], vec![]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("`app.models.TokenUsage`"));
+        assert!(
+            out.contains("[allowlisted]"),
+            "expected [allowlisted] annotation, got:\n{}",
+            out
+        );
+        assert!(!out.contains("[intentional mirror]"));
+    }
+
+    #[test]
+    fn annotates_hotspot_with_intentional_mirror_wins_over_allowlisted() {
+        // FEAT-024: intentional-mirror annotation takes precedence even when
+        // the id also appears in `allowlisted_symbols`.
+        let a = analysis_with_allowlist(&["app.models.TokenUsage"]);
+        let d = drift_with_rising_mirrored(vec![(
+            "app.models.TokenUsage",
+            0.71,
+            0.83,
+            Some("TokenUsage"),
+        )]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("[intentional mirror]"));
+        assert!(
+            !out.contains("[allowlisted]"),
+            "intentional-mirror must win over allowlisted when both apply; got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn hotspot_with_no_consolidation_match_renders_unchanged() {
+        // FEAT-024 regression guard: neither allowlist nor mirror match => no
+        // consolidation tail annotation. (Type-annotation coverage is already
+        // handled by the classification tests above.)
+        let a = analysis_with_allowlist(&["app.other.Unrelated"]);
+        let d = drift_with_hotspots(vec![("app.services.auth", 0.71, 0.83)], vec![]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(out.contains("`app.services.auth` (0.71 → 0.83)"));
+        assert!(!out.contains("[allowlisted]"));
+        assert!(!out.contains("[intentional mirror]"));
+    }
+
+    #[test]
+    fn legacy_analysis_without_allowlisted_symbols_renders_unchanged() {
+        // FEAT-024 backward-compat guard: snapshot pre-dating FEAT-020 has no
+        // `allowlisted_symbols` key. Should deserialize via `#[serde(default)]`
+        // and produce zero consolidation annotations.
+        let a = minimal_analysis();
+        let d = drift_with_hotspots(vec![("app.services.auth", 0.71, 0.83)], vec![]);
+        let out = render("my-app", &a, Some(&d), None);
+        assert!(a.allowlisted_symbols.is_none());
+        assert!(!out.contains("[allowlisted]"));
+        assert!(!out.contains("[intentional mirror]"));
+        // Row still renders intact.
+        assert!(out.contains("`app.services.auth` (0.71 → 0.83)"));
     }
 }

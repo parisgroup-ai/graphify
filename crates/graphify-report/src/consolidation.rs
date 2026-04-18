@@ -484,6 +484,7 @@ mod tests {
                 total_communities: 0,
                 total_cycles: 0,
             },
+            allowlisted_symbols: None,
         }
     }
 
