@@ -1,4 +1,5 @@
 pub mod check_report;
+pub mod consolidation;
 pub mod contract_json;
 pub mod contract_markdown;
 pub mod csv;

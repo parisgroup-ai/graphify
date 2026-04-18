@@ -90,6 +90,7 @@ Policy selectors support:
 | `graphify trend` | Aggregate historical trends from stored snapshots |
 | `graphify check` | Validate CI quality gates and declarative policy rules |
 | `graphify pr-summary` | Render a PR-ready Markdown summary of architectural change |
+| `graphify consolidation` | Emit consolidation candidates (shared-leaf symbol groups) as JSON or Markdown |
 | `graphify watch` | Auto-rebuild on file changes (300ms debounce) |
 | `graphify shell` | Interactive graph exploration REPL |
 
@@ -339,6 +340,21 @@ Every edge carries a confidence score (0.0–1.0) indicating extraction certaint
 | Non-local target | ≤0.5 | Ambiguous |
 
 Use `--json` with `query` or `explain` to see confidence data. The MCP server supports `min_confidence` filtering.
+
+## Consolidation Candidates
+
+When the same symbol name lives in multiple places (e.g. a `TokenUsage` class duplicated across services), `graphify consolidation` emits a structured list of candidates for a consolidation refactor:
+
+```bash
+graphify run --config graphify.toml          # first, generate analysis.json + graph.json
+graphify consolidation --config graphify.toml
+# → ./report/<project>/consolidation-candidates.json per project
+# → ./report/consolidation-candidates.json (aggregate) when 2+ projects
+```
+
+Symbols declared under `[consolidation].allowlist` in `graphify.toml` (regex patterns anchored against the *leaf* symbol name) are filtered out by default. Use `--ignore-allowlist` to inspect the unfiltered grouping while debugging. `--min-group-size <N>` tightens the threshold (default `2`). `--format md` produces a tabular Markdown report instead of JSON.
+
+This subcommand supersedes the `graphify-consolidation-scan.sh` shipped in the `code-consolidation` skill — the native command is faster, typed, and honors the same `[consolidation]` config used by `graphify check` and the PR summary.
 
 ## Common Monorepo Recipes
 

@@ -500,6 +500,33 @@ enum Commands {
         dir: PathBuf,
     },
 
+    /// Emit consolidation candidates — symbols whose leaf name is shared by
+    /// multiple nodes and are therefore candidates for a consolidation
+    /// refactor. Writes `consolidation-candidates.json` per project (and a
+    /// cross-project aggregate when the config declares 2+ projects).
+    Consolidation {
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Output directory (overrides config setting)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Skip the `[consolidation].allowlist` section (debug flag — emits
+        /// all candidates, tagging allowlist hits with `allowlisted: true`).
+        #[arg(long, default_value_t = false)]
+        ignore_allowlist: bool,
+
+        /// Minimum group size; groups with fewer members are dropped.
+        #[arg(long, default_value_t = 2)]
+        min_group_size: usize,
+
+        /// Output format: `json` (default) or `md`.
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+
     /// Aggregate historical architecture trends from stored snapshots
     Trend {
         /// Path to graphify.toml config
@@ -999,6 +1026,22 @@ fn main() {
 
         Commands::PrSummary { dir } => {
             run_pr_summary(&dir);
+        }
+
+        Commands::Consolidation {
+            config,
+            output,
+            ignore_allowlist,
+            min_group_size,
+            format,
+        } => {
+            cmd_consolidation(
+                &config,
+                output.as_deref(),
+                ignore_allowlist,
+                min_group_size,
+                &format,
+            );
         }
 
         Commands::InstallIntegrations {
@@ -3443,6 +3486,174 @@ fn load_optional_json<T: for<'de> serde::Deserialize<'de>>(
         Err(e) => {
             eprintln!("warning: failed to read {}, skipping section: {}", label, e);
             None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// consolidation command
+// ---------------------------------------------------------------------------
+
+/// Emits consolidation candidates per project (and a cross-project aggregate
+/// when applicable). Thin CLI wrapper around the pure renderer in
+/// `graphify_report::consolidation`.
+///
+/// Exits with `1` on config or I/O error. Candidates are always a non-fatal
+/// finding — gating is `graphify check`'s job.
+fn cmd_consolidation(
+    config_path: &Path,
+    output_override: Option<&Path>,
+    ignore_allowlist: bool,
+    min_group_size: usize,
+    format: &str,
+) {
+    use graphify_report::consolidation::{
+        render, render_aggregate, render_aggregate_markdown, render_markdown, GraphSnapshot,
+        ProjectInput, RenderOptions,
+    };
+
+    let format = format.to_ascii_lowercase();
+    if format != "json" && format != "md" {
+        eprintln!(
+            "graphify consolidation: unknown --format '{}' (expected 'json' or 'md')",
+            format
+        );
+        std::process::exit(1);
+    }
+
+    let cfg = load_config(config_path);
+    let out_dir = resolve_output(&cfg, output_override);
+    // Always load the real allowlist — the renderer needs it to tag
+    // candidates. `ignore_allowlist` is consumed by `RenderOptions` to decide
+    // whether to drop or retain hits.
+    let allowlist = resolve_consolidation(&cfg, false);
+    let opts = RenderOptions {
+        min_group_size,
+        ignore_allowlist,
+    };
+
+    if cfg.project.is_empty() {
+        eprintln!(
+            "graphify consolidation: no projects configured in {:?}",
+            config_path
+        );
+        std::process::exit(1);
+    }
+
+    // Collect per-project snapshots (also used by the aggregate pass).
+    let mut loaded: Vec<(String, AnalysisSnapshot, GraphSnapshot)> = Vec::new();
+    for project in &cfg.project {
+        let proj_out = out_dir.join(&project.name);
+        let analysis_path = proj_out.join("analysis.json");
+        if !analysis_path.exists() {
+            eprintln!(
+                "graphify consolidation: missing {} — run `graphify run` first",
+                analysis_path.display()
+            );
+            std::process::exit(1);
+        }
+        let analysis = load_snapshot(&analysis_path);
+
+        let graph_path = proj_out.join("graph.json");
+        let graph = load_graph_snapshot(&graph_path);
+
+        loaded.push((project.name.clone(), analysis, graph));
+    }
+
+    // Per-project reports.
+    for (name, analysis, graph) in &loaded {
+        let report = render(name, analysis, graph, &allowlist, opts);
+        let proj_out = out_dir.join(name);
+        std::fs::create_dir_all(&proj_out).expect("create output directory");
+
+        match format.as_str() {
+            "md" => {
+                let md = render_markdown(&report);
+                let path = proj_out.join("consolidation-candidates.md");
+                std::fs::write(&path, md).expect("write consolidation-candidates.md");
+                println!(
+                    "[{}] {} candidate group(s) → {}",
+                    name,
+                    report.candidates.len(),
+                    path.display()
+                );
+            }
+            _ => {
+                let json =
+                    serde_json::to_string_pretty(&report).expect("serialize consolidation report");
+                let path = proj_out.join("consolidation-candidates.json");
+                std::fs::write(&path, json).expect("write consolidation-candidates.json");
+                println!(
+                    "[{}] {} candidate group(s) → {}",
+                    name,
+                    report.candidates.len(),
+                    path.display()
+                );
+            }
+        }
+    }
+
+    // Aggregate across projects (only when 2+).
+    if loaded.len() >= 2 {
+        let inputs: Vec<ProjectInput<'_>> = loaded
+            .iter()
+            .map(|(name, analysis, graph)| ProjectInput {
+                name,
+                analysis,
+                graph,
+            })
+            .collect();
+        let agg = render_aggregate(&inputs, &allowlist, opts);
+
+        match format.as_str() {
+            "md" => {
+                let md = render_aggregate_markdown(&agg);
+                let path = out_dir.join("consolidation-candidates.md");
+                std::fs::write(&path, md).expect("write aggregate consolidation-candidates.md");
+                println!(
+                    "[aggregate] {} cross-project group(s) → {}",
+                    agg.candidates.len(),
+                    path.display()
+                );
+            }
+            _ => {
+                let json = serde_json::to_string_pretty(&agg)
+                    .expect("serialize aggregate consolidation report");
+                let path = out_dir.join("consolidation-candidates.json");
+                std::fs::write(&path, json).expect("write aggregate consolidation-candidates.json");
+                println!(
+                    "[aggregate] {} cross-project group(s) → {}",
+                    agg.candidates.len(),
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+fn load_graph_snapshot(path: &Path) -> graphify_report::consolidation::GraphSnapshot {
+    use graphify_report::consolidation::GraphSnapshot;
+    if !path.exists() {
+        // graph.json missing is not fatal — members just lose their kind/file
+        // annotations. Warn once and continue.
+        eprintln!(
+            "warning: {} missing; consolidation members will be annotated without kind/file.",
+            path.display()
+        );
+        return GraphSnapshot { nodes: vec![] };
+    }
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Cannot read {:?}: {e}", path);
+            std::process::exit(1);
+        }
+    };
+    match serde_json::from_str::<GraphSnapshot>(&text) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("Invalid graph JSON {:?}: {e}", path);
+            std::process::exit(1);
         }
     }
 }
