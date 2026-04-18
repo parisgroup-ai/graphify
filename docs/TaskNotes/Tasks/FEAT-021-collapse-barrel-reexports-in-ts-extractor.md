@@ -15,6 +15,12 @@ tags:
 
 # Collapse barrel re-exports to a canonical declaration source (TS)
 
+The TypeScript extractor currently attributes imports to the import-path
+string rather than the declaration source, so barrel re-exports inflate
+fan-in, hotspot scores, and cross-project edge counts. This task teaches
+the extractor to follow `export … from …` chains to the canonical
+declaration and records the alternative paths alongside.
+
 ## Description
 
 The TypeScript extractor treats each import path as a distinct node, so
@@ -102,7 +108,7 @@ records the alternative import paths that reached it.
 - [ ] Update JSON/CSV/Markdown/HTML/Neo4j/GraphML/Obsidian writers to
       emit `alternative_paths` where applicable.
 - [ ] Fixture: multi-level barrel chain (domain → domain/index →
-      domain/entities/index → entities/Course.ts) with known expected
+      domain/entities/index → entities/Course file) with known expected
       canonical target.
 - [ ] Fixture: aliased re-export (`export { Foo as Bar }`) preserves
       canonical name.
