@@ -1,10 +1,18 @@
 ---
 uid: doc-001
-status: open
+status: done
 priority: low
 scheduled: 2026-04-18
+completed: 2026-04-18
 timeEstimate: 20
 pomodoros: 0
+timeSpent: 7
+timeEntries:
+- date: 2026-04-18
+  minutes: 7
+  type: manual
+  executor: claude-solo
+  tokens: 48000
 contexts:
 - consolidation
 - docs

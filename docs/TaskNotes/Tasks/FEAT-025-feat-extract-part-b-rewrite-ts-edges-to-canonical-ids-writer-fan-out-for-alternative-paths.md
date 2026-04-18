@@ -95,15 +95,27 @@ is documentation-only; add a line to the release notes draft.
 
 ## Subtasks
 
-- [ ] Wire `reexport_graph::resolve_to_canonical` into the
+- [x] Wire `reexport_graph::resolve_to_canonical` into the
       per-project extraction step so `Imports` / `Calls` edges
       targeting TS modules rewrite to canonical ids.
-- [ ] Populate `Node.alternative_paths` from the accumulated walked
+      _Landed in commit `0cf10ed` (FEAT-021 Part B slice):
+      `run_extract` aggregates `ReExportEntry`s → builds
+      `ReExportGraph` → walks every TS symbol back to canonical.
+      Note: raw edges on collapsed symbol nodes ARE rewritten, but
+      `Imports` edges targeting barrel **modules** are NOT — that
+      requires named-import capture in the extractor and stays
+      deferred below._
+- [x] Populate `Node.alternative_paths` from the accumulated walked
       paths (deduped, order-stable, excludes the canonical id itself).
+      _Landed in `0cf10ed`._
 - [ ] Downgrade confidence + emit stderr diagnostic on
       unresolved-chain fallthrough.
-- [ ] Fan `alternative_paths` through the JSON writer (serde derive,
+      _Partially: cycle outcome emits the stderr warning; unresolved
+      outcome leaves the node as-is with no confidence downgrade.
+      Decide behavior + finish in this task._
+- [x] Fan `alternative_paths` through the JSON writer (serde derive,
       hide when empty).
+      _Landed in `0cf10ed`._
 - [ ] Add an `alternative_paths` column to the nodes CSV writer
       (pipe-joined string, empty when absent).
 - [ ] Render `alternative_paths` in the Markdown report's node-detail
@@ -116,9 +128,16 @@ is documentation-only; add a line to the release notes draft.
       documented separator since GraphML arrays are awkward).
 - [ ] Emit `alternative_paths` in the Obsidian vault writer as a
       frontmatter array on each node note.
-- [ ] Integration fixture: multi-level barrel chain end-to-end,
+- [ ] **Rewrite `Imports` edges targeting barrel modules to canonical
+      modules.** Requires the TS extractor to capture named imports
+      (currently only the source module is captured). Explicitly NOT
+      done by `0cf10ed` — symbol-level edges collapse, module-level
+      `Imports` edges still point at barrel modules.
+- [x] Integration fixture: multi-level barrel chain end-to-end,
       asserting the canonical node gets N-1 alternative paths for a
       chain of length N.
+      _Landed in `0cf10ed` (`tests/fixtures/ts_barrel_project/`,
+      2-level chain). Longer chains (N≥3) still worth adding._
 - [ ] Integration fixture: aliased re-export preserves canonical name
       and records the alias in `alternative_paths`.
 - [ ] Integration fixture: cyclic re-exports log the warning and
@@ -134,6 +153,9 @@ is documentation-only; add a line to the release notes draft.
 - [ ] Update `CLAUDE.md`'s "## Conventions" bullets to mention the
       canonical-id rewrite + `alternative_paths` as part of the
       graph representation section.
+      _Partially done in this session's close (see `CLAUDE.md`
+      additions under "Graph representation" for the Part B slice);
+      finish when the module-edge rewrite + writer fan-out land._
 
 ## Acceptance Criteria
 
@@ -149,9 +171,14 @@ is documentation-only; add a line to the release notes draft.
 
 ## Notes
 
-- Prereq: FEAT-021 Part A (commit `e082c6a`). This task assumes the
-  `reexport_graph` module and `Node.alternative_paths` field already
-  exist.
+- Prereq: FEAT-021 Part A (commit `e082c6a`) + Part B slice (commit
+  `0cf10ed`). Part B slice wired the resolver into `run_extract`,
+  collapsed barrel symbol nodes, populated `alternative_paths`, fanned
+  it through the JSON writer, and fixed the
+  `resolve_ts_relative` `is_package` bug that blocked the collapse.
+  This task picks up the remaining 6 writers, the import-edge rewrite
+  (needs named-import capture), the confidence/diagnostic policy, and
+  the regression + perf checks.
 - Keep scope discipline tight — resist the urge to refactor other
   extractors. `alternative_paths` stays TS-only for v1.
 - If the perf delta on the reference monorepo exceeds 20%, stop and

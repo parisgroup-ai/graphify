@@ -3,13 +3,19 @@ uid: feat-021
 status: open
 priority: low
 pomodoros: 0
-timeSpent: 28
+timeSpent: 66
 timeEntries:
 - date: 2026-04-18
   minutes: 28
   type: manual
   executor: claude-solo
   tokens: 100000
+- date: 2026-04-18
+  minutes: 38
+  note: Part B slice; remainder tracked on FEAT-025
+  type: manual
+  executor: claude-solo
+  tokens: 104000
 contexts:
 - extract
 - typescript
