@@ -1,8 +1,9 @@
 ---
 uid: feat-030
-status: in-progress
+status: done
 priority: normal
 scheduled: 2026-04-20
+completed: 2026-04-20
 timeEstimate: 90
 pomodoros: 0
 timeSpent: 0
