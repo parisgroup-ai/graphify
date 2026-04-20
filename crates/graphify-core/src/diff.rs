@@ -823,6 +823,7 @@ mod tests {
         ConsolidationConfig::compile(ConsolidationConfigRaw {
             allowlist: vec![],
             intentional_mirrors: mirrors,
+            ..Default::default()
         })
         .expect("mirror_config compiles")
     }

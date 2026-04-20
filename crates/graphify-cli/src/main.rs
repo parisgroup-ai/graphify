@@ -13,7 +13,7 @@ use graphify_core::contract::{
 use graphify_core::diff::{compute_diff_with_config, AnalysisSnapshot};
 use graphify_core::{
     community::detect_communities,
-    cycles::{find_sccs, find_simple_cycles},
+    cycles::{find_sccs, find_sccs_excluding, find_simple_cycles, find_simple_cycles_excluding},
     graph::CodeGraph,
     history::{build_historical_snapshot, compute_trend_report, load_historical_snapshots},
     metrics::{compute_metrics_with_thresholds, HotspotThresholds, ScoringWeights},
@@ -69,6 +69,12 @@ struct ConsolidationConfigToml {
     allowlist: Vec<String>,
     #[serde(default)]
     intentional_mirrors: HashMap<String, Vec<String>>,
+    /// BUG-015 opt-in: when `true`, cycle detection drops cycles whose only
+    /// cycle-making edges route through an allowlisted root barrel node
+    /// (node id == project `local_prefix`). Default `false` preserves
+    /// pre-BUG-015 behaviour for existing configs.
+    #[serde(default)]
+    suppress_barrel_cycles: bool,
 }
 
 impl From<ConsolidationConfigToml> for ConsolidationConfigRaw {
@@ -76,6 +82,7 @@ impl From<ConsolidationConfigToml> for ConsolidationConfigRaw {
         ConsolidationConfigRaw {
             allowlist: v.allowlist,
             intentional_mirrors: v.intentional_mirrors,
+            suppress_barrel_cycles: v.suppress_barrel_cycles,
         }
     }
 }
@@ -641,6 +648,7 @@ fn main() {
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
             let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
+            let consolidation = resolve_consolidation(&cfg, false);
             let project_refs: Vec<&ProjectConfig> = cfg.project.iter().collect();
             let workspace = collect_workspace_reexport_graph(
                 &project_refs,
@@ -659,8 +667,11 @@ fn main() {
                     workspace.as_ref(),
                 );
                 print_cache_stats(&project.name, &stats);
+                let excluded_owned = barrel_exclusion_ids(project, &consolidation);
+                let excluded: std::collections::HashSet<&str> =
+                    excluded_owned.iter().copied().collect();
                 let (mut metrics, communities, cycles_simple) =
-                    run_analyze(&graph, &w, &thresholds);
+                    run_analyze(&graph, &w, &thresholds, &excluded);
                 assign_community_ids(&mut metrics, &communities);
                 let cycles_for_report: Vec<Cycle> = cycles_simple;
                 write_analysis_json(
@@ -1223,7 +1234,14 @@ fn cmd_diff(
             let w = resolve_weights(cfg, None);
             let thresholds = resolve_hotspot_thresholds(cfg, None, None);
             let (graph, _, _stats) = run_extract(project_cfg, &cfg.settings, None, false);
-            let (mut metrics, communities, cycles_simple) = run_analyze(&graph, &w, &thresholds);
+            let excluded_owned: Vec<&str> = consolidation
+                .as_ref()
+                .map(|c| barrel_exclusion_ids(project_cfg, c))
+                .unwrap_or_default();
+            let excluded: std::collections::HashSet<&str> =
+                excluded_owned.iter().copied().collect();
+            let (mut metrics, communities, cycles_simple) =
+                run_analyze(&graph, &w, &thresholds, &excluded);
             assign_community_ids(&mut metrics, &communities);
             // Build an AnalysisSnapshot from live data.
             let total_nodes = metrics.len();
@@ -1461,6 +1479,7 @@ fn load_config(path: &Path) -> Config {
     let raw: ConsolidationConfigRaw = ConsolidationConfigToml {
         allowlist: cfg.consolidation.allowlist.clone(),
         intentional_mirrors: cfg.consolidation.intentional_mirrors.clone(),
+        suppress_barrel_cycles: cfg.consolidation.suppress_barrel_cycles,
     }
     .into();
     if let Err(err) = ConsolidationConfig::compile(raw) {
@@ -1482,6 +1501,7 @@ fn resolve_consolidation(cfg: &Config, ignore_allowlist: bool) -> ConsolidationC
     let raw: ConsolidationConfigRaw = ConsolidationConfigToml {
         allowlist: cfg.consolidation.allowlist.clone(),
         intentional_mirrors: cfg.consolidation.intentional_mirrors.clone(),
+        suppress_barrel_cycles: cfg.consolidation.suppress_barrel_cycles,
     }
     .into();
     // Safe: validated during load_config.
@@ -2511,13 +2531,22 @@ fn run_analyze(
     graph: &CodeGraph,
     weights: &ScoringWeights,
     thresholds: &HotspotThresholds,
+    excluded_cycle_nodes: &std::collections::HashSet<&str>,
 ) -> AnalysisResult {
     let metrics = compute_metrics_with_thresholds(graph, weights, thresholds);
     let communities = detect_communities(graph);
-    let sccs = find_sccs(graph);
+    let sccs = if excluded_cycle_nodes.is_empty() {
+        find_sccs(graph)
+    } else {
+        find_sccs_excluding(graph, excluded_cycle_nodes)
+    };
 
     // Build simple cycles from SCCs (capped at 500).
-    let simple_cycles = find_simple_cycles(graph, 500);
+    let simple_cycles = if excluded_cycle_nodes.is_empty() {
+        find_simple_cycles(graph, 500)
+    } else {
+        find_simple_cycles_excluding(graph, 500, excluded_cycle_nodes)
+    };
 
     // Convert to Cycle (Vec<String>) — already the right type.
     // Also include SCC node_ids as cycles for completeness when simple_cycles is empty.
@@ -2528,6 +2557,36 @@ fn run_analyze(
     };
 
     (metrics, communities, cycles)
+}
+
+/// Builds the set of node IDs to exclude from cycle detection for a project
+/// given the project's `local_prefix` and the compiled consolidation config
+/// (BUG-015 `suppress_barrel_cycles`).
+///
+/// Returns an empty set unless:
+/// - `suppress_barrel_cycles = true` in `[consolidation]`,
+/// - the project declares a `local_prefix`, AND
+/// - that prefix (as a leaf symbol) is matched by the allowlist.
+///
+/// When all three hold, the barrel node ID (equal to `local_prefix`) is
+/// returned as a single-element set. The string is owned here so the call
+/// site can assemble a `HashSet<&str>` that borrows from a stable source.
+fn barrel_exclusion_ids<'a>(
+    project: &'a ProjectConfig,
+    consolidation: &ConsolidationConfig,
+) -> Vec<&'a str> {
+    if !consolidation.suppress_barrel_cycles() {
+        return Vec::new();
+    }
+    let prefix = match project.local_prefix.as_deref() {
+        Some(p) if !p.is_empty() => p,
+        _ => return Vec::new(),
+    };
+    if consolidation.matches(prefix) {
+        vec![prefix]
+    } else {
+        Vec::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2552,7 +2611,10 @@ fn run_pipeline_for_project(
     let (graph, _, stats) =
         run_extract_with_workspace(project, settings, Some(proj_out), force, workspace);
     print_cache_stats(&project.name, &stats);
-    let (mut metrics, communities, cycles_simple) = run_analyze(&graph, weights, thresholds);
+    let excluded_owned = barrel_exclusion_ids(project, consolidation);
+    let excluded: std::collections::HashSet<&str> = excluded_owned.iter().copied().collect();
+    let (mut metrics, communities, cycles_simple) =
+        run_analyze(&graph, weights, thresholds, &excluded);
     assign_community_ids(&mut metrics, &communities);
     let cycles_for_report: Vec<Cycle> = cycles_simple;
     write_all_outputs(
@@ -2860,8 +2922,10 @@ fn cmd_check(
         let (graph, _excludes, stats) =
             run_extract_with_workspace(project, &cfg.settings, None, force, workspace.as_ref());
         print_cache_stats(&project.name, &stats);
+        let excluded_owned = barrel_exclusion_ids(project, &consolidation);
+        let excluded: std::collections::HashSet<&str> = excluded_owned.iter().copied().collect();
         let (metrics, communities, cycles) =
-            run_analyze(&graph, &ScoringWeights::default(), &thresholds);
+            run_analyze(&graph, &ScoringWeights::default(), &thresholds, &excluded);
         analyzed_projects.push(CheckProjectData {
             name: project.name.clone(),
             graph,
@@ -3214,8 +3278,11 @@ fn print_contract_report(c: &graphify_report::ContractCheckResult) {
 fn build_query_engine(project: &ProjectConfig, settings: &Settings) -> QueryEngine {
     let (graph, _, _stats) = run_extract(project, settings, None, false);
     let w = ScoringWeights::default();
+    // Query engine runs without the consolidation config in scope, so barrel
+    // suppression is not applied here — query commands see the raw cycle set.
+    let empty: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let (mut metrics, communities, _cycles_simple) =
-        run_analyze(&graph, &w, &HotspotThresholds::default());
+        run_analyze(&graph, &w, &HotspotThresholds::default(), &empty);
     assign_community_ids(&mut metrics, &communities);
     let cycles = find_sccs(&graph);
     QueryEngine::from_analyzed(graph, metrics, communities, cycles)

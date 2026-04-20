@@ -27,6 +27,11 @@ pub struct ConsolidationConfigRaw {
     /// name; the value is a list of `"<project>:<node_id>"` qualifiers naming
     /// every endpoint that is expected to hold the mirror.
     pub intentional_mirrors: HashMap<String, Vec<String>>,
+    /// Opt-in flag (BUG-015): when `true`, cycle detection ignores the root
+    /// barrel node of a project if that node is also allowlisted. Drops
+    /// synthetic cycles introduced by FEAT-028 cross-project fan-out through
+    /// `src/index.ts`-style barrels. See [`ConsolidationConfig::suppress_barrel_cycles`].
+    pub suppress_barrel_cycles: bool,
 }
 
 /// Compiled consolidation config — ready to apply at report time.
@@ -37,6 +42,7 @@ pub struct ConsolidationConfig {
     /// `analysis.json` for downstream consumers.
     pattern_sources: Vec<String>,
     intentional_mirrors: HashMap<String, Vec<String>>,
+    suppress_barrel_cycles: bool,
 }
 
 /// Error returned when an allowlist entry fails to compile.
@@ -83,12 +89,19 @@ impl ConsolidationConfig {
             patterns,
             pattern_sources,
             intentional_mirrors: raw.intentional_mirrors,
+            suppress_barrel_cycles: raw.suppress_barrel_cycles,
         })
     }
 
     /// True if no allowlist entries and no intentional mirrors are declared.
     pub fn is_empty(&self) -> bool {
         self.patterns.is_empty() && self.intentional_mirrors.is_empty()
+    }
+
+    /// Whether cycle detection should drop barrel-only cycles (BUG-015
+    /// `suppress_barrel_cycles`). Opt-in — default `false`.
+    pub fn suppress_barrel_cycles(&self) -> bool {
+        self.suppress_barrel_cycles
     }
 
     /// Original (un-anchored) pattern strings, in source order.
