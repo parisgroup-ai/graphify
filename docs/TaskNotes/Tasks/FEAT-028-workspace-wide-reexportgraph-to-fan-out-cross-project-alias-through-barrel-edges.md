@@ -5,6 +5,38 @@ priority: normal
 scheduled: 2026-04-20
 timeEstimate: 300
 pomodoros: 0
+timeSpent: 151
+timeEntries:
+- date: 2026-04-20
+  minutes: 28
+  note: source=<usage>; landed step 1 (WorkspaceReExportGraph scaffold) + namespacing ADR; v1 tripwire green; remaining steps 3-7 ~3-5h
+  type: manual
+  executor: claude-solo
+  tokens: 87816
+- date: 2026-04-20
+  minutes: 22
+  note: source=<usage>; slice 2 landed (resolve_canonical_cross_project walker + 7 tests, commit 9f2ba22); remaining steps 4-7 ~2-3h
+  type: manual
+  executor: claude-solo
+  tokens: 94097
+- date: 2026-04-20
+  minutes: 28
+  note: source=<usage>; slice 3 landed (workspace-aware apply_ts_alias_workspace + WorkspaceAliasTarget + module_paths index, commit a15f566); discovered match_alias_target inner-glob limitation (pre-existing, affects step 5 scope); remaining steps 5-7 ~2h
+  type: manual
+  executor: claude-solo
+  tokens: 131898
+- date: 2026-04-20
+  minutes: 25
+  note: source=<usage>; slice 4 P1 landed (inner-glob tsconfig matcher, commit 2904e85); P2/P3 deferred — run_extract refactor needs own 45k-token dispatch (6 call sites); step 5-7 remain
+  type: manual
+  executor: claude-solo
+  tokens: 64977
+- date: 2026-04-20
+  minutes: 48
+  note: source=<usage>; slice 5 landed P2a+P2b+P3 (commits a4f8972 refactor + 60c6a85 workspace-wide fan-out + cd760a1 tripwire inversion); step 7 done, tripwire now feat_028_cross_project_alias_fans_out_to_canonical_workspace_scope; steps 6 (summary regression) + 8 (feature-gate decision) deferred to follow-up
+  type: manual
+  executor: claude-solo
+  tokens: 142248
 contexts:
 - extract
 - typescript
@@ -26,7 +58,49 @@ ai:
 
 Close the cross-project half of FEAT-027. Today each `[[project]]` builds its own `ReExportGraph` and the walker stops at the project boundary, so a consumer project importing `import { Foo } from '@repo/core'` (alias → `../../packages/core/src`) lands on the raw alias string instead of the canonical `Foo` declaration in the core project. Approach A: lift the per-project graph into a workspace-scoped structure so the walker can cross `[[project]]` boundaries when resolving a barrel.
 
-## Description
+## Status (2026-04-20, session 2026-04-20-1437)
+
+**Feature functionally shipped** — tripwire inverted, cross-project edges emit end-to-end.
+
+| Step | State | Commit |
+|---|---|---|
+| 1 Workspace aggregation (`WorkspaceReExportGraph` + `ProjectReExportContext`, first-wins `modules_to_project` index) | done | `0fe862b` |
+| 2 Namespacing decision (option 2 — stable public ids, workspace lookup map; ADR in module doc-comment) | done | `0fe862b` |
+| 3 Workspace `resolve_canonical_cross_project` walker + `CrossProjectResolution` / `CrossProjectHop` | done | `9f2ba22` |
+| 4 `ModuleResolver::apply_ts_alias_workspace` + `WorkspaceAliasTarget` + `lookup_module_by_path` | done | `a15f566` |
+| 4b `match_alias_target` inner-glob support (blocker found during step 4) | done | `2904e85` |
+| 5a `build_project_reexport_context` refactor (separates phase-1 collection from phase-2 fan-out) | done | `a4f8972` |
+| 5b Workspace-wide fan-out wiring at `main.rs:1953` (7 call sites: Extract/Analyze/Report/Run/Check/Watch-init/Watch-rebuild; 3 single-project sites kept on legacy path) | done | `60c6a85` |
+| 7 Invert tripwire → `feat_028_cross_project_alias_fans_out_to_canonical_workspace_scope` | done | `cd760a1` |
+| **6** `graphify-summary.json` `cross_project_edges` regression (benchmark on `parisgroup-ai/cursos`) | **open** | — |
+| **8** Feature-gate decision (opt-in `[settings] workspace_graph = bool` vs always-on; currently always-on since tests are green) | **open** | — |
+
+Remaining scope for this task: only steps 6 + 8 below. The original "Description" / "Likely scope" sections further down are retained for historical context.
+
+## Remaining work (follow-up session)
+
+### Step 6 — `graphify-summary.json` `cross_project_edges` regression
+
+Run Graphify before/after this feature on the `parisgroup-ai/cursos` monorepo (same workload as CHORE-003 — pin to a fixed commit, use identical `graphify.toml`). Capture:
+- `cross_project_edges` total delta from `graphify-summary.json` (task motivation claimed 2,165 inflated barrel edges should redistribute into per-canonical-symbol fan-in).
+- Top-N post-fan-out cross-project destinations (which canonical symbols in shared packages now carry measurable fan-in?).
+- Any new cycles introduced (expected: zero).
+- Hotspot score movement on canonical symbols in shared packages (e.g. `packages/core/src/Foo`) — should bubble up if the fan-out works as motivated.
+
+Write a dated regression report under `docs/benchmarks/` mirroring `docs/benchmarks/2026-04-20-feat-021-025-cursos-regression.md`. Link from README.
+
+### Step 8 — Feature-gate decision
+
+Currently the workspace-wide ReExportGraph is always built when ≥2 projects AND ≥1 TS project (see `60c6a85`). Single-project and non-TS single-language configs stay on the legacy fast path. Decision needed: is this topology-based gating sufficient, or should there be an explicit `[settings] workspace_graph = false` opt-out for users who hit an edge case?
+
+Tradeoffs to document:
+- **Always-on (current state)**: simplest UX, best default; risk = an undiscovered resolver edge case produces wrong edges in some monorepo shape.
+- **Opt-in flag default false**: most conservative; requires every monorepo user to opt in, defeats the value of the change.
+- **Opt-out flag default true**: compromise — all monorepos get the new behavior, users can disable per-project if a regression surfaces.
+
+Recommendation direction (leave final decision to step 8 implementer): opt-out flag default true, documented in `graphify.toml` comments and README, with a loud stderr line on the first run of a workspace where the flag is at default so users know it's active.
+
+## Description (original design, retained)
 
 `tests/fixtures/ts_cross_project_alias/` + integration test `feat_027_cross_project_alias_stays_at_barrel_v1_contract` pin the current v1 contract: the consumer project emits `src.main → @repo/core [Imports]` (raw alias), has zero edges reaching `packages/core`'s internals (`src.foo`, `src.foo.Foo`), and the two graphs are islands. That test is the tripwire — it should **invert** when this feature lands.
 

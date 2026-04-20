@@ -1,69 +1,49 @@
-# Session Brief — Next Session (post-2026-04-20)
+# Session Brief — Next Session (post-2026-04-20, session `2026-04-20-1437`)
 
-**Last session:** 2026-04-20 (tn session `2026-04-20-1216`, 46m / 60m wall, 174k / 400k tokens). Dispatched two tasks via `/tn-plan-session`: **CHORE-003** (done, 12m / 62k `<usage>`, benchmark — headline −17.1% nodes, −89% top hotspot on `parisgroup-ai/cursos` @ `8ff36cc1`) and **FEAT-026** (done, 34m / 112k `<usage>`, module-level TS named-import edges now fan out to canonical modules). Also created 3 tasks (FEAT-026, CHORE-003, FEAT-027), fixed sprint.md drift (BUG-014 → done), and closed GitHub issue #13 (the originating consolidation proposal) with a resumé pointing at the 6 shipped FEAT/DOC IDs + 3 follow-ups.
+**Last session:** 2026-04-20 (tn session `2026-04-20-1437`, 2h 31m wall / 60m budget = 251%, subagent-tokens 521k / 400k advisory = 130%, 5 dispatches all `source=<usage>`). Dispatched FEAT-028 across 5 slices (scaffold → walker → alias resolver → inner-glob matcher → P2a+P2b+P3 in one sweep) — feature functionally shipped, tripwire inverted. Also created CHORE-004 + CHORE-005 as meta follow-ups on the tn/skill side from a live misread incident.
 
 ## Current State
 
-- Branch: `main` @ `b39937f` (v0.10.0) at session start → advances by 3 commits at session close (FEAT-026 code, CHORE-003 benchmark, session memory)
-- CI locally green: `cargo fmt --all -- --check` + `cargo clippy --workspace -- -D warnings` passed; `cargo test --workspace` passed per dispatcher self-report (integration test count 13 → 14, new `feat_026_named_imports_fan_out_to_canonical_modules`)
-- tn session `2026-04-20-1216` closed; calibration now has 19 observations across 3 cells. FEAT/claude-solo sample=9 (FEAT-026 ratio 1.06× — nearly spot-on at 34m vs 32m est); CHORE/claude-solo sample=3 (CHORE-003 ratio 1.71× — low_confidence flag was accurate).
-- Working-tree note: `target/` binaries show as modified in `git status` because they are **tracked** in git (legacy) — NEVER stage these; the `.gitignore` `/target` entry only catches new untracked files.
-- Benchmark worktree preserved at `/tmp/graphify-benchmark/v0.9.0` (disposable — `git worktree remove /tmp/graphify-benchmark/v0.9.0` when done).
-- GitHub issues: 0 open. Issue #13 closed this session with consolidated summary.
+- Branch: `main` — session advances main by **7 FEAT-028 commits** (`0fe862b` scaffold → `cd760a1` inverted tripwire) + this close commit
+- CI locally green across all 7 commits (`cargo fmt --all -- --check`, `cargo clippy --workspace -- -D warnings`, `cargo test --workspace`). Workspace test count advanced (now includes `feat_028_cross_project_alias_fans_out_to_canonical_workspace_scope` replacing the old FEAT-027 tripwire, plus ~23 new unit tests across `workspace_reexport.rs` and `resolver.rs`).
+- tn session `2026-04-20-1437` — to be closed at end of this session-close. Calibration now has **24 observations** (5 FEAT-028 partials + prior 19) across 3 cells; FEAT/claude-solo sample grew from 9 → 14. All 5 FEAT-028 dispatches logged with `source=<usage>` tokens (observed, not heuristic) per CHORE-004/DOC-003 dual-schema handling.
+- `target/` binaries still show as modified in `git status` — legacy-tracked, NEVER stage (`.gitignore` `/target` only catches untracked).
+- No GitHub issues opened or closed this session.
+- **Known CI caveat**: the dispatcher self-reported tests as green on the 5th dispatch; next session should run `cargo test --workspace` once cold to confirm nothing raced with the phase-split refactor.
 
 ## Open Items (tn tasks)
 
-- **FEAT-027** (open, low, ~2h — scope likely reduced now) — Spike on `tsconfig.json` paths that traverse barrels to canonical modules. With FEAT-026 landed, this is probably already covered for the symbol layer via the re-export graph + named-import fan-out; needs a 2-project fixture that imports via `@repo/core` alias through a barrel to verify. If covered, close with a regression test; if not, draft FEAT-028 with the delta.
-- **FEAT-021** (open, low) — The umbrella. Part A + Part B slice + FEAT-025 writer fan-out + FEAT-026 module edges all landed; the task body still has unchecked subtasks for "aliased re-export fixtures" and "perf delta" that are now arguably FEAT-027's job. Consider closing FEAT-021 with a pointer to FEAT-027.
-- **FEAT-025** (done). The three follow-ups it spawned: FEAT-026 (done), CHORE-003 (done), FEAT-027 (open). Full loop closed except the tsconfig spike.
+- **FEAT-028** (open, normal, ~1h remaining across 2 steps) — **functionally shipped this session**, body updated with completion table. Remaining: step 6 (cursos `cross_project_edges` regression benchmark mirroring CHORE-003 shape — quantify the "2,165 → per-canonical fan-in" motivation claim) + step 8 (feature-gate decision, currently always-on; opt-out flag direction recommended). Both small enough to slot into a future sprint.
+- **CHORE-004** (open, low, ~45m) — Rename `main-context budget:` → `main-context snapshot:` in tn's `session log` success line to match BUG-012/DOC-003 snapshot semantics. Lives in the tn repo (external), tracked here for follow-through.
+- **CHORE-005** (open, low, ~30m) — Add explicit guard in `/tn-plan-session` Step 8 against recommending close on `subagent_tokens_sum` approaching `budget.tokens`. Lives in the skill, tracked here.
+- **FEAT-021** (open, low) — umbrella. Part A + Part B + FEAT-025 writer fan-out + FEAT-026 module edges + FEAT-027 split-answer + FEAT-028 cross-project all landed. Body still has unchecked subtasks that are now arguably done elsewhere. Consider closing FEAT-021 with a pointer to the FEAT-028 completion.
+- **FEAT-027** (open) — was the spike that produced the FEAT-028 tripwire. Since FEAT-028 inverted that tripwire and shipped the fix, FEAT-027 can probably close as `done` with a one-line pointer to FEAT-028's commits.
 - **Four pre-existing frontmatter-invalid tasks** still surface in `tn list --invalid`: BUG-007 (`priority: critical`), FEAT-002 (missing tags), FEAT-011 (`priority: medium`), `sprint.md` (missing uid). Pre-existing, cosmetic.
 
 ## Decisions Made (don't re-debate)
 
 *(carried from prior sessions — see commit history + CLAUDE.md for full ledger)*
 
-*(added 2026-04-20)*
+*(added 2026-04-20, session `2026-04-20-1437`)*
 
-- **Module-layer edge rewrite uses the same ReExportGraph as the symbol layer.** FEAT-026 deliberately reuses `resolve_canonical` (not a parallel structure) so the two layers stay in lock-step. Don't build a separate resolver for module-layer in a future task.
-- **Unresolved/Cycle outcomes fall back to barrel-targeted edges.** Explicit v1 policy to keep "no import is ever silently dropped." If FEAT-025's original "downgrade Unresolved confidence" idea resurfaces, it needs a new task that consciously chooses between (a) silent-fallback-to-barrel (current), (b) downgrade-on-fallback, (c) warn-but-keep — don't default to (b) just because it was in a prior spec.
-- **`import * as ns from '...'`** stays single-edge-to-barrel. The specifier set is empty at the syntax level; walking is semantically wrong. If a consumer asks "why is my namespace import still landing on the barrel", point at this note.
-- **Type-only imports (`import type { Foo }`) keep parity.** They contribute `is_type_only: true` entries and walk through the fan-out path, weight 1. Changing this to "skip type-only imports entirely" is a behavioral change that would need a migration-note task; don't do it casually.
-- **Consolidation allowlist + intentional_mirrors loop is fully closed.** Issue #13's Ask A shipped as FEAT-020/022/023/024 + DOC-001 (all done 2026-04-18). Don't re-open — the allowlist is the contract, the `.consolidation-ignore` workaround is documented as deprecated.
+- **Workspace graph is topology-triggered, not flag-triggered.** Built only when ≥2 projects AND ≥1 TS project — single-project and non-TS configs stay on the legacy fast path with zero overhead. If step 8 (feature-gate decision) adds an opt-out flag, the default stays `true` (always build when topology matches); the flag would be purely escape-hatch for edge cases.
+- **Option 2 namespacing locked.** Public node ids stay per-project (e.g. `src.foo` in both consumer and core projects). Workspace lookup is an internal `modules_to_project` first-wins index + collision log. Cross-project edges reference the target's `module_id` verbatim. Decision rationale in `workspace_reexport.rs` module-level doc-comment. Do NOT switch to full-prefix (`core.src.foo`) without a migration task — it breaks every downstream consumer of `graph.json` / `analysis.json`.
+- **`match_alias_target` supports inner-glob tsconfig paths.** `"@repo/*": ["../../packages/*/src"]` now resolves. Previously trailing-`*` or exact-match only (pre-existing limitation unearthed during FEAT-028 slice 4). Tests in `resolver.rs` pin the contract.
+- **`run_extract` is two-phase.** Phase 1 = `build_project_reexport_context` (collect, no edges emitted). Phase 2 = `run_extract_with_workspace` (fan-out against the merged workspace graph). Any future multi-project feature (FEAT-029+) should plug into this structure, not re-split the function.
+- **tn `subagent_tokens_sum / budget.tokens` is NOT a dispatch-capacity ceiling.** It's an FEAT-019 calibration advisory meter. Each `Task` subagent allocates a fresh 1M model-context window. CHORE-005 adds an explicit guard in `/tn-plan-session` Step 8 against the misread. Until that ships, orchestrator discipline is: trust Claude Code status bar `% ctx` for real-time headroom, use tn's meter only to feed calibration.
+- **tn session token source preference.** Prefer `<usage>total_tokens: N` from the top-level Task return (flat plaintext, primary in practice — observed in all 5 FEAT-028 dispatches) over the dispatcher's heuristic self-report. Dual-schema parser per DOC-003; fall back to heuristic only if `<usage>` absent. `--note "source=<usage>"` tags the log entry so calibration can distinguish.
 
 ## Suggested Next Steps
 
-1. **FEAT-027 (~1-2h, likely shorter)** — Build the 2-project alias fixture, run current HEAD, verify whether `@repo/core/Foo` with a barrel target already resolves canonically post-FEAT-026. If yes: add a regression test + close. If no: draft FEAT-028 (e.g., apply re-export walker to alias-resolved module ids with a cross-project flag) and close FEAT-027 as investigation-complete. `claude-solo` (sample=9 for FEAT).
-2. **Close FEAT-021** — All its children landed. A 5-minute cleanup: verify the body subtasks, check the remaining "aliased re-export fixtures" note maps to FEAT-027, and `tn done FEAT-021`.
-3. **Sprint/frontmatter cleanup (~10m)** — fix the four `tn list --invalid` rows. Optional cosmetic.
-4. **Version bump + release** — v0.10.0 shipped at `b39937f` *before* FEAT-026/CHORE-003. Next release (v0.11.0?) should capture module-edge fan-out + the benchmark. Per CLAUDE.md "Version bump" recipe.
+1. **Close FEAT-028 step 6** — run the cursos `cross_project_edges` regression benchmark (mirror CHORE-003's shape at `docs/benchmarks/2026-04-20-feat-021-025-cursos-regression.md`). Run Graphify on cursos @ fixed commit before (v0.10.0, pre-FEAT-028) vs after this session's main HEAD. Primary metric: `cross_project_edges` from `graphify-summary.json` — the motivation claim was "2,165 barrel-inflated edges should redistribute". Secondary: top-N canonical destinations, hotspot score movement on shared-package symbols.
+2. **Close FEAT-028 step 8** — feature-gate decision. Recommendation in the task body: opt-out flag default `true` + stderr notice on first workspace run. Small code change (add `workspace_graph` to `[settings]` in `config.rs`, gate the aggregation path). Slot in the same sprint as step 6.
+3. **Close stale FEAT-027** — it can be `tn done FEAT-027` with a one-line pointer; the v1 tripwire it landed has been intentionally inverted by FEAT-028.
+4. **Consider closing FEAT-021** — umbrella task, all child slices now shipped. Close with pointer-to-completion commits.
+5. **CHORE-004 + CHORE-005 when convenient** — both are small quality-of-life fixes, not blocking anything. Do them opportunistically when in the tn repo or editing skills.
 
-## Out of Scope (for next session unless lifted)
+## Meta Learnings This Session
 
-- Python barrel equivalence (`from .foo import Bar` in `__init__.py`). Still out — not asked.
-- `is_stub_body_str` fix in sibling `tasknotes-cli` repo. Still out — that's the `tasknotes-cli` maintainer's job.
-- FEAT-028 / cross-project alias-through-barrel handling. Stays latent unless FEAT-027's spike says "not covered."
-
-## Re-Entry Hints (survive compaction)
-
-1. Re-read this file + CLAUDE.md (the FEAT-026 / CHORE-003 paragraph now lives at the end of the existing "TS barrel re-export collapse" bullet in `## Conventions`)
-2. `git log origin/main..HEAD --oneline` — 3 unpushed commits expected if the push auto-step ran (FEAT-026 code, CHORE-003 benchmark, session memory)
-3. `git status --short` — expect only `target/` binaries as noise
-4. `tn list --status open` — should show FEAT-027 + FEAT-021 (FEAT-021 is probably closable on inspection)
-5. `tn time --roi --week` — FEAT/claude-solo now `sample=9` (steady), CHORE/claude-solo `sample=3`
-6. Start-of-session reads for FEAT-027: `crates/graphify-extract/src/resolver.rs` (alias path), `crates/graphify-extract/src/typescript.rs` (named-import capture, post-FEAT-026), `docs/benchmarks/2026-04-20-feat-021-025-cursos-regression.md` (where to extend the monorepo fixture count)
-
-## Team Dispatch Recommendations
-
-- **FEAT-027**: `claude-solo` — precedent established; 9 samples. Spike tasks with `uncertainty: high` tend to undershoot wall-clock when the answer is "covered" and overshoot when it's "not covered" — let the dispatcher pick outcome `partial` if the spike reveals a net-new task.
-
-## Context Budget Plan
-
-- **Start of next session**: brief + CLAUDE.md + FEAT-027 body + post-FEAT-026 tree diff ≈ 12k tokens
-- FEAT-027 spike (~1-2h): expect 50-90k tokens if it ends in a regression fixture; 30-50k if it ends in a no-op close. Observable-vs-heuristic gap this session closed to ~6% (vs ~25-32% prior) — the `<usage>` parsing in `/tn-plan-session` step 7 is working as designed.
-
-## Calibration Observations
-
-- **FEAT-026 ratio 1.06× (sample=9) → calibrator is converging on claude-solo/FEAT.** Estimate of 32m vs actual 34m. The ratio 0.35 held; the sample-weight is now high enough that a single outlier won't shift the prediction materially.
-- **CHORE-003 ratio 1.71× (sample=3) with low_confidence flag accurate.** Estimate 7m → actual 12m. This is the third CHORE data point; expect the ratio to shift from the default 0.36 toward ~0.42-0.45 at the next calibration rebuild.
-- **Observable vs heuristic: CHORE-003 62k observed vs 62k heuristic (~0%), FEAT-026 112k observed vs 102k heuristic (−9%).** Gap shrank from prior session's 25%. Bigger news: dispatcher self-report is now reliably within 10% — the FEAT-030 / CHORE-004 wiring is landing accurate data.
-- **Stop hook still silent this session** (`hook_fired: false`, `main_context_inactive: true` after first log). `--tokens 400k` budget ceiling was not enforced; all calibration came from per-dispatch `--tokens` logs. Known limitation; the FEAT-019 calibration-source contract handles it.
+- `/tn-plan-session` skill has correct guidance but burying "do NOT close on token advisory" in Step 8 bullet 5 was insufficient — the misread happened anyway. CHORE-005 addresses.
+- tn output wording `main-context budget: X / Y` actively misleads — "budget" implies enforcement, but the field is a snapshot. CHORE-004 addresses.
+- When `tn` plans a task with ratio 0.36 against an author's `timeEstimate: 300`, the resulting 32m estimate is useful context (calibration says "historically 0.36× of author estimates"), NOT a ceiling. FEAT-028 actually took ~151m across 5 slices — ratio 0.5× against author estimate, calibration should shift after this session's logs.
+- Incremental commit-per-slice pattern from the dispatcher spec paid off: 7 atomic commits, each CI-green, tripwire held until the intentional flip. If FEAT-028 had been paused mid-flight, any slice would have been safe to leave on main.
