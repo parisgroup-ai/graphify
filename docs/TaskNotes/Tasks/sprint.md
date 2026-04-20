@@ -1,7 +1,7 @@
 ---
 title: Sprint
 created: 2026-04-12
-updated: 2026-04-14
+updated: 2026-04-20
 ---
 
 # Graphify — Issues
@@ -21,7 +21,7 @@ updated: 2026-04-14
 | BUG-011 | **done**    | high     | 3h     | Workspace alias imports still mangled with local_prefix   |
 | BUG-012 | **done**    | low      | 1h     | Summary JSON missing communities count                    |
 | BUG-013 | **done**    | normal   | 1h30m  | `graphify run` leaves stale report directories         |
-| BUG-014 | **open**    | low      | ?      | `graphify diff --before history/*.json` cryptic schema error |
+| BUG-014 | **done**    | low      | ?      | `graphify diff --before history/*.json` cryptic schema error |
 
 ## Backlog
 
@@ -45,6 +45,9 @@ updated: 2026-04-14
 | FEAT-016 | **done** | high     | 16h    | Contract drift detection between ORM and TS types     |
 | FEAT-017 | **done** | normal   | ?      | Classify top-20 hotspots as hub/bridge/mixed in report output |
 | FEAT-018 | **done** | normal   | 16h    | AI integrations (skills, agents, install-integrations subcommand) |
+| FEAT-026 | **open** | normal   | 3h     | TS named-import edges should target canonical modules, not barrels |
+| CHORE-003 | **open** | normal  | 2h     | Run FEAT-021/025 regression on reference monorepo + record deltas |
+| FEAT-027 | **open** | low      | 2h     | Spike: `tsconfig.json` paths that traverse barrels to canonical modules |
 
 ## Done
 
