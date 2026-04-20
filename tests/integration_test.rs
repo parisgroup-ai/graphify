@@ -1537,9 +1537,21 @@ lang = ["typescript"]
 ///
 /// This test pins the current v1 contract. It is the intentional tripwire
 /// for a future FEAT-028 that would merge re-export graphs across
-/// `[[project]]` boundaries (or otherwise resolve alias-through-barrel in
-/// monorepo setups). When that feature lands, this test should update —
-/// don't fix the assertion blindly, the change is a contract shift.
+/// FEAT-028 contract: cross-project alias-through-barrel now fans out to the
+/// canonical declaration in the sibling project.
+///
+/// Previously (FEAT-027 spike / v1 tripwire) the same fixture terminated at
+/// the raw alias string `@repo/core` because each `[[project]]` built its
+/// own per-project `ReExportGraph` that couldn't cross workspace boundaries.
+/// FEAT-028 step 5 introduces a workspace-wide `WorkspaceReExportGraph` —
+/// aggregated in `graphify-cli::main::collect_workspace_reexport_graph`
+/// before any project's fan-out — and the TS named-import fan-out at
+/// `run_extract_with_workspace` now consults
+/// `ModuleResolver::apply_ts_alias_workspace` +
+/// `WorkspaceReExportGraph::resolve_canonical_cross_project` for non-local
+/// barrels. The consumer's `import { Foo } from '@repo/core'` therefore
+/// emits an `Imports` edge directly to the sibling's canonical module
+/// (`src.foo` in the `core` project), not to the raw alias.
 ///
 /// Fixture shape (pnpm/turbo-style workspace):
 /// ```text
@@ -1549,7 +1561,7 @@ lang = ["typescript"]
 /// packages/core/src/foo.ts      (canonical declaration in a separate project)
 /// ```
 #[test]
-fn feat_027_cross_project_alias_stays_at_barrel_v1_contract() {
+fn feat_028_cross_project_alias_fans_out_to_canonical_workspace_scope() {
     let fixture_dir =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_cross_project_alias");
 
@@ -1592,8 +1604,9 @@ lang = ["typescript"]
         .expect("launch graphify binary");
     assert!(status.success(), "graphify run exited with non-zero status");
 
-    // Consumer project: edge should land on the raw alias string
-    // (`@repo/core`), NOT on any core canonical module.
+    // Consumer project: cross-project fan-out should emit an `Imports`
+    // edge directly to the sibling's canonical module (`src.foo` in the
+    // `core` project), bypassing the `@repo/core` barrel entirely.
     let consumer_graph: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(out_dir.join("consumer").join("graph.json"))
             .expect("read consumer graph.json"),
@@ -1611,21 +1624,41 @@ lang = ["typescript"]
     assert!(
         consumer_imports
             .iter()
-            .any(|(s, t)| *s == "src.main" && *t == "@repo/core"),
-        "cross-project alias: expected raw barrel edge src.main -> @repo/core (v1 contract), \
-         got {:?}. If FEAT-028 changed the contract, update this test deliberately.",
-        consumer_imports
-    );
-    assert!(
-        !consumer_imports.iter().any(|(_, t)| t.contains("src.foo")),
-        "cross-project alias: consumer must NOT reach core internals in v1, got {:?}. \
-         If FEAT-028 landed cross-project walking, this is expected — rewrite the test.",
+            .any(|(s, t)| *s == "src.main" && *t == "src.foo"),
+        "cross-project fan-out: expected canonical edge src.main -> src.foo, got {:?}",
         consumer_imports
     );
 
-    // The `@repo/core` node lives only on the consumer side (raw alias,
-    // non-local). Confirm there is no cross-project edge on the core side
-    // back to the consumer either — both graphs are islands pre-FEAT-028.
+    // The raw `@repo/core` alias must no longer appear as an edge target on
+    // the consumer side — FEAT-028 eliminates it in favour of the canonical.
+    assert!(
+        !consumer_imports.iter().any(|(_, t)| *t == "@repo/core"),
+        "cross-project fan-out: raw alias '@repo/core' must not appear as an \
+         edge target post-FEAT-028, got {:?}",
+        consumer_imports
+    );
+
+    // The `@repo/core` node should be gone from the consumer's node set —
+    // no edges reach it, and the extractor doesn't synthesise it as a
+    // standalone node (the placeholder is created implicitly by
+    // `CodeGraph::add_edge`, so eliminating the edge eliminates the node).
+    let consumer_node_ids: Vec<&str> = consumer_graph["nodes"]
+        .as_array()
+        .expect("nodes array")
+        .iter()
+        .filter_map(|n| n["id"].as_str())
+        .collect();
+    assert!(
+        !consumer_node_ids.iter().any(|id| *id == "@repo/core"),
+        "cross-project fan-out: '@repo/core' node must be removed post-FEAT-028, \
+         got {:?}",
+        consumer_node_ids
+    );
+
+    // Core project side is unchanged: the canonical `Foo` class node still
+    // exists in its own project. FEAT-028 does NOT promote the canonical
+    // into the consumer's node set — cross-project edges target the
+    // sibling's id verbatim per option-2 namespacing ADR (slice 1).
     let core_graph: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(out_dir.join("core").join("graph.json"))
             .expect("read core graph.json"),
