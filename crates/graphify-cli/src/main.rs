@@ -600,11 +600,23 @@ fn main() {
         } => {
             let cfg = load_config(&config);
             let out_dir = resolve_output(&cfg, output.as_deref());
+            let project_refs: Vec<&ProjectConfig> = cfg.project.iter().collect();
+            let workspace = collect_workspace_reexport_graph(
+                &project_refs,
+                &cfg.settings,
+                Some(&out_dir),
+                force,
+            );
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
-                let (graph, _excludes, stats) =
-                    run_extract(project, &cfg.settings, Some(&proj_out), force);
+                let (graph, _excludes, stats) = run_extract_with_workspace(
+                    project,
+                    &cfg.settings,
+                    Some(&proj_out),
+                    force,
+                    workspace.as_ref(),
+                );
                 print_cache_stats(&project.name, &stats);
                 write_graph_json(&graph, &proj_out.join("graph.json"));
                 println!(
@@ -629,10 +641,23 @@ fn main() {
             let out_dir = resolve_output(&cfg, output.as_deref());
             let w = resolve_weights(&cfg, weights.as_deref());
             let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
+            let project_refs: Vec<&ProjectConfig> = cfg.project.iter().collect();
+            let workspace = collect_workspace_reexport_graph(
+                &project_refs,
+                &cfg.settings,
+                Some(&out_dir),
+                force,
+            );
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
                 std::fs::create_dir_all(&proj_out).expect("create output directory");
-                let (graph, _, stats) = run_extract(project, &cfg.settings, Some(&proj_out), force);
+                let (graph, _, stats) = run_extract_with_workspace(
+                    project,
+                    &cfg.settings,
+                    Some(&proj_out),
+                    force,
+                    workspace.as_ref(),
+                );
                 print_cache_stats(&project.name, &stats);
                 let (mut metrics, communities, cycles_simple) =
                     run_analyze(&graph, &w, &thresholds);
@@ -673,6 +698,13 @@ fn main() {
             let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
             let formats = resolve_formats(&cfg, format.as_deref());
             let consolidation = resolve_consolidation(&cfg, ignore_allowlist);
+            let project_refs: Vec<&ProjectConfig> = cfg.project.iter().collect();
+            let workspace = collect_workspace_reexport_graph(
+                &project_refs,
+                &cfg.settings,
+                Some(&out_dir),
+                force,
+            );
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
@@ -686,6 +718,7 @@ fn main() {
                     &formats,
                     force,
                     &consolidation,
+                    workspace.as_ref(),
                 );
                 println!(
                     "[{}] Report written to {}",
@@ -714,6 +747,13 @@ fn main() {
             let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
             let formats = resolve_formats(&cfg, None);
             let consolidation = resolve_consolidation(&cfg, ignore_allowlist);
+            let project_refs: Vec<&ProjectConfig> = cfg.project.iter().collect();
+            let workspace = collect_workspace_reexport_graph(
+                &project_refs,
+                &cfg.settings,
+                Some(&out_dir),
+                force,
+            );
             let mut project_data: Vec<ProjectData> = Vec::new();
             for project in &cfg.project {
                 let proj_out = out_dir.join(&project.name);
@@ -727,6 +767,7 @@ fn main() {
                     &formats,
                     force,
                     &consolidation,
+                    workspace.as_ref(),
                 );
                 println!(
                     "[{}] Pipeline complete → {}",
@@ -1539,6 +1580,225 @@ fn parse_languages(lang_strs: &[String]) -> Vec<Language> {
 // Extraction pipeline
 // ---------------------------------------------------------------------------
 
+/// Build a workspace-wide [`graphify_extract::WorkspaceReExportGraph`] by
+/// running a lightweight pre-pass over every configured project.
+///
+/// FEAT-028 step 5 P2b: the outer project loop collects every project's
+/// `ProjectReExportContext` (+ per-project [`graphify_extract::ReExportGraph`])
+/// into a single workspace aggregate BEFORE any project's fan-out runs. The
+/// fan-out loop at main.rs:1953 then consults this aggregate via
+/// [`graphify_extract::ModuleResolver::apply_ts_alias_workspace`] +
+/// [`graphify_extract::WorkspaceReExportGraph::resolve_canonical_cross_project`]
+/// so consumer-side `@repo/core` imports fan out to the canonical
+/// declarations in the sibling project.
+///
+/// Cost: each project's files are walked twice (here + inside
+/// `run_extract_with_workspace`). The extraction cache at
+/// `.graphify-cache.json` absorbs the second parse, so the overhead is
+/// bounded to file I/O + AST re-hydration.
+///
+/// Returns `None` when no workspace-aware work is possible — i.e. fewer
+/// than 2 projects configured, or zero TypeScript projects. Callers fall
+/// back to the single-project `run_extract` path in that case.
+fn collect_workspace_reexport_graph(
+    projects: &[&ProjectConfig],
+    settings: &Settings,
+    cache_root: Option<&Path>,
+    force: bool,
+) -> Option<graphify_extract::WorkspaceReExportGraph> {
+    if projects.len() < 2 {
+        return None;
+    }
+
+    let mut has_ts = false;
+    let mut ws = graphify_extract::WorkspaceReExportGraph::new();
+
+    for project in projects {
+        let languages = parse_languages(&project.lang);
+        if !languages.contains(&Language::TypeScript) {
+            continue;
+        }
+        has_ts = true;
+
+        // Per-project cache dir (mirrors the caller's layout).
+        let cache_dir = cache_root.map(|root| root.join(&project.name));
+        let cache_dir_ref = cache_dir.as_deref();
+
+        let phase = build_phase1_for_workspace(project, settings, cache_dir_ref, force);
+        ws.add_project(phase.ctx);
+        ws.set_project_graph(project.name.clone(), phase.reexport_graph);
+    }
+
+    if !has_ts {
+        return None;
+    }
+
+    for (module_id, losing_project) in ws.module_collisions().iter().take(5) {
+        eprintln!(
+            "Warning: workspace module id collision on '{}' (losing project: '{}'). Cross-project \
+             fan-out may resolve to the first registering project.",
+            module_id, losing_project,
+        );
+    }
+
+    Some(ws)
+}
+
+/// Intermediate output of the workspace pre-pass for one project.
+struct WorkspacePhase1 {
+    ctx: graphify_extract::ProjectReExportContext,
+    reexport_graph: graphify_extract::ReExportGraph,
+}
+
+/// Run just enough of the extraction pipeline to produce a
+/// [`ProjectReExportContext`] + per-project [`ReExportGraph`] for workspace
+/// aggregation. Does NOT build the project's [`CodeGraph`] — that's the job
+/// of the second pass inside [`run_extract_with_workspace`].
+fn build_phase1_for_workspace(
+    project: &ProjectConfig,
+    settings: &Settings,
+    cache_dir: Option<&Path>,
+    force: bool,
+) -> WorkspacePhase1 {
+    let repo_path = PathBuf::from(&project.repo);
+    let languages = parse_languages(&project.lang);
+
+    let extra_owned: Vec<String> = settings.exclude.clone().unwrap_or_default();
+    let extra_excludes: Vec<&str> = extra_owned.iter().map(|s| s.as_str()).collect();
+
+    let (effective_local_prefix, _auto) = match project.local_prefix.as_deref() {
+        Some(prefix) => (prefix.to_owned(), false),
+        None => (
+            detect_local_prefix(&repo_path, &languages, &extra_excludes),
+            true,
+        ),
+    };
+
+    let psr4_mappings: Vec<(String, String)> = if languages.contains(&Language::Php) {
+        let composer = repo_path.join("composer.json");
+        if composer.exists() {
+            let mut tmp = graphify_extract::resolver::ModuleResolver::new(&repo_path);
+            tmp.load_composer_json(&composer);
+            tmp.psr4_mappings().to_vec()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    let files = graphify_extract::discover_files_with_psr4(
+        &repo_path,
+        &languages,
+        &effective_local_prefix,
+        &extra_excludes,
+        &psr4_mappings,
+    );
+
+    // Reuse the extraction cache if available — the second-pass
+    // `run_extract_with_workspace` call will save an updated cache.
+    let cache = match (force, cache_dir) {
+        (false, Some(dir)) => {
+            let cache_path = dir.join(".graphify-cache.json");
+            ExtractionCache::load(&cache_path, &effective_local_prefix)
+                .unwrap_or_else(|| ExtractionCache::new(&effective_local_prefix))
+        }
+        _ => ExtractionCache::new(&effective_local_prefix),
+    };
+
+    let python_extractor = PythonExtractor::new();
+    let typescript_extractor = TypeScriptExtractor::new();
+    let go_extractor = GoExtractor::new();
+    let rust_extractor = RustExtractor::new();
+    let php_extractor = PhpExtractor::new();
+
+    let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
+    for file in &files {
+        resolver.register_module_path(&file.module_name, &file.path, file.is_package);
+    }
+
+    if languages.contains(&Language::TypeScript) {
+        for file in files.iter().filter(|f| f.language == Language::TypeScript) {
+            if let Some(tsconfig) = find_nearest_ancestor_file(&file.path, "tsconfig.json") {
+                resolver.load_tsconfig_for_module(&file.module_name, &tsconfig);
+            }
+        }
+    }
+
+    if languages.contains(&Language::Go) {
+        let go_mod = repo_path.join("go.mod");
+        if go_mod.exists() {
+            resolver.load_go_mod(&go_mod);
+        }
+    }
+
+    if languages.contains(&Language::Php) {
+        let composer = repo_path.join("composer.json");
+        if composer.exists() {
+            resolver.load_composer_json(&composer);
+        }
+    }
+
+    let repo_path_ref = &repo_path;
+
+    let extraction: Vec<ExtractionResult> = files
+        .par_iter()
+        .filter_map(|file| {
+            let source = match std::fs::read(&file.path) {
+                Ok(bytes) => bytes,
+                Err(_) => return None,
+            };
+
+            let rel_path = file
+                .path
+                .strip_prefix(repo_path_ref)
+                .unwrap_or(&file.path)
+                .to_string_lossy()
+                .to_string();
+            let hash = sha256_hex(&source);
+
+            if let Some(cached) = cache.lookup(&rel_path, &hash) {
+                return Some(cached.clone());
+            }
+
+            let extractor: &dyn LanguageExtractor = match file.language {
+                Language::Python => &python_extractor,
+                Language::TypeScript => &typescript_extractor,
+                Language::Go => &go_extractor,
+                Language::Rust => &rust_extractor,
+                Language::Php => &php_extractor,
+            };
+
+            Some(extractor.extract_file(&file.path, &source, &file.module_name))
+        })
+        .collect();
+
+    let mut all_reexports: Vec<graphify_extract::ReExportEntry> = Vec::new();
+    for result in extraction {
+        all_reexports.extend(result.reexports);
+    }
+
+    let package_modules_owned: std::collections::HashSet<String> = files
+        .iter()
+        .filter(|f| f.is_package)
+        .map(|f| f.module_name.clone())
+        .collect();
+
+    let resolve_cb = |raw: &str, from_module: &str| -> (String, bool) {
+        let is_package = package_modules_owned.contains(from_module);
+        let (resolved, is_local, _conf) = resolver.resolve(raw, from_module, is_package);
+        (resolved, is_local)
+    };
+    let reexport_graph = graphify_extract::ReExportGraph::build(&all_reexports, &resolve_cb);
+
+    let ctx = build_project_reexport_context(&project.name, &repo_path, &files, all_reexports);
+
+    WorkspacePhase1 {
+        ctx,
+        reexport_graph,
+    }
+}
+
 /// Build a [`ProjectReExportContext`] from the inputs already computed inside
 /// `run_extract`.
 ///
@@ -1586,6 +1846,29 @@ fn run_extract(
     settings: &Settings,
     cache_dir: Option<&Path>,
     force: bool,
+) -> (CodeGraph, Vec<String>, CacheStats) {
+    run_extract_with_workspace(project, settings, cache_dir, force, None)
+}
+
+/// Workspace-aware variant of [`run_extract`].
+///
+/// When `workspace` is `Some`, the TypeScript fan-out block consults the
+/// workspace-wide [`WorkspaceReExportGraph`] for cross-project alias-through-
+/// barrel resolution (FEAT-028 step 5 P2b). Non-local barrels (e.g.
+/// `@repo/core`) that resolve — via the per-project [`ModuleResolver`]'s
+/// tsconfig alias map — into a **sibling** workspace project are walked
+/// through that sibling's [`ReExportGraph`] to the canonical declaration,
+/// and the emitted `Imports` edge targets the sibling's canonical module id
+/// verbatim (option-2 namespacing: stable public ids per project).
+///
+/// When `workspace` is `None`, behaviour is bit-for-bit identical to the
+/// pre-FEAT-028 single-project path.
+fn run_extract_with_workspace(
+    project: &ProjectConfig,
+    settings: &Settings,
+    cache_dir: Option<&Path>,
+    force: bool,
+    workspace: Option<&graphify_extract::WorkspaceReExportGraph>,
 ) -> (CodeGraph, Vec<String>, CacheStats) {
     let repo_path = PathBuf::from(&project.repo);
     let languages = parse_languages(&project.lang);
@@ -1945,12 +2228,92 @@ fn run_extract(
                 reexport_resolver.resolve(&entry.raw_target, &entry.from_module, from_is_package);
 
             // If the barrel isn't a local module (e.g. `react`,
-            // `@reduxjs/toolkit`), there's no re-export graph to walk — emit
-            // the single barrel edge once per statement, matching pre-FEAT-026
-            // behaviour. Passing the raw target (not the resolved id) keeps
-            // the downstream resolver step responsible for confidence
-            // downgrades.
+            // `@reduxjs/toolkit`), there's no **per-project** re-export graph
+            // to walk. FEAT-028 step 5 P2b: before falling back to the raw
+            // alias edge, try the workspace-wide resolver — if the tsconfig
+            // alias points at a sibling `[[project]]`, fan out to each
+            // specifier's canonical declaration in that sibling.
             if !barrel_is_local {
+                if let Some(ws) = workspace {
+                    if let Some(target) = reexport_resolver.apply_ts_alias_workspace(
+                        &entry.raw_target,
+                        &entry.from_module,
+                        ws,
+                    ) {
+                        // Register the dropped alias id on every canonical
+                        // node reached so `alternative_paths` carries the
+                        // original import string (parity with the per-
+                        // project collapse at line 1819).
+                        let mut fanned_out_any = false;
+                        for spec_name in &entry.specs {
+                            let outcome = ws.resolve_canonical_cross_project(
+                                &target.project,
+                                &target.module_id,
+                                spec_name,
+                            );
+                            match outcome {
+                                graphify_extract::CrossProjectResolution::Canonical {
+                                    module: canonical_module,
+                                    ..
+                                } => {
+                                    named_import_edges.push((
+                                        entry.from_module.clone(),
+                                        canonical_module,
+                                        graphify_core::types::Edge::imports(entry.line),
+                                    ));
+                                    fanned_out_any = true;
+                                }
+                                graphify_extract::CrossProjectResolution::Unresolved { .. }
+                                | graphify_extract::CrossProjectResolution::Cycle { .. } => {
+                                    // Chain terminated outside the workspace
+                                    // or cycled — land a single edge at the
+                                    // sibling's barrel module so the import
+                                    // is still represented (mirrors the
+                                    // per-project FEAT-026 fallback). Using
+                                    // the sibling's `target.module_id` keeps
+                                    // the edge inside the workspace graph.
+                                    named_import_edges.push((
+                                        entry.from_module.clone(),
+                                        target.module_id.clone(),
+                                        graphify_core::types::Edge::imports(entry.line),
+                                    ));
+                                    fanned_out_any = true;
+                                }
+                            }
+                        }
+                        if !fanned_out_any {
+                            // Defensive — zero specs, shouldn't happen but
+                            // keeps the statement-to-edge guarantee.
+                            named_import_edges.push((
+                                entry.from_module.clone(),
+                                target.module_id.clone(),
+                                graphify_core::types::Edge::imports(entry.line),
+                            ));
+                        }
+                        // Accumulate alternative_paths on canonicals so the
+                        // consumer's dropped `@repo/core` alias is remembered.
+                        //
+                        // NOTE: we add the raw alias to `canonical_to_alt_paths`
+                        // keyed by each canonical module that will actually
+                        // appear as a node in THIS project's graph. In
+                        // practice, cross-project canonicals live in the
+                        // sibling's graph (the canonical node isn't part of
+                        // THIS project's node set), so the alt-paths entry
+                        // here is a no-op for the current writer — it only
+                        // matters for future cross-project node dedupe. Kept
+                        // as a forward-compatibility hook; safe because the
+                        // alt-paths fan-out loop only rewrites nodes that
+                        // exist in `all_nodes`.
+                        let alts = canonical_to_alt_paths
+                            .entry(target.module_id.clone())
+                            .or_default();
+                        if !alts.contains(&entry.raw_target) {
+                            alts.push(entry.raw_target.clone());
+                        }
+                        continue;
+                    }
+                }
+
                 named_import_edges.push((
                     entry.from_module.clone(),
                     entry.raw_target.clone(),
@@ -2184,8 +2547,10 @@ fn run_pipeline_for_project(
     formats: &[String],
     force: bool,
     consolidation: &ConsolidationConfig,
+    workspace: Option<&graphify_extract::WorkspaceReExportGraph>,
 ) -> ProjectData {
-    let (graph, _, stats) = run_extract(project, settings, Some(proj_out), force);
+    let (graph, _, stats) =
+        run_extract_with_workspace(project, settings, Some(proj_out), force, workspace);
     print_cache_stats(&project.name, &stats);
     let (mut metrics, communities, cycles_simple) = run_analyze(&graph, weights, thresholds);
     assign_community_ids(&mut metrics, &communities);
@@ -2487,10 +2852,13 @@ fn cmd_check(
     let out_dir = resolve_output(&cfg, output_override);
     let thresholds = resolve_hotspot_thresholds(&cfg, hub_threshold, bridge_ratio);
     let consolidation = resolve_consolidation(&cfg, ignore_allowlist);
+    let workspace =
+        collect_workspace_reexport_graph(&projects, &cfg.settings, Some(&out_dir), force);
     let mut analyzed_projects = Vec::new();
 
     for project in &projects {
-        let (graph, _excludes, stats) = run_extract(project, &cfg.settings, None, force);
+        let (graph, _excludes, stats) =
+            run_extract_with_workspace(project, &cfg.settings, None, force, workspace.as_ref());
         print_cache_stats(&project.name, &stats);
         let (metrics, communities, cycles) =
             run_analyze(&graph, &ScoringWeights::default(), &thresholds);
@@ -3617,6 +3985,9 @@ fn cmd_watch(
 
     // Run initial pipeline.
     eprintln!("=== Initial build ===");
+    let project_refs: Vec<&ProjectConfig> = cfg.project.iter().collect();
+    let workspace =
+        collect_workspace_reexport_graph(&project_refs, &cfg.settings, Some(&out_dir), force);
     for project in &cfg.project {
         let proj_out = out_dir.join(&project.name);
         std::fs::create_dir_all(&proj_out).expect("create output directory");
@@ -3629,6 +4000,7 @@ fn cmd_watch(
             &formats,
             force,
             &consolidation,
+            workspace.as_ref(),
         );
         eprintln!("[{}] Ready.", project.name);
     }
@@ -3684,6 +4056,15 @@ fn cmd_watch(
                     changed_paths.len()
                 );
 
+                // Rebuild the workspace aggregate so cross-project fan-out
+                // reflects the newly edited re-exports. Force=false here
+                // matches the per-rebuild cache-honouring policy.
+                let refreshed_workspace = collect_workspace_reexport_graph(
+                    &project_refs,
+                    &cfg.settings,
+                    Some(&out_dir),
+                    false,
+                );
                 for &idx in &affected {
                     let project = &cfg.project[idx];
                     let proj_out = out_dir.join(&project.name);
@@ -3697,6 +4078,7 @@ fn cmd_watch(
                         &formats,
                         false,
                         &consolidation,
+                        refreshed_workspace.as_ref(),
                     );
                     eprintln!("[{}] Rebuilt.", project.name);
                 }
