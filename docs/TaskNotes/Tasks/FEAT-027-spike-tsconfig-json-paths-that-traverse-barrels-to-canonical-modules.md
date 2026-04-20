@@ -1,10 +1,18 @@
 ---
 uid: feat-027
-status: open
+status: done
 priority: low
 scheduled: 2026-04-20
+completed: 2026-04-20
 timeEstimate: 120
 pomodoros: 0
+timeSpent: 25
+timeEntries:
+- date: 2026-04-20
+  minutes: 25
+  note: 'spike outcome: same-project covered, cross-project needs FEAT-028'
+  type: manual
+  executor: claude-solo
 contexts:
 - extract
 - typescript
@@ -57,6 +65,16 @@ Timeboxed spike — 1–2 hours, output is a decision note + a follow-up task (o
 - FEAT-026 — named-import module-level fan-out (may subsume this)
 - FEAT-025 — writer fan-out (already covers the symbol layer)
 - GitHub issue #13 (closed) — originating proposal, Ask B context
+
+## Spike outcome (2026-04-20)
+
+**Split result**: one case covered, one case not.
+
+1. **Same-project tsconfig alias** (`@app/*` → `src/*` within one `[[project]]`) — **COVERED post-FEAT-026**. The resolver lowers the alias to a local module id (`is_local = true`), the per-project `ReExportGraph` has the barrel entries, and the named-import fan-out in `run_extract` walks through normally. Verified with `tests/fixtures/ts_tsconfig_alias_project/` + integration test `feat_027_same_project_tsconfig_alias_fans_out_to_canonical`: consumer emits `src.consumer → src.domain.entities.course` (canonical) and no `src.consumer → src.domain` (barrel).
+
+2. **Cross-project alias** (`@repo/*` → `../../packages/*/src` with consumer + core as separate `[[project]]`s) — **NOT COVERED in v1**. `apply_ts_alias_with_context` in `resolver.rs:307-309` returns the raw alias string when the candidate path falls outside the project root, and `is_local` in line 289 is false (the core package is not in the consumer's `known_modules`). FEAT-026's fan-out loop sees `barrel_is_local = false` at `main.rs:1893` and emits a single edge to the raw alias target, matching pre-FEAT-026 behaviour. Verified with `tests/fixtures/ts_cross_project_alias/` + integration test `feat_027_cross_project_alias_stays_at_barrel_v1_contract`: consumer emits `src.main → @repo/core` (raw), has zero edges touching core's `src.foo`, and the two projects' graphs are islands.
+
+**Decision**: both regression tests landed (covered case + v1-contract tripwire). The cross-project case needs a follow-up — drafted as FEAT-028 proposal (pending user approval, not yet created) which would either (a) merge per-project `ReExportGraph`s into a workspace-wide graph, (b) propagate re-export info through `graphify-summary.json`, or (c) apply the walker to alias-resolved ids with a cross-project flag. Closing FEAT-027 as `done` — the spike's job was "verify + decide," not to ship (a)/(b)/(c).
 
 ## Related
 

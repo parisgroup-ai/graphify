@@ -1437,3 +1437,211 @@ lang = ["typescript"]
         imports
     );
 }
+
+// ---------------------------------------------------------------------------
+// FEAT-027: tsconfig.json `paths` aliases interacting with barrel collapse
+// ---------------------------------------------------------------------------
+
+/// Spike verification: when a tsconfig `paths` alias points at a *same-project*
+/// barrel (`@app/*` → `src/*` with a re-exporting `index.ts`), FEAT-026's
+/// module-level fan-out already walks through it. The alias resolves to a
+/// module id inside the project's walker-discovered set (`is_local = true`),
+/// the barrel sits in the per-project `ReExportGraph`, and the named-import
+/// specifier lands on the canonical module.
+///
+/// Fixture shape:
+/// ```text
+/// tsconfig.json   paths: { "@app/*": ["src/*"] }
+/// src/consumer.ts              ── import { Course } from '@app/domain'
+/// src/domain/index.ts          ── export { Course } from './entities'
+/// src/domain/entities/index.ts ── export { Course } from './course'
+/// src/domain/entities/course.ts (canonical declaration)
+/// ```
+#[test]
+fn feat_027_same_project_tsconfig_alias_fans_out_to_canonical() {
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_tsconfig_alias_project");
+
+    let tmp = TempDir::new().expect("create temp dir");
+    let out_dir = tmp.path().join("output");
+
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "alias_fixture"
+repo = "{repo}"
+lang = ["typescript"]
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        repo = fixture_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    );
+
+    let config_path = tmp.path().join("graphify.toml");
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let status = Command::new(graphify_bin())
+        .arg("run")
+        .arg("--config")
+        .arg(&config_path)
+        .status()
+        .expect("launch graphify binary");
+    assert!(status.success(), "graphify run exited with non-zero status");
+
+    let graph_json_path = out_dir.join("alias_fixture").join("graph.json");
+    let raw = std::fs::read_to_string(&graph_json_path).expect("read graph.json");
+    let graph: serde_json::Value = serde_json::from_str(&raw).expect("parse graph.json");
+
+    let links = graph["links"]
+        .as_array()
+        .expect("links must be an array in graph.json");
+
+    let imports: Vec<(&str, &str)> = links
+        .iter()
+        .filter(|link| link["kind"].as_str() == Some("Imports"))
+        .filter_map(|link| {
+            let s = link["source"].as_str()?;
+            let t = link["target"].as_str()?;
+            Some((s, t))
+        })
+        .collect();
+
+    assert!(
+        imports
+            .iter()
+            .any(|(s, t)| *s == "src.consumer" && *t == "src.domain.entities.course"),
+        "same-project alias: expected canonical Imports edge, got {:?}",
+        imports
+    );
+    assert!(
+        !imports
+            .iter()
+            .any(|(s, t)| *s == "src.consumer" && *t == "src.domain"),
+        "same-project alias: barrel edge must have been fanned out, got {:?}",
+        imports
+    );
+}
+
+/// Spike verification: when a tsconfig `paths` alias crosses project
+/// boundaries (`@repo/*` → `../../packages/*/src` with consumer and core
+/// configured as separate `[[project]]`s), FEAT-026's fan-out does NOT walk
+/// through the barrel — the alias target lands outside the consumer's
+/// walker-discovered set, the resolver returns the raw alias string, and
+/// the per-project `ReExportGraph` has no entries for the core barrel.
+///
+/// This test pins the current v1 contract. It is the intentional tripwire
+/// for a future FEAT-028 that would merge re-export graphs across
+/// `[[project]]` boundaries (or otherwise resolve alias-through-barrel in
+/// monorepo setups). When that feature lands, this test should update —
+/// don't fix the assertion blindly, the change is a contract shift.
+///
+/// Fixture shape (pnpm/turbo-style workspace):
+/// ```text
+/// apps/consumer/tsconfig.json   paths: { "@repo/*": ["../../packages/*/src"] }
+/// apps/consumer/src/main.ts     ── import { Foo } from '@repo/core'
+/// packages/core/src/index.ts    ── export { Foo } from './foo'
+/// packages/core/src/foo.ts      (canonical declaration in a separate project)
+/// ```
+#[test]
+fn feat_027_cross_project_alias_stays_at_barrel_v1_contract() {
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_cross_project_alias");
+
+    let tmp = TempDir::new().expect("create temp dir");
+    let out_dir = tmp.path().join("output");
+
+    let fixture_canonical = fixture_dir
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .replace('\\', "/");
+
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "consumer"
+repo = "{fixture}/apps/consumer"
+lang = ["typescript"]
+
+[[project]]
+name = "core"
+repo = "{fixture}/packages/core"
+lang = ["typescript"]
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        fixture = fixture_canonical,
+    );
+
+    let config_path = tmp.path().join("graphify.toml");
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let status = Command::new(graphify_bin())
+        .arg("run")
+        .arg("--config")
+        .arg(&config_path)
+        .status()
+        .expect("launch graphify binary");
+    assert!(status.success(), "graphify run exited with non-zero status");
+
+    // Consumer project: edge should land on the raw alias string
+    // (`@repo/core`), NOT on any core canonical module.
+    let consumer_graph: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("consumer").join("graph.json"))
+            .expect("read consumer graph.json"),
+    )
+    .expect("parse consumer graph.json");
+
+    let consumer_imports: Vec<(&str, &str)> = consumer_graph["links"]
+        .as_array()
+        .expect("links array")
+        .iter()
+        .filter(|link| link["kind"].as_str() == Some("Imports"))
+        .filter_map(|link| Some((link["source"].as_str()?, link["target"].as_str()?)))
+        .collect();
+
+    assert!(
+        consumer_imports
+            .iter()
+            .any(|(s, t)| *s == "src.main" && *t == "@repo/core"),
+        "cross-project alias: expected raw barrel edge src.main -> @repo/core (v1 contract), \
+         got {:?}. If FEAT-028 changed the contract, update this test deliberately.",
+        consumer_imports
+    );
+    assert!(
+        !consumer_imports.iter().any(|(_, t)| t.contains("src.foo")),
+        "cross-project alias: consumer must NOT reach core internals in v1, got {:?}. \
+         If FEAT-028 landed cross-project walking, this is expected — rewrite the test.",
+        consumer_imports
+    );
+
+    // The `@repo/core` node lives only on the consumer side (raw alias,
+    // non-local). Confirm there is no cross-project edge on the core side
+    // back to the consumer either — both graphs are islands pre-FEAT-028.
+    let core_graph: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("core").join("graph.json"))
+            .expect("read core graph.json"),
+    )
+    .expect("parse core graph.json");
+
+    let core_node_ids: Vec<&str> = core_graph["nodes"]
+        .as_array()
+        .expect("nodes array")
+        .iter()
+        .filter_map(|n| n["id"].as_str())
+        .collect();
+
+    assert!(
+        core_node_ids.contains(&"src.foo.Foo"),
+        "core canonical Foo class node must exist in its own project, got {:?}",
+        core_node_ids
+    );
+}
