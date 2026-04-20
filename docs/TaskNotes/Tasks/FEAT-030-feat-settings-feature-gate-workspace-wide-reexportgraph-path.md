@@ -1,6 +1,6 @@
 ---
 uid: feat-030
-status: open
+status: in-progress
 priority: normal
 scheduled: 2026-04-20
 timeEstimate: 90

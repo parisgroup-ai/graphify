@@ -1678,3 +1678,87 @@ lang = ["typescript"]
         core_node_ids
     );
 }
+
+/// FEAT-030: the opt-out `[settings] workspace_reexport_graph = false`
+/// must force the legacy per-project fan-out path — cross-project aliases
+/// stay at the raw `@repo/*` barrel instead of resolving to the sibling's
+/// canonical module. This is the exact inverse of
+/// `feat_028_cross_project_alias_fans_out_to_canonical_workspace_scope`.
+#[test]
+fn feat_030_opt_out_flag_restores_legacy_cross_project_path() {
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_cross_project_alias");
+
+    let tmp = TempDir::new().expect("create temp dir");
+    let out_dir = tmp.path().join("output");
+
+    let fixture_canonical = fixture_dir
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .replace('\\', "/");
+
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+workspace_reexport_graph = false
+
+[[project]]
+name = "consumer"
+repo = "{fixture}/apps/consumer"
+lang = ["typescript"]
+
+[[project]]
+name = "core"
+repo = "{fixture}/packages/core"
+lang = ["typescript"]
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        fixture = fixture_canonical,
+    );
+
+    let config_path = tmp.path().join("graphify.toml");
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let status = Command::new(graphify_bin())
+        .arg("run")
+        .arg("--config")
+        .arg(&config_path)
+        .status()
+        .expect("launch graphify binary");
+    assert!(status.success(), "graphify run exited with non-zero status");
+
+    let consumer_graph: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("consumer").join("graph.json"))
+            .expect("read consumer graph.json"),
+    )
+    .expect("parse consumer graph.json");
+
+    let consumer_imports: Vec<(&str, &str)> = consumer_graph["links"]
+        .as_array()
+        .expect("links array")
+        .iter()
+        .filter(|link| link["kind"].as_str() == Some("Imports"))
+        .filter_map(|link| Some((link["source"].as_str()?, link["target"].as_str()?)))
+        .collect();
+
+    // Legacy path: the raw `@repo/core` alias is the import target — no
+    // canonical resolution across projects.
+    assert!(
+        consumer_imports.iter().any(|(_, t)| *t == "@repo/core"),
+        "opt-out: legacy path must keep '@repo/core' as an edge target, got {:?}",
+        consumer_imports
+    );
+
+    // Canonical `src.foo` must NOT appear — that's the FEAT-028 behaviour
+    // the flag explicitly suppresses.
+    assert!(
+        !consumer_imports
+            .iter()
+            .any(|(s, t)| *s == "src.main" && *t == "src.foo"),
+        "opt-out: canonical edge src.main -> src.foo must not appear when \
+         workspace_reexport_graph = false, got {:?}",
+        consumer_imports
+    );
+}

@@ -2,6 +2,11 @@
 
 All notable changes to Graphify will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- feat(settings): `workspace_reexport_graph` opt-out flag (default `true`) gates the FEAT-028 workspace-wide cross-project fan-out. Set to `false` in `[settings]` to pin pre-`v0.11.0` edge counts — useful for reproducing historical reports or bisecting whether an edge is a real dependency vs. a workspace-graph artifact. Rationale in `docs/adr/0001-workspace-reexport-graph-gate.md` (FEAT-030).
+
 ## [0.8.2] - 2026-04-16
 
 ### Fixed

@@ -157,6 +157,14 @@ struct Settings {
     weights: Option<Vec<f64>>,
     exclude: Option<Vec<String>>,
     format: Option<Vec<String>>,
+    /// Opt-out switch for the workspace-wide `ReExportGraph` cross-project
+    /// fan-out introduced in FEAT-028 (shipped `v0.11.0`). When explicitly
+    /// set to `false`, multi-project TS configs fall back to the legacy
+    /// per-project fan-out path — cross-project aliases land on the raw
+    /// barrel id instead of the sibling's canonical module. Default
+    /// (absent or `true`) keeps the FEAT-028 behaviour. See
+    /// `docs/adr/0001-workspace-reexport-graph-gate.md`.
+    workspace_reexport_graph: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -1138,6 +1146,8 @@ output = "./report"
 # weights = [0.4, 0.2, 0.2, 0.2]   # betweenness, pagerank, in_degree, in_cycle
 # exclude = []                       # extra directories to skip
 # format = ["json", "csv", "md", "html"]    # output formats (also: neo4j, graphml, obsidian)
+# workspace_reexport_graph = true   # multi-project TS fan-out (FEAT-028);
+#                                     set to `false` to pin pre-v0.11.0 edges
 
 [[project]]
 name = "my-project"
@@ -1626,6 +1636,12 @@ fn collect_workspace_reexport_graph(
     cache_root: Option<&Path>,
     force: bool,
 ) -> Option<graphify_extract::WorkspaceReExportGraph> {
+    // FEAT-030: explicit opt-out. Absent / `true` keeps the FEAT-028
+    // workspace-wide fan-out on; `false` forces the legacy per-project path.
+    if settings.workspace_reexport_graph == Some(false) {
+        return None;
+    }
+
     if projects.len() < 2 {
         return None;
     }
