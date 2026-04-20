@@ -511,24 +511,57 @@ fn apply_ts_alias(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String
 }
 
 fn match_alias_target(raw: &str, alias_pat: &str, target_pat: &str) -> Option<String> {
+    // Support three alias forms:
+    //   1. Exact match:    alias and target contain no `*`.
+    //   2. Trailing glob:  alias ends with `*`, target ends with `*`
+    //                      (`@/*` → `src/*`).
+    //   3. Inner glob:     alias or target contain a single `*` in the
+    //                      middle or suffix (`@repo/*` → `../../packages/*/src`).
+    //
+    // Inner-glob support is required for pnpm-style workspace tsconfigs
+    // (FEAT-028): a consumer maps `@repo/*` to a sibling package's inner
+    // source directory, not its root. Splitting each pattern on its sole
+    // `*` lets us capture the glob from `raw` and re-inject it into the
+    // target without hard-coding a trailing-`*` assumption.
+    //
     // Keep the separator before `*` intact so `@/*` matches only `@/foo`,
     // not external scoped packages like `@repo/foo` (BUG-011).
-    let alias_prefix = alias_pat.strip_suffix('*');
-    let target_prefix = target_pat.strip_suffix('*');
+    let alias_parts: Vec<&str> = alias_pat.splitn(3, '*').collect();
+    let target_parts: Vec<&str> = target_pat.splitn(3, '*').collect();
 
-    match (alias_prefix, target_prefix) {
-        (Some(ap), Some(tp)) => {
-            // Wildcard alias: raw must start with ap.
-            raw.strip_prefix(ap).map(|rest| format!("{}{}", tp, rest))
-        }
-        _ => {
-            // Exact alias.
+    // Reject multi-`*` patterns (ambiguous capture). tsconfig-paths in
+    // practice uses exactly one `*` per mapping.
+    if alias_parts.len() > 2 || target_parts.len() > 2 {
+        return None;
+    }
+
+    match (alias_parts.as_slice(), target_parts.as_slice()) {
+        // Exact match (no `*` in either pattern).
+        ([_], [_]) => {
             if raw == alias_pat {
                 Some(target_pat.to_owned())
             } else {
                 None
             }
         }
+        // Glob alias, exact target — unusual but treat as exact match if the
+        // glob captures nothing meaningful. Not supported: skip.
+        ([_, _], [_]) => None,
+        // Exact alias, glob target — alias has no capture to substitute into
+        // the target's `*`. Not supported: skip.
+        ([_], [_, _]) => None,
+        // Glob alias, glob target. Both have exactly one `*`; capture the
+        // wildcard slice from `raw` and splice it into the target.
+        ([ap_prefix, ap_suffix], [tp_prefix, tp_suffix]) => {
+            // `raw` must start with `ap_prefix` and end with `ap_suffix`,
+            // with the captured glob in between.
+            let tail = raw.strip_prefix(ap_prefix)?;
+            let captured = tail.strip_suffix(ap_suffix)?;
+            Some(format!("{}{}{}", tp_prefix, captured, tp_suffix))
+        }
+        // Unreachable — `splitn(3, '*')` with the earlier length guard pins
+        // each slice to either 1 or 2 elements.
+        _ => None,
     }
 }
 
@@ -1797,5 +1830,46 @@ mod tests {
                 module_id: "core.src.index".to_owned(),
             }),
         );
+    }
+
+    // ---- match_alias_target: inner-glob support (FEAT-028 slice 4) ----
+
+    #[test]
+    fn match_alias_target_inner_glob_expands_capture_into_middle_of_target() {
+        // pnpm-style workspace: `"@repo/*": ["../../packages/*/src"]`.
+        // Consumer imports `@repo/core` — the glob captures `core`, which
+        // is spliced into the target's inner `*` position, yielding
+        // `../../packages/core/src`.
+        let got = match_alias_target("@repo/core", "@repo/*", "../../packages/*/src");
+        assert_eq!(got, Some("../../packages/core/src".to_owned()));
+    }
+
+    #[test]
+    fn match_alias_target_inner_glob_with_deep_import_captures_full_tail() {
+        // `@repo/core/foo` with `"@repo/*": ["../../packages/*/src"]` —
+        // capture is `core/foo`, result is `../../packages/core/foo/src`.
+        // Not a typical tsconfig target shape (inner-glob with trailing
+        // segment usually targets a package root, not a nested path), but
+        // the matcher should still honour the literal pattern.
+        let got = match_alias_target("@repo/core/foo", "@repo/*", "../../packages/*/src");
+        assert_eq!(got, Some("../../packages/core/foo/src".to_owned()));
+    }
+
+    #[test]
+    fn match_alias_target_trailing_glob_still_works() {
+        // Regression: the classic trailing-`*` form used by
+        // `"@/*": ["src/*"]` must keep resolving unchanged after the
+        // inner-glob rewrite.
+        let got = match_alias_target("@/lib/api", "@/*", "src/*");
+        assert_eq!(got, Some("src/lib/api".to_owned()));
+    }
+
+    #[test]
+    fn match_alias_target_inner_glob_rejects_non_matching_prefix() {
+        // Consumer imports `@vendor/core`, but the alias is `@repo/*` →
+        // the prefix doesn't match, so we return `None` instead of
+        // mis-capturing.
+        let got = match_alias_target("@vendor/core", "@repo/*", "../../packages/*/src");
+        assert_eq!(got, None);
     }
 }
