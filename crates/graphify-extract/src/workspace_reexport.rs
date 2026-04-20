@@ -58,9 +58,10 @@
 //! // another project's root.
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::lang::ReExportEntry;
+use crate::reexport_graph::ReExportGraph;
 
 // ---------------------------------------------------------------------------
 // Per-project context
@@ -155,7 +156,7 @@ impl ProjectReExportContext {
 /// future diagnostic pass can warn. This is deliberate: FEAT-028's step 2
 /// still has to decide whether to prefix-namespace ids to disambiguate, so
 /// this scaffold refuses to make that decision on behalf of the caller.
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug)]
 pub struct WorkspaceReExportGraph {
     /// Per-project contexts, in insertion order (matches config order).
     projects: Vec<ProjectReExportContext>,
@@ -168,6 +169,22 @@ pub struct WorkspaceReExportGraph {
     /// a diagnostic pass can warn when the workspace has ambiguous module
     /// ids. Each tuple is `(module_id, project_that_lost)`.
     module_collisions: Vec<(String, String)>,
+    /// Per-project re-export graphs keyed by `project_name`, populated via
+    /// [`WorkspaceReExportGraph::set_project_graph`].
+    ///
+    /// `run_extract` already builds one [`ReExportGraph`] per project (via
+    /// [`ReExportGraph::build`] with the project's `ModuleResolver` as the
+    /// [`crate::reexport_graph::ResolveFn`]). FEAT-028 step 3 consumes that
+    /// by letting the caller hand each pre-built graph into the workspace
+    /// aggregate, so the cross-project walker can look up
+    /// `(module, local_name)` hops in the owning project's graph without
+    /// this module owning a `raw_target` resolution path.
+    ///
+    /// If a project has no graph registered (e.g. a non-TypeScript project),
+    /// the walker treats barrel lookups in its modules as "no re-exports",
+    /// which matches the per-project behaviour for an empty
+    /// [`ReExportGraph`].
+    project_graphs: HashMap<String, ReExportGraph>,
 }
 
 impl WorkspaceReExportGraph {
@@ -237,6 +254,240 @@ impl WorkspaceReExportGraph {
     pub fn len(&self) -> usize {
         self.projects.len()
     }
+
+    /// Attach a pre-built per-project [`ReExportGraph`] to the workspace.
+    ///
+    /// Callers own the graph's construction (see [`ReExportGraph::build`]
+    /// with the project's [`crate::resolver::ModuleResolver`]) and hand the
+    /// finished graph here so the cross-project walker can look up hops in
+    /// any project's context without this module owning resolution of raw
+    /// `export … from …` targets.
+    ///
+    /// Overwrites any previously-attached graph for the same `project_name`.
+    pub fn set_project_graph(&mut self, project_name: impl Into<String>, graph: ReExportGraph) {
+        self.project_graphs.insert(project_name.into(), graph);
+    }
+
+    /// Look up the per-project re-export graph for `project_name`.
+    ///
+    /// Returns `None` if no graph was attached for that project (e.g. a
+    /// non-TypeScript project, or a TypeScript project that was registered
+    /// via [`WorkspaceReExportGraph::add_project`] but whose graph hasn't
+    /// been set yet).
+    pub fn project_graph(&self, project_name: &str) -> Option<&ReExportGraph> {
+        self.project_graphs.get(project_name)
+    }
+
+    /// Walk a re-export chain starting from `(from_project, from_module,
+    /// spec_name)`, crossing project boundaries as needed.
+    ///
+    /// This is the workspace-scoped analogue of
+    /// [`ReExportGraph::resolve_canonical`]. Hops are resolved in the
+    /// current project's graph first; when a hop targets a module owned by
+    /// another workspace project (per `modules_to_project`), the walker
+    /// hands off to that project's graph and continues.
+    ///
+    /// # Cross-project locality
+    ///
+    /// "Local to the workspace" replaces "local to this project" — every
+    /// module that any registered project owns counts as local. That matches
+    /// the v1 policy sketched in FEAT-028 step 4: alias-through-barrel edges
+    /// that cross a `[[project]]` boundary should still fan out to the
+    /// canonical declaration instead of terminating at the barrel.
+    ///
+    /// # Termination & variants
+    ///
+    /// - [`CrossProjectResolution::Canonical`] — chain ends at a module that
+    ///   is local to some workspace project and does not forward the name
+    ///   any further. `project` / `module` / `symbol` are that endpoint's
+    ///   workspace coordinates; `intermediates` lists every barrel-scoped
+    ///   `(project, module, name)` triple traversed, in walk order.
+    /// - [`CrossProjectResolution::Cycle`] — a `(project, module, name)`
+    ///   triple was revisited. Participants are listed in visit order.
+    /// - [`CrossProjectResolution::Unresolved`] — the walk ended at a
+    ///   module no workspace project owns (external package, unknown file,
+    ///   or a project whose graph isn't registered).
+    ///
+    /// The walker never panics and never loops indefinitely — the cycle
+    /// guard uses a `HashSet` over the fully-qualified triple.
+    pub fn resolve_canonical_cross_project(
+        &self,
+        from_project: &str,
+        from_module: &str,
+        spec_name: &str,
+    ) -> CrossProjectResolution {
+        let mut visited: HashSet<(String, String, String)> = HashSet::new();
+        let mut intermediates: Vec<CrossProjectHop> = Vec::new();
+
+        let mut cur_project = from_project.to_owned();
+        let mut cur_module = from_module.to_owned();
+        let mut cur_name = spec_name.to_owned();
+
+        loop {
+            // Cycle guard — the triple makes the same module+name in a
+            // different project distinct, which is exactly what we want
+            // when chains bounce between projects.
+            let key = (cur_project.clone(), cur_module.clone(), cur_name.clone());
+            if !visited.insert(key) {
+                return CrossProjectResolution::Cycle {
+                    participants: intermediates
+                        .into_iter()
+                        .chain(std::iter::once(CrossProjectHop {
+                            project: cur_project,
+                            module: cur_module,
+                            symbol: cur_name,
+                        }))
+                        .collect(),
+                };
+            }
+
+            // Every hop (including the very first one) becomes an
+            // intermediate — matching the per-project walker where the
+            // starting `(module, name)` becomes the first alternative path.
+            intermediates.push(CrossProjectHop {
+                project: cur_project.clone(),
+                module: cur_module.clone(),
+                symbol: cur_name.clone(),
+            });
+
+            // Look up in the current project's graph, if any.
+            let named_hop = self
+                .project_graphs
+                .get(&cur_project)
+                .and_then(|g| g.lookup(&cur_module, &cur_name))
+                .cloned();
+
+            if let Some(hop) = named_hop {
+                // Is the upstream module local to ANY workspace project?
+                if let Some(next_project) =
+                    self.modules_to_project.get(&hop.upstream_module).cloned()
+                {
+                    cur_project = next_project;
+                    cur_module = hop.upstream_module;
+                    cur_name = hop.upstream_name;
+                    continue;
+                }
+
+                // Upstream lives outside the workspace — terminate.
+                // The barrel hop we just pushed is a legitimate
+                // intermediate (parity with the per-project walker's
+                // `chain_into_external_package_is_unresolved` where
+                // `alternative_paths` keeps the barrel alias); `last`
+                // captures the extra-workspace endpoint separately.
+                return CrossProjectResolution::Unresolved {
+                    last: CrossProjectHop {
+                        project: cur_project,
+                        module: hop.upstream_module,
+                        symbol: hop.upstream_name,
+                    },
+                    intermediates,
+                };
+            }
+
+            // Fall back to `export * from …` edges in the current project.
+            let star_hop = self
+                .project_graphs
+                .get(&cur_project)
+                .map(|g| g.star_edges(&cur_module))
+                .unwrap_or(&[])
+                .iter()
+                .find_map(|star| {
+                    // Only follow stars whose upstream is local to SOME
+                    // workspace project AND where the upstream directly
+                    // re-exports the name we're looking for. Matches the
+                    // per-project policy: a star edge on its own doesn't
+                    // prove the target has the name.
+                    let next_project = self.modules_to_project.get(&star.upstream_module)?;
+                    let graph = self.project_graphs.get(next_project)?;
+                    graph.lookup(&star.upstream_module, &cur_name)?;
+                    Some((next_project.clone(), star.upstream_module.clone()))
+                });
+
+            if let Some((next_project, next_module)) = star_hop {
+                cur_project = next_project;
+                cur_module = next_module;
+                // `cur_name` unchanged — `export *` preserves names.
+                continue;
+            }
+
+            // Terminal — no hop available. If the current module is
+            // workspace-local, this is the canonical declaration; otherwise
+            // the chain ran off the edge of the workspace (Unresolved).
+            let is_workspace_local = self.modules_to_project.contains_key(&cur_module);
+            let mut chain = intermediates;
+            // The endpoint is captured separately in `Canonical { … }`;
+            // drop the corresponding entry from `intermediates` so the
+            // callsite sees only the intermediate barrel hops.
+            chain.pop();
+
+            if is_workspace_local {
+                return CrossProjectResolution::Canonical {
+                    project: cur_project,
+                    module: cur_module,
+                    symbol: cur_name,
+                    intermediates: chain,
+                };
+            }
+
+            return CrossProjectResolution::Unresolved {
+                last: CrossProjectHop {
+                    project: cur_project,
+                    module: cur_module,
+                    symbol: cur_name,
+                },
+                intermediates: chain,
+            };
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-project walker outcome
+// ---------------------------------------------------------------------------
+
+/// One step in a cross-project re-export chain.
+///
+/// Scoped by `project` so the workspace walker can disambiguate cases where
+/// two projects both publish the same `module_id` (a collision already
+/// recorded in [`WorkspaceReExportGraph::module_collisions`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CrossProjectHop {
+    /// The `project_name` of the project that owns `module` at this hop.
+    pub project: String,
+    /// The dot-notation module id within that project.
+    pub module: String,
+    /// The symbol name as seen at this hop (pre-alias-rewrite).
+    pub symbol: String,
+}
+
+/// Outcome of [`WorkspaceReExportGraph::resolve_canonical_cross_project`].
+///
+/// Mirrors the per-project
+/// [`CanonicalResolution`](crate::reexport_graph::CanonicalResolution)
+/// shape but carries `(project, module, symbol)` triples at every position
+/// so callers can emit cross-project edges that target the right project's
+/// canonical node.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CrossProjectResolution {
+    /// Chain terminated at a workspace-local module that does not forward
+    /// the name any further. The endpoint is the canonical declaration;
+    /// `intermediates` lists every barrel-scoped hop (each with its own
+    /// owning project) traversed in walk order.
+    Canonical {
+        project: String,
+        module: String,
+        symbol: String,
+        intermediates: Vec<CrossProjectHop>,
+    },
+    /// Chain ended at a module no workspace project owns — either an
+    /// external package or a project whose graph is not registered.
+    Unresolved {
+        last: CrossProjectHop,
+        intermediates: Vec<CrossProjectHop>,
+    },
+    /// A `(project, module, name)` triple was revisited. `participants`
+    /// lists the full cycle including the revisit point.
+    Cycle { participants: Vec<CrossProjectHop> },
 }
 
 // ---------------------------------------------------------------------------
@@ -411,5 +662,390 @@ mod tests {
 
         assert_eq!(ws.project_for_module("src.dup"), Some("solo"));
         assert!(ws.module_collisions().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_canonical_cross_project — FEAT-028 step 3
+    // -----------------------------------------------------------------------
+
+    /// Small helper: build a per-project [`ReExportGraph`] from a flat list
+    /// of entries, treating each `raw_target` as already-resolved. The
+    /// resulting graph's `upstream_is_local` flag is unused by the
+    /// cross-project walker (locality is re-derived from
+    /// `modules_to_project`), so we hard-code `true` here to keep the
+    /// fixture obvious.
+    fn build_identity_graph(entries: &[ReExportEntry]) -> ReExportGraph {
+        let resolve = |raw: &str, _from: &str| (raw.to_owned(), true);
+        ReExportGraph::build(entries, &resolve)
+    }
+
+    fn named_entry(from: &str, target: &str, specs: &[(&str, &str)]) -> ReExportEntry {
+        ReExportEntry {
+            from_module: from.to_owned(),
+            raw_target: target.to_owned(),
+            line: 1,
+            specs: specs
+                .iter()
+                .map(|(exported, local)| ReExportSpec {
+                    exported_name: (*exported).to_owned(),
+                    local_name: (*local).to_owned(),
+                })
+                .collect(),
+            is_star: false,
+        }
+    }
+
+    fn star_entry(from: &str, target: &str) -> ReExportEntry {
+        ReExportEntry {
+            from_module: from.to_owned(),
+            raw_target: target.to_owned(),
+            line: 1,
+            specs: vec![],
+            is_star: true,
+        }
+    }
+
+    fn hop(project: &str, module: &str, symbol: &str) -> CrossProjectHop {
+        CrossProjectHop {
+            project: project.to_owned(),
+            module: module.to_owned(),
+            symbol: symbol.to_owned(),
+        }
+    }
+
+    // --- Parity case: single-hop, same project ------------------------------
+
+    #[test]
+    fn cross_project_walker_same_project_single_hop_mirrors_per_project_canonical() {
+        // Only one project registered. `core.src.index` re-exports `Foo`
+        // from `core.src.foo`. Walker should land on
+        // `(core, core.src.foo, Foo)` just like the per-project walker.
+        let entries = vec![named_entry(
+            "core.src.index",
+            "core.src.foo",
+            &[("Foo", "Foo")],
+        )];
+        let graph = build_identity_graph(&entries);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(ctx(
+            "core",
+            "/abs/core",
+            &["core.src.index", "core.src.foo"],
+            entries,
+        ));
+        ws.set_project_graph("core", graph);
+
+        let result = ws.resolve_canonical_cross_project("core", "core.src.index", "Foo");
+        match result {
+            CrossProjectResolution::Canonical {
+                project,
+                module,
+                symbol,
+                intermediates,
+            } => {
+                assert_eq!(project, "core");
+                assert_eq!(module, "core.src.foo");
+                assert_eq!(symbol, "Foo");
+                assert_eq!(intermediates, vec![hop("core", "core.src.index", "Foo")]);
+            }
+            other => panic!("expected Canonical, got {other:?}"),
+        }
+    }
+
+    // --- Primary case: single-hop cross-project -----------------------------
+
+    #[test]
+    fn cross_project_walker_crosses_project_boundary_on_named_hop() {
+        // `consumer.src.index` re-exports `Foo` from `core.src.foo`
+        // (a module owned by a different project). The walker should
+        // cross the boundary and return the canonical coordinates in
+        // `core`.
+        let consumer_entries = vec![named_entry(
+            "consumer.src.index",
+            "core.src.foo",
+            &[("Foo", "Foo")],
+        )];
+        let consumer_graph = build_identity_graph(&consumer_entries);
+        let core_graph = build_identity_graph(&[]);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(ctx(
+            "consumer",
+            "/abs/consumer",
+            &["consumer.src.index"],
+            consumer_entries,
+        ));
+        ws.add_project(ctx("core", "/abs/core", &["core.src.foo"], vec![]));
+        ws.set_project_graph("consumer", consumer_graph);
+        ws.set_project_graph("core", core_graph);
+
+        let result = ws.resolve_canonical_cross_project("consumer", "consumer.src.index", "Foo");
+        match result {
+            CrossProjectResolution::Canonical {
+                project,
+                module,
+                symbol,
+                intermediates,
+            } => {
+                assert_eq!(project, "core", "must cross into core project");
+                assert_eq!(module, "core.src.foo");
+                assert_eq!(symbol, "Foo");
+                assert_eq!(
+                    intermediates,
+                    vec![hop("consumer", "consumer.src.index", "Foo")],
+                    "the consumer barrel hop should be recorded as intermediate"
+                );
+            }
+            other => panic!("expected Canonical, got {other:?}"),
+        }
+    }
+
+    // --- Multi-hop cross-project --------------------------------------------
+
+    #[test]
+    fn cross_project_walker_multi_hop_chain_collects_every_intermediate() {
+        // consumer barrel -> shared barrel (different project) -> core leaf
+        // (yet another project). Walker should traverse all three and
+        // return the canonical id in `core`, with both intermediate barrel
+        // hops recorded in order.
+        let consumer_entries = vec![named_entry(
+            "consumer.src.index",
+            "shared.src.index",
+            &[("Foo", "Foo")],
+        )];
+        let shared_entries = vec![named_entry(
+            "shared.src.index",
+            "core.src.foo",
+            &[("Foo", "Foo")],
+        )];
+        let consumer_graph = build_identity_graph(&consumer_entries);
+        let shared_graph = build_identity_graph(&shared_entries);
+        let core_graph = build_identity_graph(&[]);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(ctx(
+            "consumer",
+            "/abs/consumer",
+            &["consumer.src.index"],
+            consumer_entries,
+        ));
+        ws.add_project(ctx(
+            "shared",
+            "/abs/shared",
+            &["shared.src.index"],
+            shared_entries,
+        ));
+        ws.add_project(ctx("core", "/abs/core", &["core.src.foo"], vec![]));
+        ws.set_project_graph("consumer", consumer_graph);
+        ws.set_project_graph("shared", shared_graph);
+        ws.set_project_graph("core", core_graph);
+
+        let result = ws.resolve_canonical_cross_project("consumer", "consumer.src.index", "Foo");
+        match result {
+            CrossProjectResolution::Canonical {
+                project,
+                module,
+                symbol,
+                intermediates,
+            } => {
+                assert_eq!(project, "core");
+                assert_eq!(module, "core.src.foo");
+                assert_eq!(symbol, "Foo");
+                assert_eq!(
+                    intermediates,
+                    vec![
+                        hop("consumer", "consumer.src.index", "Foo"),
+                        hop("shared", "shared.src.index", "Foo"),
+                    ],
+                    "both barrel hops, in order, must appear as intermediates"
+                );
+            }
+            other => panic!("expected Canonical, got {other:?}"),
+        }
+    }
+
+    // --- Cycle across project boundary --------------------------------------
+
+    #[test]
+    fn cross_project_walker_detects_cycle_spanning_two_projects() {
+        // a.barrel re-exports Foo from b.barrel; b.barrel re-exports Foo
+        // from a.barrel. Both live in different projects. Walker must
+        // return Cycle rather than looping forever.
+        let a_entries = vec![named_entry("a.barrel", "b.barrel", &[("Foo", "Foo")])];
+        let b_entries = vec![named_entry("b.barrel", "a.barrel", &[("Foo", "Foo")])];
+        let a_graph = build_identity_graph(&a_entries);
+        let b_graph = build_identity_graph(&b_entries);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(ctx("a", "/abs/a", &["a.barrel"], a_entries));
+        ws.add_project(ctx("b", "/abs/b", &["b.barrel"], b_entries));
+        ws.set_project_graph("a", a_graph);
+        ws.set_project_graph("b", b_graph);
+
+        let result = ws.resolve_canonical_cross_project("a", "a.barrel", "Foo");
+        match result {
+            CrossProjectResolution::Cycle { participants } => {
+                // The full cycle is traversed: a -> b -> back to a (revisit).
+                assert_eq!(
+                    participants,
+                    vec![
+                        hop("a", "a.barrel", "Foo"),
+                        hop("b", "b.barrel", "Foo"),
+                        hop("a", "a.barrel", "Foo"),
+                    ],
+                    "participants must include the revisit point"
+                );
+            }
+            other => panic!("expected Cycle, got {other:?}"),
+        }
+    }
+
+    // --- Unresolved (external package / non-workspace target) ---------------
+
+    #[test]
+    fn cross_project_walker_terminates_unresolved_when_target_outside_workspace() {
+        // Consumer barrel re-exports `Foo` from an external npm package
+        // (not owned by any workspace project). Walker must terminate
+        // with Unresolved and record the barrel hop as intermediate.
+        let consumer_entries = vec![named_entry(
+            "consumer.src.index",
+            "external.pkg",
+            &[("Foo", "Foo")],
+        )];
+        let consumer_graph = build_identity_graph(&consumer_entries);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(ctx(
+            "consumer",
+            "/abs/consumer",
+            &["consumer.src.index"],
+            consumer_entries,
+        ));
+        ws.set_project_graph("consumer", consumer_graph);
+
+        let result = ws.resolve_canonical_cross_project("consumer", "consumer.src.index", "Foo");
+        match result {
+            CrossProjectResolution::Unresolved {
+                last,
+                intermediates,
+            } => {
+                assert_eq!(last, hop("consumer", "external.pkg", "Foo"));
+                assert_eq!(
+                    intermediates,
+                    vec![hop("consumer", "consumer.src.index", "Foo")],
+                );
+            }
+            other => panic!("expected Unresolved, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_project_walker_terminal_module_with_no_hops_is_canonical_itself() {
+        // `consumer.src.main` is local but has no re-exports for `Bar`.
+        // With no barrel hop to take, the walker treats `(consumer,
+        // consumer.src.main, Bar)` as the canonical declaration (it's
+        // workspace-local and the chain has nowhere to go). This mirrors
+        // `unrelated_module_has_no_chain_and_resolves_to_itself` on the
+        // per-project walker.
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(ctx(
+            "consumer",
+            "/abs/consumer",
+            &["consumer.src.main"],
+            vec![],
+        ));
+        ws.set_project_graph("consumer", build_identity_graph(&[]));
+
+        let result = ws.resolve_canonical_cross_project("consumer", "consumer.src.main", "Bar");
+        match result {
+            CrossProjectResolution::Canonical {
+                project,
+                module,
+                symbol,
+                intermediates,
+            } => {
+                assert_eq!(project, "consumer");
+                assert_eq!(module, "consumer.src.main");
+                assert_eq!(symbol, "Bar");
+                assert!(intermediates.is_empty());
+            }
+            other => panic!("expected Canonical, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_project_walker_unresolved_when_starting_module_not_in_workspace() {
+        // Starting at a module no project owns (e.g. `react.useState`)
+        // resolves immediately to Unresolved — mirroring the per-project
+        // `non_local_starting_module_is_unresolved`.
+        let ws = WorkspaceReExportGraph::new();
+        let result = ws.resolve_canonical_cross_project("nobody", "react", "useState");
+        match result {
+            CrossProjectResolution::Unresolved {
+                last,
+                intermediates,
+            } => {
+                assert_eq!(last, hop("nobody", "react", "useState"));
+                assert!(intermediates.is_empty());
+            }
+            other => panic!("expected Unresolved, got {other:?}"),
+        }
+    }
+
+    // --- `export * from …` crossing a project boundary ----------------------
+
+    #[test]
+    fn cross_project_walker_follows_star_reexport_across_project_boundary() {
+        // consumer.src.index does `export * from 'core.src.index'`
+        // (cross-project). core.src.index re-exports Foo from core.src.foo.
+        // Walker must follow the star hop into core, then the named hop
+        // to core.src.foo.
+        let consumer_entries = vec![star_entry("consumer.src.index", "core.src.index")];
+        let core_entries = vec![named_entry(
+            "core.src.index",
+            "core.src.foo",
+            &[("Foo", "Foo")],
+        )];
+        let consumer_graph = build_identity_graph(&consumer_entries);
+        let core_graph = build_identity_graph(&core_entries);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(ctx(
+            "consumer",
+            "/abs/consumer",
+            &["consumer.src.index"],
+            consumer_entries,
+        ));
+        ws.add_project(ctx(
+            "core",
+            "/abs/core",
+            &["core.src.index", "core.src.foo"],
+            core_entries,
+        ));
+        ws.set_project_graph("consumer", consumer_graph);
+        ws.set_project_graph("core", core_graph);
+
+        let result = ws.resolve_canonical_cross_project("consumer", "consumer.src.index", "Foo");
+        match result {
+            CrossProjectResolution::Canonical {
+                project,
+                module,
+                symbol,
+                intermediates,
+            } => {
+                assert_eq!(project, "core");
+                assert_eq!(module, "core.src.foo");
+                assert_eq!(symbol, "Foo");
+                assert_eq!(
+                    intermediates,
+                    vec![
+                        hop("consumer", "consumer.src.index", "Foo"),
+                        hop("core", "core.src.index", "Foo"),
+                    ],
+                );
+            }
+            other => panic!("expected Canonical, got {other:?}"),
+        }
     }
 }
