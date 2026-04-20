@@ -40,6 +40,47 @@ pub struct ReExportSpec {
     pub local_name: String,
 }
 
+/// A single `import … from …` statement captured during TypeScript extraction.
+///
+/// FEAT-026: the walker collects these per-file so the pipeline can walk each
+/// specifier through the project-wide re-export graph and emit module-level
+/// `Imports` edges that target the canonical declaration module (not the
+/// barrel). The raw `source` path is resolved project-wide later because
+/// resolution depends on `tsconfig.paths`, workspace aliases, etc.
+///
+/// Semantics:
+/// - Named / default imports populate `specs` with the upstream name to look
+///   up in the re-export graph (default imports use the literal name `"default"`).
+/// - `import * as ns from '…'` never produces a `NamedImportEntry` — the
+///   extractor falls back to the single barrel edge, as documented in the v1
+///   policy.
+/// - Side-effect imports (`import 'x'`) never produce a `NamedImportEntry`
+///   for the same reason.
+/// - Type-only imports (`import type { Foo } from '…'`) are captured here
+///   with `is_type_only = true`, preserving parity with the pre-FEAT-026
+///   behaviour where they contributed a single Imports edge.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NamedImportEntry {
+    /// The dot-notation id of the module emitting the `import` statement.
+    pub from_module: String,
+    /// The raw string that followed `from` (before resolution).
+    pub raw_target: String,
+    /// Line where the statement begins (1-indexed).
+    pub line: usize,
+    /// Upstream names to look up in the re-export graph, one per specifier.
+    ///
+    /// - `import { Foo, Bar }` → `["Foo", "Bar"]`
+    /// - `import { Foo as MyFoo }` → `["Foo"]` (upstream name; the local
+    ///   alias does not affect re-export graph lookup)
+    /// - `import X from '…'` → `["default"]`
+    /// - `import X, { Foo } from '…'` → `["default", "Foo"]`
+    pub specs: Vec<String>,
+    /// `true` if the import statement was `import type { … } from '…'`.
+    /// Emitted so consumers can preserve parity with the pre-FEAT-026 edge
+    /// counting (one edge per statement).
+    pub is_type_only: bool,
+}
+
 /// The result of extracting a single source file.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ExtractionResult {
@@ -54,6 +95,15 @@ pub struct ExtractionResult {
     /// FEAT-021) deserialize cleanly into an empty vector.
     #[serde(default)]
     pub reexports: Vec<ReExportEntry>,
+    /// `import { X, Y } from '…'` / `import X from '…'` statements captured
+    /// from the file. Used by FEAT-026 to fan module-level `Imports` edges
+    /// out to the canonical declaration module of each specifier instead of
+    /// keeping a single edge to the barrel.
+    ///
+    /// `#[serde(default)]` lets older cached extraction results (from before
+    /// FEAT-026) deserialize cleanly into an empty vector.
+    #[serde(default)]
+    pub named_imports: Vec<NamedImportEntry>,
 }
 
 impl ExtractionResult {
@@ -62,6 +112,7 @@ impl ExtractionResult {
             nodes: Vec::new(),
             edges: Vec::new(),
             reexports: Vec::new(),
+            named_imports: Vec::new(),
         }
     }
 }

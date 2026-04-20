@@ -1332,3 +1332,108 @@ lang = ["typescript"]
         alt_strs
     );
 }
+
+// ---------------------------------------------------------------------------
+// FEAT-026: TS named-import edges target canonical modules, not barrels
+// ---------------------------------------------------------------------------
+
+/// The `ts_barrel_project` fixture also exercises the module-level fan-out
+/// side of the barrel-collapse story:
+///
+/// ```text
+/// consumer.ts ── import { Course } from './domain'
+/// domain/index.ts         ── export { Course } from './entities'
+/// domain/entities/index.ts ── export { Course } from './course'
+/// entities/course.ts       ── export class Course {}   ← canonical
+/// ```
+///
+/// Pre-FEAT-026 the module-level `Imports` edge from `src.consumer` landed
+/// on `src.domain` (the barrel), inflating the barrel's module-layer
+/// fan-in even though FEAT-021 Part B already canonicalised the symbol
+/// layer. Post-FEAT-026 the edge fans out per specifier through the
+/// re-export graph to the canonical declaration module.
+#[test]
+fn feat_026_named_imports_fan_out_to_canonical_modules() {
+    let fixture_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts_barrel_project");
+
+    let tmp = TempDir::new().expect("create temp dir");
+    let out_dir = tmp.path().join("output");
+
+    let config_content = format!(
+        r#"[settings]
+output = "{output}"
+
+[[project]]
+name = "barrel_fixture"
+repo = "{repo}"
+lang = ["typescript"]
+"#,
+        output = out_dir.to_str().unwrap().replace('\\', "/"),
+        repo = fixture_dir
+            .canonicalize()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .replace('\\', "/"),
+    );
+
+    let config_path = tmp.path().join("graphify.toml");
+    std::fs::write(&config_path, config_content).expect("write config");
+
+    let status = Command::new(graphify_bin())
+        .arg("run")
+        .arg("--config")
+        .arg(&config_path)
+        .status()
+        .expect("launch graphify binary");
+    assert!(status.success(), "graphify run exited with non-zero status");
+
+    let graph_json_path = out_dir.join("barrel_fixture").join("graph.json");
+    let raw = std::fs::read_to_string(&graph_json_path).expect("read graph.json");
+    let graph: serde_json::Value = serde_json::from_str(&raw).expect("parse graph.json");
+
+    let links = graph["links"]
+        .as_array()
+        .expect("links must be an array in graph.json");
+
+    // Collect every `Imports` edge as `(source, target)` pairs.
+    let imports: Vec<(&str, &str)> = links
+        .iter()
+        .filter(|link| link["kind"].as_str() == Some("Imports"))
+        .filter_map(|link| {
+            let s = link["source"].as_str()?;
+            let t = link["target"].as_str()?;
+            Some((s, t))
+        })
+        .collect();
+
+    // The consumer's `import { Course } from './domain'` must resolve to a
+    // module-level Imports edge targeting the canonical declaration module
+    // (`src.domain.entities.course`), not the barrel `src.domain`.
+    assert!(
+        imports
+            .iter()
+            .any(|(s, t)| *s == "src.consumer" && *t == "src.domain.entities.course"),
+        "expected Imports edge src.consumer -> src.domain.entities.course, got {:?}",
+        imports
+    );
+
+    // Conversely, the consumer must NOT have an Imports edge to either
+    // barrel module — FEAT-026's whole point is that the barrel stops
+    // aggregating module-level fan-in from named imports.
+    assert!(
+        !imports
+            .iter()
+            .any(|(s, t)| *s == "src.consumer" && *t == "src.domain"),
+        "barrel edge src.consumer -> src.domain must have been fanned out, got {:?}",
+        imports
+    );
+    assert!(
+        !imports
+            .iter()
+            .any(|(s, t)| *s == "src.consumer" && *t == "src.domain.entities"),
+        "barrel edge src.consumer -> src.domain.entities must have been fanned out, got {:?}",
+        imports
+    );
+}

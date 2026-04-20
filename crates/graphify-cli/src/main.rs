@@ -1736,10 +1736,12 @@ fn run_extract(
     let mut all_nodes = Vec::new();
     let mut all_raw_edges: Vec<(String, String, graphify_core::types::Edge)> = Vec::new();
     let mut all_reexports: Vec<graphify_extract::ReExportEntry> = Vec::new();
+    let mut all_named_imports: Vec<graphify_extract::NamedImportEntry> = Vec::new();
     for result in results {
         all_nodes.extend(result.nodes);
         all_raw_edges.extend(result.edges);
         all_reexports.extend(result.reexports);
+        all_named_imports.extend(result.named_imports);
     }
 
     // Build a set of module names that are package entry points (__init__.py,
@@ -1767,7 +1769,14 @@ fn run_extract(
     // -----------------------------------------------------------------------
     let mut barrel_to_canonical: HashMap<String, String> = HashMap::new();
     let mut canonical_to_alt_paths: HashMap<String, Vec<String>> = HashMap::new();
-    if !all_reexports.is_empty() && languages.contains(&Language::TypeScript) {
+    // FEAT-026: edges synthesized from named-import specifier fan-out. We
+    // emit these after the main `all_raw_edges` resolver loop, tagged so the
+    // resolver pass knows the target is already resolved to a canonical
+    // module id (no re-resolve needed).
+    let mut named_import_edges: Vec<(String, String, graphify_core::types::Edge)> = Vec::new();
+    let has_ts_reexport_work = (!all_reexports.is_empty() || !all_named_imports.is_empty())
+        && languages.contains(&Language::TypeScript);
+    if has_ts_reexport_work {
         let package_modules_owned: HashSet<String> =
             package_modules.iter().map(|s| (*s).to_owned()).collect();
         let reexport_resolver = &resolver;
@@ -1854,6 +1863,104 @@ fn run_extract(
                 }
             }
         }
+
+        // -------------------------------------------------------------------
+        // FEAT-026: fan module-level `Imports` edges out to canonical modules.
+        //
+        // For each captured `import { X, Y } from '…'` statement:
+        //   1. Resolve the raw target path to a module id.
+        //   2. For each upstream specifier name, walk the re-export graph
+        //      from that module to the canonical declaration module.
+        //   3. Emit one `Imports` edge per canonical module (deduping via
+        //      `CodeGraph::add_edge`'s weight-increment path — N specifiers
+        //      landing on the same canonical module collapse to one edge
+        //      with weight N).
+        //   4. `Unresolved` / `Cycle` fall back to the barrel target so we
+        //      never drop an import; behaviour matches the pre-FEAT-026
+        //      single-edge contract.
+        // -------------------------------------------------------------------
+        for entry in &all_named_imports {
+            let from_is_package = package_modules_owned.contains(&entry.from_module);
+            let (barrel_module, barrel_is_local, _conf) =
+                reexport_resolver.resolve(&entry.raw_target, &entry.from_module, from_is_package);
+
+            // If the barrel isn't a local module (e.g. `react`,
+            // `@reduxjs/toolkit`), there's no re-export graph to walk — emit
+            // the single barrel edge once per statement, matching pre-FEAT-026
+            // behaviour. Passing the raw target (not the resolved id) keeps
+            // the downstream resolver step responsible for confidence
+            // downgrades.
+            if !barrel_is_local {
+                named_import_edges.push((
+                    entry.from_module.clone(),
+                    entry.raw_target.clone(),
+                    graphify_core::types::Edge::imports(entry.line),
+                ));
+                continue;
+            }
+
+            // Local barrel: fan out per specifier.
+            let mut fanned_out_any = false;
+            for spec_name in &entry.specs {
+                let outcome =
+                    reexport_graph.resolve_canonical(&barrel_module, spec_name, &is_local_fn);
+                match outcome {
+                    graphify_extract::CanonicalResolution::Canonical {
+                        canonical_module, ..
+                    } => {
+                        named_import_edges.push((
+                            entry.from_module.clone(),
+                            canonical_module,
+                            graphify_core::types::Edge::imports(entry.line),
+                        ));
+                        fanned_out_any = true;
+                    }
+                    graphify_extract::CanonicalResolution::Unresolved { .. }
+                    | graphify_extract::CanonicalResolution::Cycle { .. } => {
+                        // Chain didn't complete — fall back to a single edge
+                        // pointing at the barrel module. `CodeGraph`'s
+                        // weight-increment path dedupes when multiple specs
+                        // from the same statement all fail.
+                        named_import_edges.push((
+                            entry.from_module.clone(),
+                            barrel_module.clone(),
+                            graphify_core::types::Edge::imports(entry.line),
+                        ));
+                        fanned_out_any = true;
+                    }
+                }
+            }
+
+            // Defensive: if the statement produced no outcome at all, keep
+            // the pre-FEAT-026 single barrel edge.
+            if !fanned_out_any {
+                named_import_edges.push((
+                    entry.from_module.clone(),
+                    barrel_module,
+                    graphify_core::types::Edge::imports(entry.line),
+                ));
+            }
+        }
+    } else if !all_named_imports.is_empty() {
+        // FEAT-026 safety net: non-TS projects don't populate
+        // `all_named_imports` today, but if they ever do we still need to
+        // land one edge per statement so we don't drop imports.
+        for entry in &all_named_imports {
+            named_import_edges.push((
+                entry.from_module.clone(),
+                entry.raw_target.clone(),
+                graphify_core::types::Edge::imports(entry.line),
+            ));
+        }
+    }
+
+    // FEAT-026: hand the synthesized named-import edges off to the main
+    // edge-resolution loop. Canonical targets (already dot-notation module
+    // ids known to the resolver) resolve to themselves at confidence 1.0;
+    // fallback barrel-target edges (when the chain was unresolvable) go
+    // through the normal resolver path unchanged.
+    if !named_import_edges.is_empty() {
+        all_raw_edges.extend(named_import_edges);
     }
 
     // Collapse barrel symbol nodes into their canonical counterparts.

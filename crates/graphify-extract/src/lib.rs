@@ -14,7 +14,9 @@ pub mod walker;
 
 pub use drizzle::{extract_drizzle_contract, extract_drizzle_contract_at, DrizzleParseError};
 pub use go::GoExtractor;
-pub use lang::{ExtractionResult, LanguageExtractor, ReExportEntry, ReExportSpec};
+pub use lang::{
+    ExtractionResult, LanguageExtractor, NamedImportEntry, ReExportEntry, ReExportSpec,
+};
 pub use php::PhpExtractor;
 pub use python::PythonExtractor;
 pub use reexport_graph::{

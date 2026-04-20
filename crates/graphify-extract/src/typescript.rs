@@ -1,4 +1,6 @@
-use crate::lang::{ExtractionResult, LanguageExtractor, ReExportEntry, ReExportSpec};
+use crate::lang::{
+    ExtractionResult, LanguageExtractor, NamedImportEntry, ReExportEntry, ReExportSpec,
+};
 use graphify_core::types::{Edge, Language, Node, NodeKind};
 use std::collections::HashSet;
 use std::path::Path;
@@ -278,6 +280,17 @@ fn collect_binding_names(node: tree_sitter::Node, source: &[u8], bindings: &mut 
 ///   - `import { api } from '@/lib/api';`      → Imports edge to `@/lib/api`
 ///   - `import React from 'react';`             → Imports edge to `react`
 ///   - `import * as fs from 'fs';`             → Imports edge to `fs`
+///
+/// FEAT-026 behaviour:
+///   - Named / default imports populate a [`NamedImportEntry`] with the
+///     upstream specifier names. The pipeline walks each specifier through
+///     the re-export graph to the canonical declaration module and emits
+///     one `Imports` edge per canonical target (deduped via
+///     `CodeGraph::add_edge` weight increment). No module-level edge is
+///     emitted from the extractor in this branch — the pipeline owns it.
+///   - `import * as ns from '…'` and side-effect imports (`import 'x'`)
+///     keep the pre-FEAT-026 behaviour of a single barrel edge, because
+///     there are no specifiers to fan out.
 fn extract_import_statement(
     node: tree_sitter::Node,
     source: &[u8],
@@ -286,18 +299,91 @@ fn extract_import_statement(
 ) {
     let line = node.start_position().row + 1;
 
-    // The `source` field on `import_statement` holds the string literal for the module path.
-    if let Some(source_node) = node.child_by_field_name("source") {
-        let raw = source_node.utf8_text(source).unwrap_or("");
-        let target = raw.trim_matches(|c| c == '\'' || c == '"');
-        if !target.is_empty() {
-            result.edges.push((
-                module_name.to_owned(),
-                target.to_owned(),
-                Edge::imports(line),
-            ));
+    let Some(source_node) = node.child_by_field_name("source") else {
+        return;
+    };
+    let raw = source_node.utf8_text(source).unwrap_or("");
+    let target = raw.trim_matches(|c| c == '\'' || c == '"');
+    if target.is_empty() {
+        return;
+    }
+
+    // Collect specifier names (upstream-facing, not the local alias) and
+    // detect whether the statement is namespace / side-effect / type-only.
+    let mut specs: Vec<String> = Vec::new();
+    let mut has_namespace = false;
+    let mut has_clause = false;
+    let mut is_type_only = false;
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        // `import type { Foo } from '...'` — the grammar exposes a `type`
+        // token directly under the import_statement.
+        if child.kind() == "type" {
+            is_type_only = true;
+            continue;
+        }
+        if child.kind() != "import_clause" {
+            continue;
+        }
+        has_clause = true;
+        let mut inner = child.walk();
+        for clause_child in child.children(&mut inner) {
+            match clause_child.kind() {
+                // Default import: `import foo from 'x'` — upstream name is
+                // the literal `"default"`.
+                "identifier" => {
+                    specs.push("default".to_owned());
+                }
+                // Named imports: `import { a, b as c, type D } from 'x'`
+                "named_imports" => {
+                    let mut ni = clause_child.walk();
+                    for spec in clause_child.children(&mut ni) {
+                        if spec.kind() != "import_specifier" {
+                            continue;
+                        }
+                        // Upstream lookup uses the source-side name. The
+                        // `name` field is the source-side name; an `alias`
+                        // field is present when the binding is renamed.
+                        // For bare `import { Foo }`, `name` = `Foo` and no
+                        // alias — we still want "Foo".
+                        let upstream = spec
+                            .child_by_field_name("name")
+                            .and_then(|n| n.utf8_text(source).ok())
+                            .unwrap_or("");
+                        if !upstream.is_empty() {
+                            specs.push(upstream.to_owned());
+                        }
+                    }
+                }
+                // Namespace import: `import * as ns from 'x'` — no
+                // specifiers to fan out; keep the single barrel edge.
+                "namespace_import" => {
+                    has_namespace = true;
+                }
+                _ => {}
+            }
         }
     }
+
+    // Namespace imports, side-effect imports, and imports with no parseable
+    // specifiers keep the pre-FEAT-026 single-edge behaviour.
+    if has_namespace || !has_clause || specs.is_empty() {
+        result.edges.push((
+            module_name.to_owned(),
+            target.to_owned(),
+            Edge::imports(line),
+        ));
+        return;
+    }
+
+    result.named_imports.push(NamedImportEntry {
+        from_module: module_name.to_owned(),
+        raw_target: target.to_owned(),
+        line,
+        specs,
+        is_type_only,
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -669,19 +755,32 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn named_import_produces_imports_edge() {
+    fn named_import_captures_named_import_entry() {
+        // FEAT-026: the extractor no longer emits a module-level Imports
+        // edge for named imports — it captures a NamedImportEntry and lets
+        // the pipeline fan the edge out to the canonical module per
+        // specifier via the re-export graph.
         let result = extract("import { api } from '@/lib/api';\n");
-        let imports: Vec<_> = result
+        let direct_imports: Vec<_> = result
             .edges
             .iter()
             .filter(|(_, t, e)| e.kind == EdgeKind::Imports && t == "@/lib/api")
             .collect();
-        assert_eq!(
-            imports.len(),
-            1,
-            "expected 1 Imports edge to @/lib/api, got {:?}",
-            imports
+        assert!(
+            direct_imports.is_empty(),
+            "named imports no longer emit direct Imports edges, got {:?}",
+            direct_imports
         );
+        assert_eq!(
+            result.named_imports.len(),
+            1,
+            "expected 1 NamedImportEntry, got {:?}",
+            result.named_imports
+        );
+        let entry = &result.named_imports[0];
+        assert_eq!(entry.raw_target, "@/lib/api");
+        assert_eq!(entry.specs, vec!["api".to_string()]);
+        assert!(!entry.is_type_only);
     }
 
     // -----------------------------------------------------------------------
@@ -689,19 +788,25 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn default_import_produces_imports_edge() {
+    fn default_import_captures_named_import_entry() {
+        // FEAT-026: `import React from 'react'` now goes through the
+        // NamedImportEntry path with the synthetic spec name "default" so
+        // the pipeline can walk `export { default } from '…'` chains.
         let result = extract("import React from 'react';\n");
-        let imports: Vec<_> = result
+        let direct_imports: Vec<_> = result
             .edges
             .iter()
             .filter(|(_, t, e)| e.kind == EdgeKind::Imports && t == "react")
             .collect();
-        assert_eq!(
-            imports.len(),
-            1,
-            "expected 1 Imports edge to react, got {:?}",
-            imports
+        assert!(
+            direct_imports.is_empty(),
+            "default imports no longer emit direct Imports edges, got {:?}",
+            direct_imports
         );
+        assert_eq!(result.named_imports.len(), 1);
+        let entry = &result.named_imports[0];
+        assert_eq!(entry.raw_target, "react");
+        assert_eq!(entry.specs, vec!["default".to_string()]);
     }
 
     // -----------------------------------------------------------------------
@@ -1044,8 +1149,12 @@ mod tests {
 
     #[test]
     fn import_edges_have_extracted_confidence() {
+        // FEAT-026: named imports go through the NamedImportEntry path, so
+        // use a namespace import here — it still emits a direct Imports edge
+        // from the extractor and is the clearest place to assert that
+        // extractor-level confidence stays 1.0 / Extracted.
         use graphify_core::types::ConfidenceKind;
-        let result = extract("import { api } from '@/lib/api';\n");
+        let result = extract("import * as api from '@/lib/api';\n");
         let import_edge = result
             .edges
             .iter()
@@ -1117,6 +1226,73 @@ mod tests {
         assert!(entry.is_star);
         assert!(entry.specs.is_empty());
         assert_eq!(entry.raw_target, "./barrel");
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-026: named-import specifier capture
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn multiple_named_imports_capture_all_specs_under_one_entry() {
+        let result = extract("import { Foo, Bar } from './entities';\n");
+        assert_eq!(result.named_imports.len(), 1);
+        let entry = &result.named_imports[0];
+        assert_eq!(entry.raw_target, "./entities");
+        assert_eq!(entry.specs, vec!["Foo".to_string(), "Bar".to_string()]);
+    }
+
+    #[test]
+    fn aliased_named_import_keys_on_upstream_name() {
+        // `import { Foo as MyFoo }` should record "Foo" — the re-export graph
+        // lookup uses the upstream name, not the local alias.
+        let result = extract("import { Foo as MyFoo } from './entities';\n");
+        assert_eq!(result.named_imports.len(), 1);
+        assert_eq!(result.named_imports[0].specs, vec!["Foo".to_string()]);
+    }
+
+    #[test]
+    fn default_and_named_combined_capture_both_specs() {
+        // `import React, { useState } from 'react'` captures both a
+        // "default" spec and the named "useState" spec.
+        let result = extract("import React, { useState } from 'react';\n");
+        assert_eq!(result.named_imports.len(), 1);
+        let specs: HashSet<String> = result.named_imports[0].specs.iter().cloned().collect();
+        assert!(specs.contains("default"));
+        assert!(specs.contains("useState"));
+    }
+
+    #[test]
+    fn type_only_named_import_marks_is_type_only() {
+        let result = extract("import type { Foo } from './foo';\n");
+        assert_eq!(result.named_imports.len(), 1);
+        assert!(result.named_imports[0].is_type_only);
+    }
+
+    #[test]
+    fn namespace_import_still_emits_direct_edge() {
+        // `import * as X from '…'` has no specifiers to fan out — keep the
+        // pre-FEAT-026 single barrel edge.
+        let result = extract("import * as api from '@/lib/api';\n");
+        let imports: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Imports && t == "@/lib/api")
+            .collect();
+        assert_eq!(imports.len(), 1);
+        assert!(result.named_imports.is_empty());
+    }
+
+    #[test]
+    fn side_effect_import_still_emits_direct_edge() {
+        // `import 'x'` — no clause, no specifiers — keep the single edge.
+        let result = extract("import './polyfills';\n");
+        let imports: Vec<_> = result
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Imports && t == "./polyfills")
+            .collect();
+        assert_eq!(imports.len(), 1);
+        assert!(result.named_imports.is_empty());
     }
 
     #[test]
