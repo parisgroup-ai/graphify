@@ -1539,6 +1539,48 @@ fn parse_languages(lang_strs: &[String]) -> Vec<Language> {
 // Extraction pipeline
 // ---------------------------------------------------------------------------
 
+/// Build a [`ProjectReExportContext`] from the inputs already computed inside
+/// `run_extract`.
+///
+/// Extracted as a free helper (FEAT-028 step 5 P2a) so the outer project loop
+/// can materialise every project's context before any project's fan-out runs.
+/// Today the single-project `run_extract` call builds its own context inline
+/// and doesn't consume the result; P2b will invert this so the outer loop
+/// drives the collection and hands a shared `WorkspaceReExportGraph` back in.
+///
+/// Inputs:
+/// - `project_name` — display name from `graphify.toml` (becomes `project_name`
+///   on the returned context).
+/// - `repo_root` — canonical project repo path (becomes `repo_root`).
+/// - `files` — every [`graphify_extract::DiscoveredFile`] the walker produced
+///   for this project. `module_paths` is populated by iterating files and
+///   calling [`ProjectReExportContext::add_module_path`].
+/// - `reexports` — the collected `export … from …` entries for this project.
+///   Consumed by value because the caller has no further use for them; the
+///   workspace aggregate will eventually clone if a future pass needs to
+///   recompute re-export graphs.
+fn build_project_reexport_context(
+    project_name: &str,
+    repo_root: &Path,
+    files: &[graphify_extract::DiscoveredFile],
+    reexports: Vec<graphify_extract::ReExportEntry>,
+) -> graphify_extract::ProjectReExportContext {
+    let known_modules: Vec<String> = files.iter().map(|f| f.module_name.clone()).collect();
+
+    let mut ctx = graphify_extract::ProjectReExportContext::new(
+        project_name.to_owned(),
+        repo_root.to_string_lossy().into_owned(),
+        known_modules,
+        reexports,
+    );
+
+    for file in files {
+        ctx.add_module_path(&file.module_name, &file.path, file.is_package);
+    }
+
+    ctx
+}
+
 fn run_extract(
     project: &ProjectConfig,
     settings: &Settings,
@@ -1766,6 +1808,13 @@ fn run_extract(
     // ids) is intentionally not wired here — Imports edges key on module
     // paths, not symbol names, so the incremental win comes from the node
     // dedupe alone. Expanding to edge rewrite is tracked as a follow-up.
+    //
+    // FEAT-028 step 5 P2a: the per-project context is now materialised via
+    // `build_project_reexport_context` so the outer call sites can collect
+    // every project's context into a single workspace-wide
+    // `WorkspaceReExportGraph` in P2b. Within `run_extract` the fan-out still
+    // consumes only the project's own `ReExportGraph` (single-project
+    // workspace), keeping v1 behaviour bit-for-bit identical.
     // -----------------------------------------------------------------------
     let mut barrel_to_canonical: HashMap<String, String> = HashMap::new();
     let mut canonical_to_alt_paths: HashMap<String, Vec<String>> = HashMap::new();
@@ -1787,6 +1836,17 @@ fn run_extract(
             (resolved, is_local)
         };
         let reexport_graph = graphify_extract::ReExportGraph::build(&all_reexports, &resolve_cb);
+
+        // FEAT-028 step 5 P2a: surface the per-project context so the outer
+        // loop can (in P2b) aggregate every project's context into a
+        // workspace-wide graph. `_ctx` is built here solely to exercise the
+        // helper; at the single-project scope it's unused by the fan-out.
+        let _ctx = build_project_reexport_context(
+            &project.name,
+            &repo_path,
+            &files,
+            all_reexports.clone(),
+        );
 
         let is_local_fn = |module: &str| reexport_resolver.is_local_module(module);
 

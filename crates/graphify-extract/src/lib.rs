@@ -35,5 +35,6 @@ pub use walker::{
     path_to_module_psr4, DiscoveredFile,
 };
 pub use workspace_reexport::{
-    CrossProjectHop, CrossProjectResolution, ProjectReExportContext, WorkspaceReExportGraph,
+    CrossProjectHop, CrossProjectResolution, ProjectReExportContext, WorkspaceAliasTarget,
+    WorkspaceReExportGraph,
 };
