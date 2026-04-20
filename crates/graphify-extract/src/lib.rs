@@ -11,6 +11,7 @@ pub mod stubs;
 pub mod ts_contract;
 pub mod typescript;
 pub mod walker;
+pub mod workspace_reexport;
 
 pub use drizzle::{extract_drizzle_contract, extract_drizzle_contract_at, DrizzleParseError};
 pub use go::GoExtractor;
@@ -33,3 +34,4 @@ pub use walker::{
     detect_local_prefix, discover_files, discover_files_with_psr4, path_to_module,
     path_to_module_psr4, DiscoveredFile,
 };
+pub use workspace_reexport::{ProjectReExportContext, WorkspaceReExportGraph};
