@@ -48,6 +48,7 @@ updated: 2026-04-20
 | FEAT-026 | **open** | normal   | 3h     | TS named-import edges should target canonical modules, not barrels |
 | CHORE-003 | **open** | normal  | 2h     | Run FEAT-021/025 regression on reference monorepo + record deltas |
 | FEAT-027 | **done** | low      | 2h     | Spike: `tsconfig.json` paths that traverse barrels to canonical modules |
+| FEAT-028 | **open** | normal   | 5h     | Workspace-wide ReExportGraph for cross-project alias-through-barrel edges |
 
 ## Done
 
