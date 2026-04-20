@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
+use crate::workspace_reexport::{WorkspaceAliasTarget, WorkspaceReExportGraph};
+
 #[derive(Clone, Debug)]
 struct TsAliasContext {
     alias_pattern: String,
@@ -311,6 +313,87 @@ impl ModuleResolver {
         let relative = candidate.strip_prefix(&self.root).ok()?;
         let clean = relative.to_string_lossy().replace('\\', "/");
         Some(path_to_dot_notation(clean.trim_start_matches('/')))
+    }
+
+    /// Workspace-aware tsconfig alias resolver (FEAT-028 step 4).
+    ///
+    /// Same alias expansion logic as the per-project
+    /// [`ModuleResolver::apply_ts_alias_with_context`], but when the
+    /// expanded target path falls **outside** this project's `self.root`,
+    /// asks `workspace` whether the path lands inside any other registered
+    /// project via [`WorkspaceReExportGraph::lookup_module_by_path`].
+    ///
+    /// Returns:
+    /// - `Some(WorkspaceAliasTarget { project, module_id })` when the alias
+    ///   resolves into another workspace project. Callers (the FEAT-028
+    ///   fan-out loop) use this to emit a cross-project edge instead of
+    ///   terminating at the raw alias.
+    /// - `None` in every other case — including the alias matching locally
+    ///   (let the existing per-project resolver handle it) and the alias
+    ///   pointing outside ALL project roots (the caller should fall back to
+    ///   the v1 raw-alias contract, preserving the FEAT-027 behaviour for
+    ///   non-workspace externals).
+    ///
+    /// Does NOT modify any existing resolver behaviour — the per-project
+    /// `resolve` call path is untouched. Step 5 of FEAT-028 wires this into
+    /// the fan-out loop at `graphify-cli::main::run_extract`.
+    pub fn apply_ts_alias_workspace(
+        &self,
+        raw: &str,
+        from_module: &str,
+        workspace: &WorkspaceReExportGraph,
+    ) -> Option<WorkspaceAliasTarget> {
+        // Per-module tsconfig contexts first (matches the ordering in
+        // `resolve`). Each context carries its own `base_dir`, loaded from
+        // the tsconfig file that declared the alias — that's the correct
+        // anchor for relative alias targets like `../../packages/*/src`.
+        if let Some(contexts) = self.ts_aliases_by_module.get(from_module) {
+            for ctx in contexts {
+                if let Some(target) = self.lookup_ts_alias_in_workspace(
+                    raw,
+                    &ctx.alias_pattern,
+                    &ctx.target_pattern,
+                    &ctx.base_dir,
+                    workspace,
+                ) {
+                    return Some(target);
+                }
+            }
+        }
+
+        // Global aliases fall back to `self.root` as the anchor — same as
+        // the per-project resolver's implicit behaviour.
+        for (alias_pat, target_pat) in &self.ts_aliases {
+            if let Some(target) =
+                self.lookup_ts_alias_in_workspace(raw, alias_pat, target_pat, &self.root, workspace)
+            {
+                return Some(target);
+            }
+        }
+
+        None
+    }
+
+    fn lookup_ts_alias_in_workspace(
+        &self,
+        raw: &str,
+        alias_pat: &str,
+        target_pat: &str,
+        base_dir: &Path,
+        workspace: &WorkspaceReExportGraph,
+    ) -> Option<WorkspaceAliasTarget> {
+        let resolved_path = match_alias_target(raw, alias_pat, target_pat)?;
+        let candidate = normalize_path(&base_dir.join(resolved_path));
+
+        // Only yield when the candidate path is OUTSIDE the current project.
+        // Inside-root hits are the per-project resolver's responsibility and
+        // returning them here would double-fan-out in the caller (step 5).
+        if candidate.starts_with(&self.root) {
+            return None;
+        }
+
+        let (project, module_id) = workspace.lookup_module_by_path(&candidate)?;
+        Some(WorkspaceAliasTarget { project, module_id })
     }
 
     fn lookup_module_by_path(&self, candidate: &Path) -> Option<String> {
@@ -1538,5 +1621,181 @@ mod tests {
         let (resolved, is_local, _) = resolver.resolve("\\App\\Models\\User", "App.Main", false);
         assert_eq!(resolved, "App.Models.User");
         assert!(is_local);
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-028 step 4 — workspace-aware tsconfig alias resolution
+    // -----------------------------------------------------------------------
+
+    use crate::workspace_reexport::{
+        ProjectReExportContext, WorkspaceAliasTarget, WorkspaceReExportGraph,
+    };
+
+    /// Build a workspace containing a `core` project whose `src/index.ts`
+    /// (package entry) and `src/foo.ts` (regular) are registered. Used by
+    /// the three cross-project tests below.
+    fn core_only_workspace() -> WorkspaceReExportGraph {
+        let mut core = ProjectReExportContext::new(
+            "core",
+            "/abs/packages/core",
+            vec!["core.src.index".to_owned(), "core.src.foo".to_owned()],
+            vec![],
+        );
+        core.add_module_path(
+            "core.src.index",
+            Path::new("/abs/packages/core/src/index.ts"),
+            /* is_package */ true,
+        );
+        core.add_module_path(
+            "core.src.foo",
+            Path::new("/abs/packages/core/src/foo.ts"),
+            false,
+        );
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(core);
+        ws
+    }
+
+    #[test]
+    fn apply_ts_alias_workspace_returns_none_for_inside_root_target() {
+        // Alias target falls inside the current project's root — the
+        // existing per-project resolver handles this locally. The
+        // workspace variant must return `None` so the caller (step 5 fan-
+        // out) doesn't double-process.
+        let mut r = ModuleResolver::new(Path::new("/abs/apps/consumer"));
+        r.ts_aliases_by_module.insert(
+            "src.main".to_owned(),
+            vec![TsAliasContext {
+                alias_pattern: "@/*".to_owned(),
+                target_pattern: "src/*".to_owned(),
+                base_dir: PathBuf::from("/abs/apps/consumer"),
+            }],
+        );
+        let ws = WorkspaceReExportGraph::new();
+
+        assert_eq!(
+            r.apply_ts_alias_workspace("@/lib/api", "src.main", &ws),
+            None
+        );
+    }
+
+    #[test]
+    fn apply_ts_alias_workspace_crosses_boundary_to_sibling_project() {
+        // The cross-project scenario that FEAT-027 pinned as v1-unsupported.
+        // Consumer's exact alias `@repo/core` → `../../packages/core/src`
+        // points at the sibling core project's `src` package-entry
+        // directory. Step 4's workspace resolver should return
+        // `(core, core.src.index)` — the package-entry variant registered
+        // via `add_module_path(is_package = true)`.
+        //
+        // (The in-tree fixture's tsconfig uses an inner-glob form
+        // `"@repo/*": ["../../packages/*/src"]` that `match_alias_target`
+        // does not handle today — pre-existing limitation, orthogonal to
+        // FEAT-028. Step 5's fan-out will inherit whatever alias forms the
+        // underlying matcher supports; broadening that matcher is
+        // out-of-scope here.)
+        let mut r = ModuleResolver::new(Path::new("/abs/apps/consumer"));
+        r.ts_aliases_by_module.insert(
+            "consumer.src.main".to_owned(),
+            vec![TsAliasContext {
+                alias_pattern: "@repo/core".to_owned(),
+                target_pattern: "../../packages/core/src".to_owned(),
+                base_dir: PathBuf::from("/abs/apps/consumer"),
+            }],
+        );
+        let ws = core_only_workspace();
+
+        let got = r.apply_ts_alias_workspace("@repo/core", "consumer.src.main", &ws);
+        assert_eq!(
+            got,
+            Some(WorkspaceAliasTarget {
+                project: "core".to_owned(),
+                module_id: "core.src.index".to_owned(),
+            }),
+            "workspace alias must resolve to core's package-entry module id"
+        );
+    }
+
+    #[test]
+    fn apply_ts_alias_workspace_returns_none_for_outside_all_projects() {
+        // Alias target lands in a directory that no workspace project owns
+        // (e.g. pointing into `node_modules` or an unrelated filesystem
+        // location). The caller should fall back to the v1 raw-alias
+        // behaviour — `None` is the signal for that.
+        let mut r = ModuleResolver::new(Path::new("/abs/apps/consumer"));
+        r.ts_aliases_by_module.insert(
+            "consumer.src.main".to_owned(),
+            vec![TsAliasContext {
+                alias_pattern: "@vendor/*".to_owned(),
+                target_pattern: "../../vendor/*".to_owned(),
+                base_dir: PathBuf::from("/abs/apps/consumer"),
+            }],
+        );
+        let ws = core_only_workspace();
+
+        assert_eq!(
+            r.apply_ts_alias_workspace("@vendor/something", "consumer.src.main", &ws),
+            None,
+        );
+    }
+
+    #[test]
+    fn apply_ts_alias_workspace_glob_expansion_matches_sibling_submodule() {
+        // Multi-level glob: `@repo/*` → `../../packages/*/src`. Consumer
+        // imports `@repo/core/foo` — the `*` captures `core/foo`, appended
+        // to `../../packages/` and then `/src` is... wait, actually the
+        // alias is `../../packages/*/src` so `@repo/core/foo` expands to
+        // `../../packages/core/foo/src`, which is NOT what we want. The
+        // real test case here is the single-level form (used in practice):
+        // `@repo/core` → `packages/core/src`. A deeper import would hit a
+        // submodule path. Cover the submodule-direct-match variant using a
+        // simpler alias form — `@repo/*` → `../../packages/*` — which
+        // naturally expands `@repo/core/foo` to `../../packages/core/foo`.
+        let mut r = ModuleResolver::new(Path::new("/abs/apps/consumer"));
+        r.ts_aliases_by_module.insert(
+            "consumer.src.main".to_owned(),
+            vec![TsAliasContext {
+                alias_pattern: "@repo/*".to_owned(),
+                target_pattern: "../../packages/*".to_owned(),
+                base_dir: PathBuf::from("/abs/apps/consumer"),
+            }],
+        );
+        let ws = core_only_workspace();
+
+        let got = r.apply_ts_alias_workspace("@repo/core/src/foo", "consumer.src.main", &ws);
+        assert_eq!(
+            got,
+            Some(WorkspaceAliasTarget {
+                project: "core".to_owned(),
+                module_id: "core.src.foo".to_owned(),
+            }),
+            "deep glob expansion must match the sibling project's submodule"
+        );
+    }
+
+    #[test]
+    fn apply_ts_alias_workspace_uses_global_aliases_with_self_root_anchor() {
+        // When no per-module tsconfig context is registered, the
+        // workspace-aware resolver falls back to the resolver's global
+        // `ts_aliases` using `self.root` as the base dir — same behaviour
+        // as the per-project resolver. Verifies parity with the global
+        // alias path and the `self.root` anchor. Uses an exact-match alias
+        // since `match_alias_target` only handles trailing-`*` globs.
+        let mut r = ModuleResolver::new(Path::new("/abs/apps/consumer"));
+        r.ts_aliases.push((
+            "@repo/core".to_owned(),
+            "../../packages/core/src".to_owned(),
+        ));
+        let ws = core_only_workspace();
+
+        let got = r.apply_ts_alias_workspace("@repo/core", "consumer.src.main", &ws);
+        assert_eq!(
+            got,
+            Some(WorkspaceAliasTarget {
+                project: "core".to_owned(),
+                module_id: "core.src.index".to_owned(),
+            }),
+        );
     }
 }

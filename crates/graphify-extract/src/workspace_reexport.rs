@@ -59,6 +59,7 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use crate::lang::ReExportEntry;
 use crate::reexport_graph::ReExportGraph;
@@ -105,10 +106,31 @@ pub struct ProjectReExportContext {
     pub known_modules: Vec<String>,
     /// Every `export … from …` entry captured during TypeScript extraction.
     pub reexports: Vec<ReExportEntry>,
+    /// Path-based lookup keys for this project's discovered modules, mirroring
+    /// [`crate::resolver::ModuleResolver::register_module_path`].
+    ///
+    /// Each entry is a `(normalised_path, module_id)` pair. Paths are stored
+    /// in the same normalised, extension-stripped form the resolver uses, so
+    /// the workspace-wide path index (built in
+    /// [`WorkspaceReExportGraph::add_project`]) can answer "which project
+    /// owns this resolved tsconfig-alias target path?" with O(1) lookup.
+    ///
+    /// Populated alongside `known_modules` from the walker's
+    /// [`crate::walker::DiscoveredFile`] stream — see FEAT-028 step 4 for
+    /// how the cross-project alias resolver consumes this.
+    pub module_paths: Vec<(PathBuf, String)>,
 }
 
 impl ProjectReExportContext {
     /// Cheap constructor — useful in tests and in the collection site.
+    ///
+    /// Starts with an empty `module_paths`; callers populate it via
+    /// [`ProjectReExportContext::add_module_path`] as the walker discovers
+    /// files. The split constructor (rather than a single all-args variant)
+    /// keeps the collection site readable: the caller loops over
+    /// [`crate::walker::DiscoveredFile`] entries and appends each one, which
+    /// matches the existing pattern used to populate
+    /// [`crate::resolver::ModuleResolver::register_module_path`].
     pub fn new(
         project_name: impl Into<String>,
         repo_root: impl Into<String>,
@@ -120,6 +142,27 @@ impl ProjectReExportContext {
             repo_root: repo_root.into(),
             known_modules,
             reexports,
+            module_paths: Vec::new(),
+        }
+    }
+
+    /// Record a `(file_path, module_id)` pair. Mirrors the side-effect shape
+    /// of [`crate::resolver::ModuleResolver::register_module_path`]: the
+    /// caller passes the discovered file's path and `is_package` flag; this
+    /// helper normalises (extension-strip + canonical components) and, for
+    /// package entry points, also records the parent-directory variant so a
+    /// tsconfig alias target of `packages/core/src` (without `/index`)
+    /// matches the `core.src.index` module.
+    pub fn add_module_path(&mut self, module_id: &str, file_path: &Path, is_package: bool) {
+        let without_ext = path_without_extension(file_path);
+        self.module_paths
+            .push((normalize_path(&without_ext), module_id.to_owned()));
+
+        if is_package {
+            if let Some(parent) = file_path.parent() {
+                self.module_paths
+                    .push((normalize_path(parent), module_id.to_owned()));
+            }
         }
     }
 
@@ -129,6 +172,32 @@ impl ProjectReExportContext {
         // once per cross-project hop, not per-file per-edge. Switch to a
         // `HashSet` if profiling shows pressure.
         self.known_modules.iter().any(|m| m == module_id)
+    }
+}
+
+// Local path helpers — intentionally private duplicates of the ones in
+// `resolver.rs` so this module can normalise paths consistently without
+// widening that module's surface. Both are ~5 lines; if a third consumer
+// shows up, promote to a shared `path_utils` submodule.
+fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn path_without_extension(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_stem()) {
+        (Some(parent), Some(stem)) => parent.join(stem),
+        _ => path.to_path_buf(),
     }
 }
 
@@ -169,6 +238,18 @@ pub struct WorkspaceReExportGraph {
     /// a diagnostic pass can warn when the workspace has ambiguous module
     /// ids. Each tuple is `(module_id, project_that_lost)`.
     module_collisions: Vec<(String, String)>,
+    /// Path → `(project_name, module_id)` index, built from every
+    /// [`ProjectReExportContext::module_paths`] entry when the project is
+    /// registered. Paths are normalised and extension-stripped, matching the
+    /// per-project [`crate::resolver::ModuleResolver::module_lookup_paths`]
+    /// shape so the workspace-aware alias resolver (FEAT-028 step 4) can
+    /// answer "does this tsconfig-alias target land inside another
+    /// registered project?" in O(1).
+    ///
+    /// First-wins, mirroring `modules_to_project`: if two projects both
+    /// register the same path (shouldn't happen in a well-formed monorepo
+    /// but defensive just in case), the first registration claims it.
+    module_paths: HashMap<PathBuf, (String, String)>,
     /// Per-project re-export graphs keyed by `project_name`, populated via
     /// [`WorkspaceReExportGraph::set_project_graph`].
     ///
@@ -210,12 +291,35 @@ impl WorkspaceReExportGraph {
                     .insert(module_id.clone(), ctx.project_name.clone());
             }
         }
+        for (path, module_id) in &ctx.module_paths {
+            self.module_paths
+                .entry(path.clone())
+                .or_insert_with(|| (ctx.project_name.clone(), module_id.clone()));
+        }
         self.projects.push(ctx);
     }
 
     /// Every project context in insertion order.
     pub fn projects(&self) -> &[ProjectReExportContext] {
         &self.projects
+    }
+
+    /// Look up which `(project_name, module_id)` owns a given resolved file
+    /// path. The `candidate` path is normalised before lookup so callers can
+    /// pass raw `base_dir.join(resolved)` output without pre-canonicalising.
+    ///
+    /// Tries the path as-given first, then the extension-stripped form, so
+    /// a tsconfig alias target like `packages/core/src/foo` matches a
+    /// registered `packages/core/src/foo.ts`. Returns `None` if no
+    /// registered project owns the path — used by the workspace-aware alias
+    /// resolver to decide whether to fall back to the raw-alias v1 contract.
+    pub fn lookup_module_by_path(&self, candidate: &Path) -> Option<(String, String)> {
+        let key = normalize_path(candidate);
+        if let Some(hit) = self.module_paths.get(&key) {
+            return Some(hit.clone());
+        }
+        let without_ext = normalize_path(&path_without_extension(&key));
+        self.module_paths.get(&without_ext).cloned()
     }
 
     /// Look up which project owns a given dot-notation module id.
@@ -439,6 +543,27 @@ impl WorkspaceReExportGraph {
             };
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace-aware alias target (FEAT-028 step 4)
+// ---------------------------------------------------------------------------
+
+/// Result of resolving a TypeScript tsconfig alias whose target path falls
+/// **outside** the current project's root but **inside** another workspace
+/// project's root.
+///
+/// Returned by
+/// [`crate::resolver::ModuleResolver::apply_ts_alias_workspace`] — callers in
+/// the FEAT-028 fan-out loop (step 5) use this to emit a cross-project edge
+/// targeting the sibling project's canonical module id, instead of
+/// terminating at the raw alias string as v1 did (the FEAT-027 tripwire).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceAliasTarget {
+    /// Name of the sibling project that owns the resolved module.
+    pub project: String,
+    /// Dot-notation module id within that project (e.g. `src.index`).
+    pub module_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -1047,5 +1172,111 @@ mod tests {
             }
             other => panic!("expected Canonical, got {other:?}"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-028 step 4 — path-based module lookup
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn add_module_path_records_extension_stripped_form() {
+        let mut c = ctx("core", "/abs/core", &["core.src.foo"], vec![]);
+        c.add_module_path(
+            "core.src.foo",
+            Path::new("/abs/core/src/foo.ts"),
+            /* is_package */ false,
+        );
+        assert_eq!(
+            c.module_paths,
+            vec![(
+                PathBuf::from("/abs/core/src/foo"),
+                "core.src.foo".to_owned()
+            )],
+        );
+    }
+
+    #[test]
+    fn add_module_path_for_package_records_parent_too() {
+        // Package entry points (`index.ts` / `__init__.py`) need the parent
+        // directory variant so a tsconfig alias target of
+        // `packages/core/src` (no `/index`) matches the `core.src.index`
+        // module id — mirrors the resolver's side-effect in
+        // `register_module_path`.
+        let mut c = ctx("core", "/abs/core", &["core.src.index"], vec![]);
+        c.add_module_path(
+            "core.src.index",
+            Path::new("/abs/core/src/index.ts"),
+            /* is_package */ true,
+        );
+        assert_eq!(
+            c.module_paths,
+            vec![
+                (
+                    PathBuf::from("/abs/core/src/index"),
+                    "core.src.index".to_owned(),
+                ),
+                (PathBuf::from("/abs/core/src"), "core.src.index".to_owned(),),
+            ],
+        );
+    }
+
+    #[test]
+    fn workspace_lookup_by_path_returns_project_and_module_id() {
+        let mut core = ctx("core", "/abs/core", &["core.src.index"], vec![]);
+        core.add_module_path("core.src.index", Path::new("/abs/core/src/index.ts"), true);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(core);
+
+        // Exact extension-stripped hit.
+        assert_eq!(
+            ws.lookup_module_by_path(Path::new("/abs/core/src/index")),
+            Some(("core".to_owned(), "core.src.index".to_owned())),
+        );
+        // Parent-directory hit (the package variant).
+        assert_eq!(
+            ws.lookup_module_by_path(Path::new("/abs/core/src")),
+            Some(("core".to_owned(), "core.src.index".to_owned())),
+        );
+        // Extension present — resolver falls back to stripped form.
+        assert_eq!(
+            ws.lookup_module_by_path(Path::new("/abs/core/src/index.ts")),
+            Some(("core".to_owned(), "core.src.index".to_owned())),
+        );
+    }
+
+    #[test]
+    fn workspace_lookup_by_path_returns_none_when_path_not_registered() {
+        let mut core = ctx("core", "/abs/core", &["core.src.index"], vec![]);
+        core.add_module_path("core.src.index", Path::new("/abs/core/src/index.ts"), true);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(core);
+
+        assert!(ws
+            .lookup_module_by_path(Path::new("/abs/other/src/index"))
+            .is_none(),);
+        assert!(ws
+            .lookup_module_by_path(Path::new("/abs/core/src/missing"))
+            .is_none(),);
+    }
+
+    #[test]
+    fn workspace_lookup_by_path_first_project_wins_on_collision() {
+        // Two projects somehow register the same absolute path — first wins,
+        // defensive behaviour mirroring `modules_to_project`.
+        let mut a = ctx("a", "/abs/a", &["a.src"], vec![]);
+        a.add_module_path("a.src", Path::new("/shared/path.ts"), false);
+        let mut b = ctx("b", "/abs/b", &["b.src"], vec![]);
+        b.add_module_path("b.src", Path::new("/shared/path.ts"), false);
+
+        let mut ws = WorkspaceReExportGraph::new();
+        ws.add_project(a);
+        ws.add_project(b);
+
+        assert_eq!(
+            ws.lookup_module_by_path(Path::new("/shared/path.ts")),
+            Some(("a".to_owned(), "a.src".to_owned())),
+        );
     }
 }
