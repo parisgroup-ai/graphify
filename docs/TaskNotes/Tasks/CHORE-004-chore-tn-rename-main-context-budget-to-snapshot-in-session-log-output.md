@@ -5,6 +5,14 @@ priority: normal
 scheduled: 2026-04-20
 timeEstimate: 45
 pomodoros: 0
+timeSpent: 3
+timeEntries:
+- date: 2026-04-20
+  minutes: 3
+  note: source=<usage>; cross-repo — lives in parisgroup-ai/tasknotes-cli rust/crates/tasknotes-cli/src/commands/session.rs:887, dispatch from that repo instead
+  type: manual
+  executor: claude-solo
+  tokens: 46474
 contexts:
 - tn
 - dx

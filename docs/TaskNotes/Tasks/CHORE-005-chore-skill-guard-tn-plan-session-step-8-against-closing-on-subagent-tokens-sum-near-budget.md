@@ -5,6 +5,14 @@ priority: normal
 scheduled: 2026-04-20
 timeEstimate: 30
 pomodoros: 0
+timeSpent: 3
+timeEntries:
+- date: 2026-04-20
+  minutes: 3
+  note: source=<usage>; cross-repo — /tn-plan-session skill lives at ~/.claude/commands/tn-plan-session.md, outside graphify; dispatch from ~/.claude cwd or via share-skill
+  type: manual
+  executor: claude-solo
+  tokens: 44086
 contexts:
 - skill
 - tn-plan-session
