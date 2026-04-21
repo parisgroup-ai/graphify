@@ -1,8 +1,9 @@
 ---
 uid: bug-019
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-21
+completed: 2026-04-21
 pomodoros: 0
 projects:
 - '[[sprint.md|Current Sprint]]'

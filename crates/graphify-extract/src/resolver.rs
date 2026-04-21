@@ -414,6 +414,32 @@ impl ModuleResolver {
             return (raw.to_owned(), true, 1.0);
         }
 
+        // 8.5. Bare-identifier same-module lookup (BUG-019). If `raw` is a
+        //      bare identifier (no `::`, `.`, `\`, `/`, or leading dot) and
+        //      `{from_module}.{raw}` is a registered local module, promote
+        //      to the qualified id. Covers the common case of a function
+        //      calling a same-file helper — the extractor emits the bare
+        //      leaf `build_communities`, but BUG-018's Defines registration
+        //      already put `src.community.build_communities` in known_modules.
+        //
+        //      Ordered before case 9 to match Rust shadowing semantics: a
+        //      local `fn build_communities` shadows any `use …build_communities`
+        //      in the same file. If there's no local symbol, case 8.5 misses
+        //      and case 9's use-alias fallback handles the external call.
+        //      Non-recursive (one HashMap lookup) — no bound concern.
+        if !raw.is_empty()
+            && !from_module.is_empty()
+            && !raw.contains("::")
+            && !raw.contains('.')
+            && !raw.contains('\\')
+            && !raw.contains('/')
+        {
+            let synthesized = format!("{}.{}", from_module, raw);
+            if self.known_modules.contains_key(&synthesized) {
+                return (synthesized, true, 1.0);
+            }
+        }
+
         // 9. Rust `use`-alias fallback (FEAT-031). When a scoped or bare call
         //    target isn't a registered local module directly, consult the
         //    per-source-module alias map captured by the Rust extractor and
@@ -2251,5 +2277,79 @@ mod tests {
         let (resolved, is_local, _) = resolver.resolve("Node", "src.a", false);
         assert_eq!(resolved, "src.types.Node");
         assert!(is_local);
+    }
+
+    #[test]
+    fn bug_019_bare_call_synthesizes_same_module_qualified_id() {
+        // Core BUG-019 case: `build_communities()` inside `src.community`
+        // where `src.community.build_communities` is a registered symbol
+        // (BUG-018 put it in known_modules via the Defines-target pass).
+        // The extractor emits the bare leaf; the resolver must now promote
+        // it to the qualified local id instead of returning non-local.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.community");
+        resolver.register_module("src.community.build_communities");
+
+        let (resolved, is_local, conf) =
+            resolver.resolve("build_communities", "src.community", false);
+        assert_eq!(resolved, "src.community.build_communities");
+        assert!(is_local, "same-module qualified id must resolve as local");
+        assert_eq!(conf, 1.0, "direct known-modules hit → confidence 1.0");
+    }
+
+    #[test]
+    fn bug_019_bare_call_without_matching_symbol_stays_external() {
+        // Negative guard: a bare call to an external function that was
+        // NOT registered as a symbol must not be spuriously promoted.
+        // `Vec::new()` target in this test is unqualified (`Vec`), so
+        // the synthesized `src.graph.Vec` misses and resolve falls
+        // through to the no-match return.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.graph");
+
+        let (resolved, is_local, _) = resolver.resolve("Vec", "src.graph", false);
+        assert_eq!(resolved, "Vec");
+        assert!(
+            !is_local,
+            "external call with no matching local symbol stays external"
+        );
+    }
+
+    #[test]
+    fn bug_019_scoped_call_skips_bare_synthesis() {
+        // Scoped / dotted / aliased input must NOT be handled by case 8.5 —
+        // those shapes flow through their dedicated branches (cases 6 + 9
+        // for Rust scoped forms). Guard: a scoped `Foo::bar` from `src.m`
+        // must NOT synthesize `src.m.Foo::bar` and look it up.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.m");
+        // Pathological: planted an id that WOULD match if case 8.5 ran on
+        // scoped input. The shape-guard must prevent this.
+        resolver.register_module("src.m.Foo::bar");
+
+        let (resolved, is_local, _) = resolver.resolve("Foo::bar", "src.m", false);
+        // Case 8.5's `::` check skips scoped inputs, so we fall through to
+        // case 9 (no alias → no rewrite) and then to the no-match return.
+        assert_eq!(resolved, "Foo::bar");
+        assert!(
+            !is_local,
+            "scoped-call shape must flow through case 9, not be synthesized at 8.5"
+        );
+    }
+
+    #[test]
+    fn bug_019_empty_from_module_does_not_synthesize() {
+        // If `from_module` is empty, the synthesized id would collapse to
+        // `.raw`, which is meaningless. Case 8.5 must skip, letting the
+        // no-match return preserve the raw input.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.register_module(".foo"); // pathological plant
+
+        let (resolved, is_local, _) = resolver.resolve("foo", "", false);
+        assert_eq!(resolved, "foo");
+        assert!(!is_local);
     }
 }

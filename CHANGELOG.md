@@ -4,6 +4,11 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.9] - 2026-04-21
+
+### Fixed
+- fix(extract): bare same-module Calls edges (e.g. `build_communities()` inside `src.community`, where the function is defined in the same file) were being returned as non-local by `ModuleResolver::resolve` — the extractor emits just the bare leaf `build_communities` and no `use` statement triggers a rewrite, so the direct `known_modules.contains_key("build_communities")` lookup missed. New case 8.5 in `resolve_with_depth` synthesizes `{from_module}.{raw}` for bare-identifier input and looks it up against the `known_modules` map seeded by BUG-018's Defines-target pass. On hit, returns the qualified id with `is_local=true, confidence=1.0`. Placement before case 9 matches Rust shadowing semantics: a local `fn foo` shadows `use …foo`, so local-first is correct. Self-dogfood delta on graphify's 5-crate workspace: Ambiguous Calls 394 → 144 (−63%), Inferred 13 → 263 (20×); +250 promotions. Graph node counts dropped 5–15% per crate as bare-identifier placeholders collapsed into canonical symbols. Top hotspots now surface real hub modules (`src.policy`, `src.resolver`, `src.consolidation`, `src.install.codex_bridge`, `src.server`) instead of uniformly-capped facades (BUG-019).
+
 ## [0.11.8] - 2026-04-21
 
 ### Fixed
