@@ -2035,7 +2035,10 @@ fn run_extract_with_workspace(
     let repo_path_ref = &repo_path;
 
     // Extract each file in parallel: read → hash → cache check → parse on miss.
-    let extraction_with_meta: Vec<(String, String, ExtractionResult, bool)> = files
+    // Tuple: `(rel_path, hash, module_name, result, was_hit)` — module_name
+    // is kept so the post-extraction sequential pass can register per-file
+    // artifacts (FEAT-031 `use_aliases`) against the resolver.
+    let extraction_with_meta: Vec<(String, String, String, ExtractionResult, bool)> = files
         .par_iter()
         .filter_map(|file| {
             let source = match std::fs::read(&file.path) {
@@ -2057,7 +2060,13 @@ fn run_extract_with_workspace(
 
             // Cache hit: reuse previous extraction.
             if let Some(cached) = cache.lookup(&rel_path, &hash) {
-                return Some((rel_path, hash, cached.clone(), true));
+                return Some((
+                    rel_path,
+                    hash,
+                    file.module_name.clone(),
+                    cached.clone(),
+                    true,
+                ));
             }
 
             // Cache miss: parse with tree-sitter.
@@ -2070,22 +2079,23 @@ fn run_extract_with_workspace(
             };
 
             let result = extractor.extract_file(&file.path, &source, &file.module_name);
-            Some((rel_path, hash, result, false))
+            Some((rel_path, hash, file.module_name.clone(), result, false))
         })
         .collect();
 
     // Build new cache from extraction results and count stats.
     let mut new_cache = ExtractionCache::new(&effective_local_prefix);
-    let mut results: Vec<ExtractionResult> = Vec::with_capacity(extraction_with_meta.len());
+    let mut results: Vec<(String, ExtractionResult)> =
+        Vec::with_capacity(extraction_with_meta.len());
 
-    for (rel_path, hash, result, was_hit) in extraction_with_meta {
+    for (rel_path, hash, module_name, result, was_hit) in extraction_with_meta {
         if was_hit {
             stats.hits += 1;
         } else {
             stats.misses += 1;
         }
         new_cache.insert(rel_path, hash, result.clone());
-        results.push(result);
+        results.push((module_name, result));
     }
 
     // Count evictions: old cache entries whose paths aren't in the current discovered file set.
@@ -2095,12 +2105,17 @@ fn run_extract_with_workspace(
         .filter(|p| !current_paths.contains(*p))
         .count();
 
-    // Merge results sequentially into graph.
+    // Merge results sequentially into graph. FEAT-031: also register per-file
+    // `use_aliases` on the resolver so case-9 fallback can rewrite scoped and
+    // bare-name call targets to their canonical local ids.
     let mut all_nodes = Vec::new();
     let mut all_raw_edges: Vec<(String, String, graphify_core::types::Edge)> = Vec::new();
     let mut all_reexports: Vec<graphify_extract::ReExportEntry> = Vec::new();
     let mut all_named_imports: Vec<graphify_extract::NamedImportEntry> = Vec::new();
-    for result in results {
+    for (module_name, result) in results {
+        if !result.use_aliases.is_empty() {
+            resolver.register_use_aliases(&module_name, &result.use_aliases);
+        }
         all_nodes.extend(result.nodes);
         all_raw_edges.extend(result.edges);
         all_reexports.extend(result.reexports);

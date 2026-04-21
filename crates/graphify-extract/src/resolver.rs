@@ -43,6 +43,14 @@ pub struct ModuleResolver {
     /// Used by language-specific resolver branches that need to re-prepend the
     /// prefix when stripping a language-rooted prefix like Rust's `crate::`.
     local_prefix: String,
+    /// Per-source-module short-name → full-path alias map (FEAT-031). Each
+    /// entry corresponds to a `use` declaration captured in the source file
+    /// (e.g. `use crate::types::Node;` in `src/graph.rs` registers
+    /// `("Node", "crate::types::Node")` under key `"src.graph"`). Consulted
+    /// as a final fallback in `resolve()` when the direct-name lookup misses,
+    /// so scoped-identifier call targets like `Node::module` can be rewritten
+    /// to their canonical local ids.
+    use_aliases_by_module: HashMap<String, HashMap<String, String>>,
     /// Workspace / project root (reserved for future use).
     #[allow(dead_code)]
     root: PathBuf,
@@ -63,6 +71,7 @@ impl ModuleResolver {
             go_module_path: None,
             psr4_mappings: Vec::new(),
             local_prefix: String::new(),
+            use_aliases_by_module: HashMap::new(),
             root: normalize_path(root),
         }
     }
@@ -91,6 +100,31 @@ impl ModuleResolver {
             return id.to_owned();
         }
         format!("{}.{}", self.local_prefix, id)
+    }
+
+    /// Register the per-file `use`-alias map captured by the Rust extractor
+    /// for the source module `from_module` (FEAT-031).
+    ///
+    /// The resolver consults this map as a final fallback in `resolve()`
+    /// when a bare or scoped call target doesn't match any registered local
+    /// module directly — e.g. `Node::module` after `use crate::types::Node;`
+    /// becomes `crate::types::Node::module`, which the `crate::` branch
+    /// then canonicalizes to `src.types.Node.module`.
+    ///
+    /// Calling this multiple times for the same module merges entries
+    /// (first write wins per short name, matching the extractor's own
+    /// `register_use_alias` semantics).
+    pub fn register_use_aliases(&mut self, from_module: &str, aliases: &HashMap<String, String>) {
+        if aliases.is_empty() {
+            return;
+        }
+        let slot = self
+            .use_aliases_by_module
+            .entry(from_module.to_owned())
+            .or_default();
+        for (short, full) in aliases {
+            slot.entry(short.clone()).or_insert_with(|| full.clone());
+        }
     }
 
     /// Register a dot-notation module name as a local module.
@@ -325,8 +359,37 @@ impl ModuleResolver {
         }
 
         // 8. Direct module name — check against known modules.
-        let is_local = self.known_modules.contains_key(raw);
-        (raw.to_owned(), is_local, 1.0)
+        if self.known_modules.contains_key(raw) {
+            return (raw.to_owned(), true, 1.0);
+        }
+
+        // 9. Rust `use`-alias fallback (FEAT-031). When a scoped or bare call
+        //    target isn't a registered local module directly, consult the
+        //    per-source-module alias map captured by the Rust extractor and
+        //    rewrite the root segment (or the whole name) to its fully-
+        //    qualified form. Recurses back through `resolve` so the rewritten
+        //    path flows through the language-specific branches (typically the
+        //    `crate::` branch, case 6). Confidence is governed at the edge
+        //    level — Calls edges arrive here at 0.7/Inferred from the
+        //    extractor, so the recursive resolver's 0.9 is capped back down
+        //    by the pipeline's `min(edge.confidence, resolver_confidence)`.
+        if let Some(aliases) = self.use_aliases_by_module.get(from_module) {
+            // Bare-name form: the whole raw matches a `use`-imported short name.
+            if let Some(full) = aliases.get(raw) {
+                let full = full.clone();
+                return self.resolve(&full, from_module, is_package);
+            }
+            // Scoped form: rewrite only the root segment.
+            if let Some((root, tail)) = raw.split_once("::") {
+                if let Some(full) = aliases.get(root) {
+                    let rewritten = format!("{}::{}", full, tail);
+                    return self.resolve(&rewritten, from_module, is_package);
+                }
+            }
+        }
+
+        // No match — external or unresolved reference.
+        (raw.to_owned(), false, 1.0)
     }
 
     fn apply_ts_alias_with_context(
@@ -1943,5 +2006,114 @@ mod tests {
         // mis-capturing.
         let got = match_alias_target("@vendor/core", "@repo/*", "../../packages/*/src");
         assert_eq!(got, None);
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-031: use_aliases fallback for Rust scoped and bare-name calls
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn feat_031_use_alias_scoped_call_resolves_to_local_method() {
+        // Setup: `src.graph` has `use crate::types::Node;` and calls
+        // `Node::module(...)`. The resolver should rewrite `Node::module`
+        // through the alias map to `crate::types::Node::module`, then the
+        // `crate::` branch canonicalizes to `src.types.Node.module`.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.types");
+        resolver.register_module("src.types.Node");
+        resolver.register_module("src.types.Node.module");
+        resolver.register_module("src.graph");
+
+        let mut aliases = HashMap::new();
+        aliases.insert("Node".to_owned(), "crate::types::Node".to_owned());
+        resolver.register_use_aliases("src.graph", &aliases);
+
+        let (resolved, is_local, _conf) = resolver.resolve("Node::module", "src.graph", false);
+        assert_eq!(resolved, "src.types.Node.module");
+        assert!(is_local);
+    }
+
+    #[test]
+    fn feat_031_use_alias_bare_call_resolves_to_local_function() {
+        // `use crate::validator::validate;` + bare `validate()` in body.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.validator");
+        resolver.register_module("src.validator.validate");
+        resolver.register_module("src.main");
+
+        let mut aliases = HashMap::new();
+        aliases.insert(
+            "validate".to_owned(),
+            "crate::validator::validate".to_owned(),
+        );
+        resolver.register_use_aliases("src.main", &aliases);
+
+        let (resolved, is_local, _conf) = resolver.resolve("validate", "src.main", false);
+        assert_eq!(resolved, "src.validator.validate");
+        assert!(is_local);
+    }
+
+    #[test]
+    fn feat_031_use_alias_no_match_leaves_bare_name_nonlocal() {
+        // Negative: `Vec::new()` with no `use Vec` must not be spuriously
+        // promoted to a local symbol.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.graph");
+
+        let (resolved, is_local, _conf) = resolver.resolve("Vec::new", "src.graph", false);
+        assert_eq!(resolved, "Vec::new");
+        assert!(!is_local, "no alias → stays external");
+    }
+
+    #[test]
+    fn feat_031_use_alias_scoped_prefix_but_unknown_tail_stays_resolved() {
+        // `use crate::types::Node;` exists but the call is `Node::unknown_fn`
+        // (not a registered symbol). The rewrite still happens; `is_local`
+        // reflects whether the rewritten id is in known_modules.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.types");
+        resolver.register_module("src.types.Node");
+        resolver.register_module("src.graph");
+
+        let mut aliases = HashMap::new();
+        aliases.insert("Node".to_owned(), "crate::types::Node".to_owned());
+        resolver.register_use_aliases("src.graph", &aliases);
+
+        let (resolved, is_local, _conf) = resolver.resolve("Node::unknown_fn", "src.graph", false);
+        assert_eq!(resolved, "src.types.Node.unknown_fn");
+        assert!(
+            !is_local,
+            "rewritten id not in known_modules → not marked local"
+        );
+    }
+
+    #[test]
+    fn feat_031_use_alias_per_module_scope_does_not_leak() {
+        // An alias registered on module A must NOT fire for a call from
+        // module B. Two modules, only A has the `Node` alias.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.types");
+        resolver.register_module("src.types.Node");
+        resolver.register_module("src.a");
+        resolver.register_module("src.b");
+
+        let mut aliases_a = HashMap::new();
+        aliases_a.insert("Node".to_owned(), "crate::types::Node".to_owned());
+        resolver.register_use_aliases("src.a", &aliases_a);
+
+        // From `src.b` — no alias registered → Node stays external.
+        let (resolved, is_local, _) = resolver.resolve("Node", "src.b", false);
+        assert_eq!(resolved, "Node");
+        assert!(!is_local, "alias must be per-source-module, not global");
+
+        // From `src.a` — alias fires.
+        let (resolved, is_local, _) = resolver.resolve("Node", "src.a", false);
+        assert_eq!(resolved, "src.types.Node");
+        assert!(is_local);
     }
 }

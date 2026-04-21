@@ -185,6 +185,7 @@ mod tests {
             edges: vec![("app.main".to_string(), "os".to_string(), Edge::imports(1))],
             reexports: Vec::new(),
             named_imports: Vec::new(),
+            use_aliases: std::collections::HashMap::new(),
         }
     }
 

@@ -237,7 +237,10 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
         }
     }
 
-    let results: Vec<ExtractionResult> = files
+    // Tuple `(module_name, result)` keeps the source module attached so the
+    // sequential merge loop can register per-file artifacts (FEAT-031
+    // `use_aliases`) against the resolver.
+    let results: Vec<(String, ExtractionResult)> = files
         .par_iter()
         .filter_map(|file| {
             let source = match std::fs::read(&file.path) {
@@ -256,13 +259,19 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
                 Language::Php => &php_extractor,
             };
 
-            Some(extractor.extract_file(&file.path, &source, &file.module_name))
+            Some((
+                file.module_name.clone(),
+                extractor.extract_file(&file.path, &source, &file.module_name),
+            ))
         })
         .collect();
 
     let mut all_nodes = Vec::new();
     let mut all_raw_edges: Vec<(String, String, graphify_core::types::Edge)> = Vec::new();
-    for result in results {
+    for (module_name, result) in results {
+        if !result.use_aliases.is_empty() {
+            resolver.register_use_aliases(&module_name, &result.use_aliases);
+        }
         all_nodes.extend(result.nodes);
         all_raw_edges.extend(result.edges);
     }

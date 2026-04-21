@@ -1,8 +1,9 @@
 ---
 uid: feat-031
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-21
+completed: 2026-04-21
 pomodoros: 0
 tags:
 - task
@@ -13,7 +14,7 @@ tags:
 ai:
   parallelParts: 0
   needsReview: false
-  uncertainty: medium
+  uncertainty: med
   hintsInferred: true
 ---
 

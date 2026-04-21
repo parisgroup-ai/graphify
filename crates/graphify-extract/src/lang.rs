@@ -1,5 +1,6 @@
 use graphify_core::types::{Edge, Node};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// A single `export … from …` statement captured during TypeScript extraction.
@@ -104,6 +105,24 @@ pub struct ExtractionResult {
     /// FEAT-026) deserialize cleanly into an empty vector.
     #[serde(default)]
     pub named_imports: Vec<NamedImportEntry>,
+    /// Short-name → fully-qualified path aliases captured from `use`
+    /// declarations in Rust source files (FEAT-031). Per-file scope —
+    /// aggregated per source module by the pipeline and plumbed into
+    /// [`crate::resolver::ModuleResolver::register_use_aliases`] so that the
+    /// resolver's final-fallback branch can rewrite scoped and bare-name call
+    /// targets (e.g. `Node::module` after `use crate::types::Node;` resolves
+    /// to the canonical local symbol rather than a non-local placeholder).
+    ///
+    /// Population rules (Rust only; every other extractor leaves this empty):
+    /// - `use foo::bar::Baz;` → `("Baz", "foo::bar::Baz")`
+    /// - `use foo::Bar as Baz;` → `("Baz", "foo::Bar")` (local alias wins)
+    /// - `use std::{io, fs};` → two entries, one per item
+    /// - `use foo::*;` — wildcards are v2, not captured
+    ///
+    /// `#[serde(default)]` lets older cached extraction results (from before
+    /// FEAT-031) deserialize cleanly into an empty map.
+    #[serde(default)]
+    pub use_aliases: HashMap<String, String>,
 }
 
 impl ExtractionResult {
@@ -113,6 +132,7 @@ impl ExtractionResult {
             edges: Vec::new(),
             reexports: Vec::new(),
             named_imports: Vec::new(),
+            use_aliases: HashMap::new(),
         }
     }
 }

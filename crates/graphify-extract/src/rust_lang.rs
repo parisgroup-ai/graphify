@@ -98,6 +98,10 @@ fn extract_use_declaration(
 
 /// Recursively collect import paths from use declaration arguments.
 /// Handles: identifiers, scoped_identifier, scoped_use_list, use_as_clause, use_list.
+///
+/// FEAT-031: also populates `result.use_aliases` with `short_name → full_path`
+/// entries so the post-extraction resolver can rewrite scoped and bare-name
+/// call targets (e.g. `Node::module` after `use crate::types::Node;`).
 fn collect_use_paths(
     node: &tree_sitter::Node,
     source: &[u8],
@@ -109,6 +113,7 @@ fn collect_use_paths(
         "identifier" | "scoped_identifier" | "crate" | "self" | "super" => {
             let path_str = node.utf8_text(source).unwrap_or("").to_owned();
             if !path_str.is_empty() {
+                register_use_alias(&path_str, None, result);
                 result
                     .edges
                     .push((module_name.to_owned(), path_str, Edge::imports(line)));
@@ -119,6 +124,11 @@ fn collect_use_paths(
             if let Some(path_node) = node.child_by_field_name("path") {
                 let path_str = path_node.utf8_text(source).unwrap_or("").to_owned();
                 if !path_str.is_empty() {
+                    let alias = node
+                        .child_by_field_name("alias")
+                        .and_then(|n| n.utf8_text(source).ok())
+                        .filter(|s| !s.is_empty());
+                    register_use_alias(&path_str, alias, result);
                     result
                         .edges
                         .push((module_name.to_owned(), path_str, Edge::imports(line)));
@@ -147,6 +157,7 @@ fn collect_use_paths(
                                 } else {
                                     format!("{}::{}", prefix, name)
                                 };
+                                register_use_alias(&full_path, None, result);
                                 result.edges.push((
                                     module_name.to_owned(),
                                     full_path,
@@ -154,8 +165,47 @@ fn collect_use_paths(
                                 ));
                             }
                         }
-                        "scoped_identifier" | "scoped_use_list" | "use_as_clause" => {
-                            // Nested: reconstruct with prefix.
+                        "scoped_identifier" => {
+                            let child_text = child.utf8_text(source).unwrap_or("");
+                            if !child_text.is_empty() {
+                                let full_path = if prefix.is_empty() {
+                                    child_text.to_owned()
+                                } else {
+                                    format!("{}::{}", prefix, child_text)
+                                };
+                                register_use_alias(&full_path, None, result);
+                                result.edges.push((
+                                    module_name.to_owned(),
+                                    full_path,
+                                    Edge::imports(line),
+                                ));
+                            }
+                        }
+                        "use_as_clause" => {
+                            // Nested aliased item inside a grouped import,
+                            // e.g. `use std::{io::Result as IoResult};`.
+                            if let Some(path_node) = child.child_by_field_name("path") {
+                                let path_str = path_node.utf8_text(source).unwrap_or("");
+                                if !path_str.is_empty() {
+                                    let full_path = if prefix.is_empty() {
+                                        path_str.to_owned()
+                                    } else {
+                                        format!("{}::{}", prefix, path_str)
+                                    };
+                                    let alias = child
+                                        .child_by_field_name("alias")
+                                        .and_then(|n| n.utf8_text(source).ok())
+                                        .filter(|s| !s.is_empty());
+                                    register_use_alias(&full_path, alias, result);
+                                    result.edges.push((
+                                        module_name.to_owned(),
+                                        full_path,
+                                        Edge::imports(line),
+                                    ));
+                                }
+                            }
+                        }
+                        "scoped_use_list" => {
                             let child_text = child.utf8_text(source).unwrap_or("");
                             if !child_text.is_empty() {
                                 let full_path = if prefix.is_empty() {
@@ -185,7 +235,9 @@ fn collect_use_paths(
             }
         }
         "use_wildcard" => {
-            // `use foo::*` — import the path without the wildcard.
+            // `use foo::*` — import the path without the wildcard. Wildcard
+            // short-name expansion is v2 (FEAT-031 boundaries) since the set
+            // of names is not visible at parse time.
             let text = node.utf8_text(source).unwrap_or("");
             let path = text.strip_suffix("::*").unwrap_or(text);
             if !path.is_empty() {
@@ -196,6 +248,34 @@ fn collect_use_paths(
         }
         _ => {}
     }
+}
+
+/// Register a `short_name → full_path` entry in the extraction's `use_aliases`
+/// map (FEAT-031).
+///
+/// The short name comes from `alias_override` when present (i.e. the local
+/// name introduced by a `use … as …` clause); otherwise it's the last
+/// `::`-separated segment of `full_path`. Single-segment paths (`use foo;`)
+/// also register `foo → foo` — harmless, and keeps the fallback logic
+/// uniform in the resolver.
+fn register_use_alias(
+    full_path: &str,
+    alias_override: Option<&str>,
+    result: &mut ExtractionResult,
+) {
+    let short = match alias_override {
+        Some(alias) => alias,
+        None => full_path.rsplit("::").next().unwrap_or(full_path),
+    };
+    if short.is_empty() {
+        return;
+    }
+    // First `use` wins — subsequent duplicates are unusual (would be a compile
+    // error in Rust) and we don't want to silently overwrite the original.
+    result
+        .use_aliases
+        .entry(short.to_owned())
+        .or_insert_with(|| full_path.to_owned());
 }
 
 // ---------------------------------------------------------------------------
@@ -465,20 +545,44 @@ fn extract_calls_recursive(
     match node.kind() {
         "call_expression" => {
             if let Some(func) = node.child_by_field_name("function") {
-                // Only extract bare identifier calls (not field_expression or scoped_identifier).
-                if func.kind() == "identifier" {
-                    let callee = func.utf8_text(source).unwrap_or("").to_owned();
-                    if !callee.is_empty() {
-                        let line = node.start_position().row + 1;
-                        result.edges.push((
-                            module_name.to_owned(),
-                            callee,
-                            Edge::calls(line).with_confidence(
-                                0.7,
-                                graphify_core::types::ConfidenceKind::Inferred,
-                            ),
-                        ));
+                match func.kind() {
+                    // Bare call: `foo()` — target is the identifier.
+                    "identifier" => {
+                        let callee = func.utf8_text(source).unwrap_or("").to_owned();
+                        if !callee.is_empty() {
+                            let line = node.start_position().row + 1;
+                            result.edges.push((
+                                module_name.to_owned(),
+                                callee,
+                                Edge::calls(line).with_confidence(
+                                    0.7,
+                                    graphify_core::types::ConfidenceKind::Inferred,
+                                ),
+                            ));
+                        }
                     }
+                    // Scoped call: `Foo::bar()`, `foo::Bar::baz()` (FEAT-031).
+                    // Target is the full scoped path verbatim; the post-
+                    // extraction resolver's `use_aliases` fallback rewrites
+                    // the root segment to the canonical local symbol.
+                    "scoped_identifier" => {
+                        let callee = func.utf8_text(source).unwrap_or("").to_owned();
+                        if !callee.is_empty() {
+                            let line = node.start_position().row + 1;
+                            result.edges.push((
+                                module_name.to_owned(),
+                                callee,
+                                Edge::calls(line).with_confidence(
+                                    0.7,
+                                    graphify_core::types::ConfidenceKind::Inferred,
+                                ),
+                            ));
+                        }
+                    }
+                    // `field_expression` (method-call on a value) and any
+                    // other shape stay out-of-scope: v1 policy per the
+                    // FEAT-031 task body's Boundaries section.
+                    _ => {}
                 }
             }
         }
@@ -812,5 +916,123 @@ impl Config {
             .filter(|e| e.2.kind == EdgeKind::Calls && e.1 == "validate")
             .collect();
         assert_eq!(calls.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-031: use_aliases + scoped_identifier call extraction
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn feat_031_use_alias_simple_identifier() {
+        let r = extract("use std::io;\n");
+        assert_eq!(
+            r.use_aliases.get("io").map(String::as_str),
+            Some("std::io"),
+            "short name `io` should alias to full path `std::io`"
+        );
+    }
+
+    #[test]
+    fn feat_031_use_alias_crate_scoped_path() {
+        let r = extract("use crate::types::Node;\n");
+        assert_eq!(
+            r.use_aliases.get("Node").map(String::as_str),
+            Some("crate::types::Node"),
+            "short name `Node` should alias to `crate::types::Node`"
+        );
+    }
+
+    #[test]
+    fn feat_031_use_alias_grouped_import() {
+        let r = extract("use std::{io, fs};\n");
+        assert_eq!(r.use_aliases.get("io").map(String::as_str), Some("std::io"));
+        assert_eq!(r.use_aliases.get("fs").map(String::as_str), Some("std::fs"));
+    }
+
+    #[test]
+    fn feat_031_use_alias_grouped_scoped() {
+        let r = extract("use crate::types::{Node, Edge};\n");
+        assert_eq!(
+            r.use_aliases.get("Node").map(String::as_str),
+            Some("crate::types::Node")
+        );
+        assert_eq!(
+            r.use_aliases.get("Edge").map(String::as_str),
+            Some("crate::types::Edge")
+        );
+    }
+
+    #[test]
+    fn feat_031_use_alias_as_clause() {
+        let r = extract("use std::io::Result as IoResult;\n");
+        // The local short name is the alias (`IoResult`), value is the full path.
+        assert_eq!(
+            r.use_aliases.get("IoResult").map(String::as_str),
+            Some("std::io::Result"),
+            "aliased imports should use the local alias as the key"
+        );
+        // The original short name `Result` should NOT shadow the alias.
+        assert!(
+            !r.use_aliases.contains_key("Result"),
+            "plain `Result` should not be registered when an `as` alias is present"
+        );
+    }
+
+    #[test]
+    fn feat_031_scoped_call_emits_edge() {
+        let r = extract(
+            "use crate::types::Node;\nfn build() { let _ = Node::module(\"x\", \"\", 0); }\n",
+        );
+        let scoped_calls: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls && e.1 == "Node::module")
+            .collect();
+        assert_eq!(
+            scoped_calls.len(),
+            1,
+            "scoped_identifier call `Node::module(...)` must emit a Calls edge"
+        );
+        assert_eq!(scoped_calls[0].2.confidence, 0.7);
+        assert_eq!(scoped_calls[0].2.confidence_kind, ConfidenceKind::Inferred);
+    }
+
+    #[test]
+    fn feat_031_deep_scoped_call_emits_edge() {
+        let r = extract("fn build() { let _ = foo::Bar::baz(); }\n");
+        let scoped_calls: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls && e.1 == "foo::Bar::baz")
+            .collect();
+        assert_eq!(
+            scoped_calls.len(),
+            1,
+            "deep scoped_identifier call `foo::Bar::baz()` must emit a Calls edge with full path"
+        );
+    }
+
+    #[test]
+    fn feat_031_scoped_call_in_impl_method_body() {
+        let r = extract(
+            r#"use crate::types::Node;
+struct G;
+impl G {
+    pub fn add(&self) {
+        let _ = Node::symbol("s");
+    }
+}
+"#,
+        );
+        let scoped_calls: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls && e.1 == "Node::symbol")
+            .collect();
+        assert_eq!(
+            scoped_calls.len(),
+            1,
+            "scoped calls inside impl method bodies must be captured"
+        );
     }
 }
