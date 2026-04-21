@@ -1,7 +1,7 @@
 ---
 uid: bug-017
 status: done
-priority: critical
+priority: high
 scheduled: 2026-04-21
 completed: 2026-04-21
 pomodoros: 0
