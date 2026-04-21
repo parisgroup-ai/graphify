@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cycles::find_sccs;
 use crate::graph::CodeGraph;
+use crate::types::ConfidenceKind;
 
 // ---------------------------------------------------------------------------
 // ScoringWeights
@@ -349,12 +350,23 @@ pub fn compute_metrics_with_thresholds(
         return Vec::new();
     }
 
-    // Raw metrics.
-    let raw_bt = betweenness_centrality(graph);
-    let raw_pr = pagerank(graph);
+    // FEAT-033: build a scoring view that drops edges the project marked as
+    // intentionally external (`ConfidenceKind::ExpectedExternal` via
+    // `[[project]].external_stubs`). All downstream inputs — betweenness,
+    // PageRank, in/out-degree, cycle membership, hotspot classification — run
+    // against the filtered graph so NodeMetrics uniformly reflects the
+    // actionable (internal + ambiguous) dependency structure. The full graph
+    // stays available for `query`/`explain`/report writers that need the raw
+    // edge set.
+    let scoring_graph =
+        graph.filter_edges(|e| e.confidence_kind != ConfidenceKind::ExpectedExternal);
+
+    // Raw metrics over the scoring view.
+    let raw_bt = betweenness_centrality(&scoring_graph);
+    let raw_pr = pagerank(&scoring_graph);
 
     // Precompute cycle membership ONCE (O(V+E)), not per-node.
-    let sccs = find_sccs(graph);
+    let sccs = find_sccs(&scoring_graph);
     let cycle_members: std::collections::HashSet<&str> = sccs
         .iter()
         .flat_map(|scc| scc.node_ids.iter().map(|s| s.as_str()))
@@ -363,7 +375,7 @@ pub fn compute_metrics_with_thresholds(
     // Build raw in_degree map (as f64 for normalization).
     let raw_id_f64: HashMap<String, f64> = ids
         .iter()
-        .map(|id| (id.clone(), graph.in_degree(id) as f64))
+        .map(|id| (id.clone(), scoring_graph.in_degree(id) as f64))
         .collect();
 
     // Normalize.
@@ -385,7 +397,7 @@ pub fn compute_metrics_with_thresholds(
                 + weights.in_degree * id_norm
                 + weights.in_cycle * ic;
 
-            let raw_in_deg = graph.in_degree(id);
+            let raw_in_deg = scoring_graph.in_degree(id);
             let raw_bt_val = raw_bt.get(id).copied().unwrap_or(0.0);
             let hotspot_type = classify(raw_in_deg, raw_bt_val, thresholds);
 
@@ -394,7 +406,7 @@ pub fn compute_metrics_with_thresholds(
                 betweenness: raw_bt_val,
                 pagerank: raw_pr.get(id).copied().unwrap_or(0.0),
                 in_degree: raw_in_deg,
-                out_degree: graph.out_degree(id),
+                out_degree: scoring_graph.out_degree(id),
                 in_cycle,
                 score,
                 community_id: 0,
@@ -704,6 +716,128 @@ mod tests {
         let metrics = compute_metrics_with_thresholds(&g, &ScoringWeights::default(), &thresholds);
         let a = metrics.iter().find(|m| m.id == "a").unwrap();
         assert_eq!(a.hotspot_type, HotspotType::Hub);
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-033: ExpectedExternal edges deprioritized in hotspot scoring
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn compute_metrics_filters_expected_external_edges_from_scoring() {
+        use crate::types::ConfidenceKind;
+
+        // local_hub has 2 legitimate (Extracted) incoming edges.
+        // external_stub has 4 ExpectedExternal incoming edges (should not count).
+        let mut g = CodeGraph::new();
+        for id in &["a", "b", "c", "d", "e", "local_hub", "external_stub"] {
+            g.add_node(module(id));
+        }
+        g.add_edge("a", "local_hub", Edge::imports(1));
+        g.add_edge("b", "local_hub", Edge::imports(2));
+        g.add_edge(
+            "a",
+            "external_stub",
+            Edge::imports(3).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+        g.add_edge(
+            "b",
+            "external_stub",
+            Edge::imports(4).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+        g.add_edge(
+            "c",
+            "external_stub",
+            Edge::imports(5).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+        g.add_edge(
+            "d",
+            "external_stub",
+            Edge::imports(6).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+
+        let weights = ScoringWeights {
+            betweenness: 0.0,
+            pagerank: 0.0,
+            in_degree: 1.0,
+            in_cycle: 0.0,
+        };
+        let metrics = compute_metrics(&g, &weights);
+
+        let hub = metrics.iter().find(|m| m.id == "local_hub").unwrap();
+        let ext = metrics.iter().find(|m| m.id == "external_stub").unwrap();
+
+        // external_stub loses all incoming signal when ExpectedExternal edges are filtered.
+        assert_eq!(
+            ext.in_degree, 0,
+            "ExpectedExternal in-edges must not count toward in_degree"
+        );
+        assert_eq!(
+            ext.score, 0.0,
+            "external hub should have score 0 once its only edges are filtered"
+        );
+
+        // local_hub keeps its 2 Extracted edges and must outrank the external.
+        assert_eq!(hub.in_degree, 2);
+        assert!(
+            hub.score > ext.score,
+            "local hotspot ({}) must outrank external ({})",
+            hub.score,
+            ext.score
+        );
+    }
+
+    #[test]
+    fn compute_metrics_keeps_all_nodes_after_filter() {
+        use crate::types::ConfidenceKind;
+
+        // A node whose only edges are ExpectedExternal must still appear in
+        // the output so `graphify query`/`explain` can look it up.
+        let mut g = CodeGraph::new();
+        g.add_node(module("local"));
+        g.add_node(module("external"));
+        g.add_edge(
+            "local",
+            "external",
+            Edge::imports(1).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+
+        let metrics = compute_metrics(&g, &ScoringWeights::default());
+        assert_eq!(metrics.len(), 2, "filtered nodes must still be reported");
+        assert!(metrics.iter().any(|m| m.id == "external"));
+    }
+
+    #[test]
+    fn compute_metrics_mixed_confidence_only_counts_non_external() {
+        use crate::types::ConfidenceKind;
+
+        // target has 1 Extracted + 3 ExpectedExternal incoming edges → in_degree should be 1.
+        let mut g = CodeGraph::new();
+        for id in &["src_a", "src_b", "src_c", "src_d", "target"] {
+            g.add_node(module(id));
+        }
+        g.add_edge("src_a", "target", Edge::imports(1));
+        g.add_edge(
+            "src_b",
+            "target",
+            Edge::imports(2).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+        g.add_edge(
+            "src_c",
+            "target",
+            Edge::imports(3).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+        g.add_edge(
+            "src_d",
+            "target",
+            Edge::imports(4).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+
+        let metrics = compute_metrics(&g, &ScoringWeights::default());
+        let target = metrics.iter().find(|m| m.id == "target").unwrap();
+        assert_eq!(
+            target.in_degree, 1,
+            "in_degree should count only the single non-external incoming edge"
+        );
     }
 
     #[test]

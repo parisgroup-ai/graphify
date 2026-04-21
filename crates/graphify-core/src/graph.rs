@@ -207,6 +207,42 @@ impl CodeGraph {
         self.graph.node_weights().collect()
     }
 
+    /// Returns a new `CodeGraph` containing every node but only edges for
+    /// which `keep(&edge)` returns `true`.
+    ///
+    /// Node IDs and their [`Node`] payloads are preserved exactly. Edge
+    /// payloads and weights are cloned. Used by metrics scoring (FEAT-033) to
+    /// build a view that excludes `ConfidenceKind::ExpectedExternal` edges
+    /// without mutating the original graph.
+    pub fn filter_edges<F>(&self, keep: F) -> CodeGraph
+    where
+        F: Fn(&Edge) -> bool,
+    {
+        let mut out = CodeGraph::new();
+        out.default_language = self.default_language.clone();
+
+        // Map source-graph NodeIndex → destination-graph NodeIndex so edges
+        // can be re-attached without touching the ID→index lookup table.
+        let mut remap: HashMap<NodeIndex, NodeIndex> =
+            HashMap::with_capacity(self.graph.node_count());
+        for idx in self.graph.node_indices() {
+            let new_idx = out.add_node(self.graph[idx].clone());
+            remap.insert(idx, new_idx);
+        }
+
+        for eref in self.graph.edge_references() {
+            let edge = eref.weight();
+            if !keep(edge) {
+                continue;
+            }
+            let src = remap[&eref.source()];
+            let tgt = remap[&eref.target()];
+            out.graph.add_edge(src, tgt, edge.clone());
+        }
+
+        out
+    }
+
     // -----------------------------------------------------------------------
     // Crate-internal accessors
     // -----------------------------------------------------------------------
@@ -609,5 +645,65 @@ mod tests {
         assert_eq!(edge.weight, 2);
         assert_eq!(edge.confidence, 1.0);
         assert_eq!(edge.confidence_kind, ConfidenceKind::Extracted);
+    }
+
+    // -----------------------------------------------------------------------
+    // filter_edges (FEAT-033 foundation)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn filter_edges_drops_matching_edges_and_keeps_all_nodes() {
+        use crate::types::ConfidenceKind;
+
+        let mut g = CodeGraph::new();
+        g.add_node(python_module("local.a", true));
+        g.add_node(python_module("local.b", true));
+        g.add_node(python_module("std.collections", false));
+
+        g.add_edge("local.a", "local.b", Edge::imports(1));
+        g.add_edge(
+            "local.a",
+            "std.collections",
+            Edge::imports(2).with_confidence(0.4, ConfidenceKind::ExpectedExternal),
+        );
+
+        let filtered = g.filter_edges(|e| e.confidence_kind != ConfidenceKind::ExpectedExternal);
+
+        // Every node survives, even the external one (hotspot list still lists it).
+        assert_eq!(filtered.node_count(), 3);
+        // Only the Extracted edge survives.
+        assert_eq!(filtered.edge_count(), 1);
+
+        // Filtered degrees reflect the dropped external edge.
+        assert_eq!(filtered.out_degree("local.a"), 1);
+        assert_eq!(filtered.in_degree("std.collections"), 0);
+        assert_eq!(filtered.in_degree("local.b"), 1);
+    }
+
+    #[test]
+    fn filter_edges_preserves_node_payloads() {
+        let mut g = CodeGraph::new();
+        g.add_node(Node::module(
+            "app.main",
+            "app/main.py",
+            Language::Python,
+            42,
+            true,
+        ));
+
+        let filtered = g.filter_edges(|_| true);
+
+        let n = filtered.get_node("app.main").expect("node should survive");
+        assert_eq!(n.line, 42);
+        assert_eq!(n.file_path.to_str().unwrap(), "app/main.py");
+        assert!(n.is_local);
+    }
+
+    #[test]
+    fn filter_edges_empty_graph_returns_empty() {
+        let g = CodeGraph::new();
+        let filtered = g.filter_edges(|_| true);
+        assert_eq!(filtered.node_count(), 0);
+        assert_eq!(filtered.edge_count(), 0);
     }
 }
