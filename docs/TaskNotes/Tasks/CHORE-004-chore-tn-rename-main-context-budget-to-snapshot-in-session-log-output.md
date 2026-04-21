@@ -1,8 +1,9 @@
 ---
 uid: chore-004
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-20
+completed: 2026-04-20
 timeEstimate: 45
 pomodoros: 0
 timeSpent: 3
