@@ -1,42 +1,41 @@
-# Session Brief — Next Session (post-2026-04-20 v0.11.2 release)
+# Session Brief — Next Session (post-2026-04-20 FEAT-029 benchmark close)
 
-**Last session:** 2026-04-20 (fourth session of the day, following the CHORE-006 + FEAT-030 close at `3ca4151`). Single-commit release session: bumped workspace version `0.11.1` → `0.11.2`, expanded CHANGELOG to cover both FEAT-030 (opt-out flag) and CHORE-006 (target/ untrack) under the new `[0.11.2] - 2026-04-20` heading, committed `e226bf0`, tagged `v0.11.2` explicitly at the commit SHA, pushed main + tags. CI (1m30s) and Release (5m10s) both green; 4 binary assets published.
+**Last session:** 2026-04-20 late evening (fifth session of the day, following the v0.11.2 release close at `21c5c7d`). FEAT-029 benchmark session — verified FEAT-028's "2,165 cross-project edges redistribute" claim quantitatively on `parisgroup-ai/cursos @ 8ff36cc1`. Three-round A/B/C pin×toml benchmark dispatched via `claude -p --dangerously-skip-permissions` in background, two restarts handling pre-condition mismatches (wrong toml expectation at pin; concurrent session mutating cursos HEAD mid-benchmark). Final run landed clean. Two commits shipped, both pushed; CI green (1m10s).
 
 ## Current State
 
-- Branch: `main` — advances by **1 commit** (`e226bf0` version bump), plus this close commit
-- Working tree clean. Tag `v0.11.2` pushed, release `v0.11.2` visible at github.com/parisgroup-ai/graphify/releases/tag/v0.11.2 with all 4 targets: aarch64/x86_64 × apple-darwin/unknown-linux-musl (sizes 3.0–3.5MB, consistent with CLAUDE.md expectation)
-- FEAT-030 opt-out flag (`[settings] workspace_reexport_graph = false`) is now available as a downloadable binary — downstream consumers like `parisgroup-ai/cursos` can adopt without building from source
-- No new tn tasks worked on this session; open backlog unchanged (3 open: FEAT-029, CHORE-004, CHORE-005)
+- Branch: `main` — **in sync with origin** (2 session commits pushed: `159758b` + `e45c82e`)
+- Working tree clean
+- Open tn backlog unchanged: `CHORE-004`, `CHORE-005` (both outside graphify codebase — tasknotes-cli + `/tn-plan-session` skill)
+- `v0.11.2` release from prior session remains the current published binary
 
-## Open Items (tn tasks)
+## What shipped this session
 
-- **FEAT-029** (open, ~1.5–2h with clone prereq) — cursos `cross_project_edges` redistribution benchmark. Same blocker as before: `parisgroup-ai/cursos` not checked out locally. With `v0.11.2` now published, the benchmark's `true` vs `false` axis can run against a CI-built binary instead of a HEAD build — slightly cleaner reproducibility
-- **CHORE-004** (open, ~45m) — tn-side rename (`main-context budget:` → `snapshot:`). Lives in tasknotes-cli source
-- **CHORE-005** (open, ~30m) — skill-side guard for `/tn-plan-session` step 8. Lives in the skill
-
-**Skill-side follow-up (not a graphify task, not tracked in tn):** commit-push skill's multi-session guard has a dead target/ special-case now that CHORE-006 shipped. Lives in `~/.claude/skills/commit-push/`. Safe to drop — `git status` stays clean through `cargo build --release`.
+- **`159758b`** — `docs(benchmarks): FEAT-029 verify cross-project edge redistribution on cursos (+14.3% vs claim)` — 5 files, 12,284 insertions (benchmark report + 3 summary JSONs + CLAUDE.md edit on the FEAT-028 paragraph)
+- **`e45c82e`** — `chore(tasks): close FEAT-029 as done`
 
 ## Decisions Made (don't re-debate)
 
 *(carried from prior sessions — see commit history + CLAUDE.md for full ledger)*
 
-*(added 2026-04-20 v0.11.2 release)*
+*(added 2026-04-20 FEAT-029 close)*
 
-- **CHANGELOG format: bundled CHORE-006 under `### Changed` in the `[0.11.2]` entry, not a separate patch release.** CHORE-006 and FEAT-030 landed in back-to-back commits in the same session; separating them into `v0.11.2` (FEAT-030 only) + `v0.11.3` (CHORE-006) would be ceremony without value. The CHANGELOG narrative makes the scope clear to users reading the release notes ("why did my tracked files change between v0.11.1 and v0.11.2")
-- **Ran local CI gates (`fmt --check` + `clippy -D warnings` + `test --workspace`) before push, not just `cargo build --release`.** CLAUDE.md's version-bump recipe only shows `cargo build`, but Release.yml doesn't run quality gates — pushing a tag without running the CI.yml-equivalent locally risks shipping a broken binary that still gets published (release builds succeed even when lint/tests would fail on CI.yml). Running them locally is cheap insurance; add to the recipe next time CLAUDE.md is touched
-- **Tag pinned at commit SHA (`git tag v0.11.2 e226bf0`), not at HEAD.** CLAUDE.md convention, motivated by the scenario where a follow-up commit lands before the release workflow picks up the tag — the tag ref is what the release binaries' filename derives from (`graphify-0.11.2-<target>`), so pinning it to the intended commit is the cheap guard
+- **"Option 1" benchmark methodology: A and B use pin's toml (`8ff36cc1`), C uses `main`'s toml.** Corpus is identical in all three rounds (detached HEAD at pin); only the config varies. Captured `main:graphify.toml` via `git show main:graphify.toml > /tmp/cursos-toml-main.txt` **before** the detached-HEAD checkout to avoid ref resolution ambiguity. The pin's toml was always pre-mitigation (only `allowlist=["logger"]`) because BUG-015's `suppress_barrel_cycles` was a response to FEAT-028's damage — temporally newer. Documented for reproducibility in the benchmark report § "Option 1".
+- **Redistribution claim is confirmed within +14.3%** (measured +2,475 edges, claimed ~2,165). Nuance recorded: effect is **both redistributive and additive** — not just "barrels rerouting to canonical packages" but also "pkg-api→@repo/* alias edges that the pre-0.11 extractor didn't emit". Net +2,475 = ~+4,000 new pkg-api→@repo/* edges minus ~−1,600 consumer-app→barrel redistributions.
+- **Mitigation is zero-cost observability layer.** `[consolidation] suppress_barrel_cycles=true` + `allowlist=["logger","src"]` removes 541 synthetic cycles (99.8%) with 0 impact on edge count or graph shape. Pure filter over cycle detection + hotspot gating.
+- **Conflict resolution on stash pop: take HEAD version when concurrent session finalized the affected work.** Parallel Claude instance committed `dde8d67d3` (CHORE-1346 close) while the benchmark ran, mutating the same `CHORE-1346-*.md` that was in the benchmark's stash. Resolved with `git checkout --ours` (HEAD=done) because the stash preserved an obsolete in-progress state (open timer from before the concurrent session finished).
+- **Running `claude -p --dangerously-skip-permissions` in background is the right dispatch shape for long multi-step benchmarks.** ~8m total across 3 graphify runs + report + CLAUDE.md edit. Two restarts were legitimate pauses (pre-condition checks) — the subagent stopped cleanly and asked instead of contorting. Stashes were preserved across restarts. Total wall clock felt longer but no rework.
 
 ## Suggested Next Steps
 
-1. **FEAT-029 benchmark** (still blocked on cursos clone). Now has a published `v0.11.2` binary to reference, so the `workspace_reexport_graph = true|false` comparison axis is cleaner. If you want to unblock: clone `parisgroup-ai/cursos` into `~/ai/cursos` or supply an existing path, then run the three-point benchmark
-2. **Skill-side cleanup** — drop commit-push skill's target/ special-case (dead code post-CHORE-006). Not a graphify session, live in skill source
-3. **CHORE-004 / CHORE-005** — both live outside graphify (tasknotes-cli source + `/tn-plan-session` skill)
-4. **If idle:** graphify's own architectural health hasn't been self-analysed recently. Consider running `graphify run` against the graphify workspace itself (would need a `graphify.toml` checked in — currently absent). Could surface dogfooding insights for the Rust extractor (note: Rust support exists per FEAT-003)
+1. **Close the other two backlog items if appetite surfaces:** `CHORE-004` (tn-side, rename `main-context budget:` → `snapshot:` in tn session log) lives in `parisgroup-ai/tasknotes-cli`; `CHORE-005` (skill-side, step 8 guard in `/tn-plan-session`) lives in `~/.claude/skills/tn-plan-session/`. Both are small (~30–45m each). Neither is graphify code.
+2. **Dogfood graphify on itself** — `graphify.toml` is NOT checked into this repo. Configuring a self-analysis run against the graphify workspace could surface Rust-extractor dogfooding insights (FEAT-003 added Rust support). Would need a `graphify.toml` at repo root with 5 `[[project]]` entries for the 5 crates. Nice-to-have, not urgent.
+3. **Consider publishing the graphify skills upstream.** Skills Sync flagged 18 local-only skills including `graphify-drift-check`, `graphify-onboarding`, `graphify-refactor-plan`. These ship via `graphify install-integrations` today but don't live in `ai-skills-parisgroup` — other operators wouldn't get them without installing graphify locally first. If intentional (delivery channel = graphify binary), leave as-is.
+4. **Cleanup optional:** `/tmp/` artifacts already cleared at session close; no residual debt.
 
 ## Meta Learnings This Session
 
-- **Single-commit release sessions are the cleanest shape.** CHORE-006 + FEAT-030 shipped in the previous session; bundling the release bump into that session would have crossed the "don't mix feature commits with release bumps" line. Separating into a dedicated release session produced 1 focused commit, 1 tag, 1 CHANGELOG edit — easy to review, easy to revert if needed. The trade-off (one extra commit in the log) is worth it
-- **The CHANGELOG `[Unreleased]` → versioned-heading promotion is the canonical ritual.** Keep-a-Changelog style keeps `[Unreleased]` as a permanent landing pad; at release time, duplicate the heading with the version + date and leave the empty `[Unreleased]` above it. New entries always land in the right place on the next cycle without reformatting
-- **CI + Release parallelism matters more than perceived.** Release.yml ran 5m10s (4-target matrix builds), CI.yml ran 1m30s — total wall clock was the Release duration, not the sum, because they kicked off from the same push simultaneously. If CI had been required to finish before Release started, every release would add ~1m30s minimum. The split-workflow-design-per-CLAUDE.md choice is cheaper than it looks
-- **Running graphify's own CI gates locally before push is cheaper than recovering from a failed CI run.** `fmt --check` + `clippy -D warnings` + `test --workspace` together took ~20s on this machine post-first-compile. A failed CI run after tag push would require either a `v0.11.3` patch bump (wastes a version number) or `git tag -d` + `git push --delete tag` + retag (risky, especially if someone already pulled the broken tag). The 20s local check is always the right call
+- **Multi-instance safety relies on stash discipline, not avoidance.** The benchmark ran successfully across two concurrent Claude sessions touching `parisgroup-ai/cursos`. Each run's stash carried a distinct message tag (`feat-029-benchmark-<epoch>`); the other instance's commits happened on main while the benchmark was in detached HEAD. The only friction was the final `stash pop` conflict, which was resolvable by semantic inspection (in-progress obsolete vs. committed done). **Takeaway:** `git stash push -u -m "<scope>-<epoch>"` is the right defensive pattern for any `claude -p` that touches a shared working tree.
+- **Buffered `claude -p` stdout looks like a hang.** The background run's `/tmp/*.log` was 0 bytes for ~8 minutes while the subprocess was active (state R on CPU). Confirming liveness via `ps` state column + `/tmp/cursos-benchmark/` mtimes was the right move instead of killing. Recorded here because the temptation to interrupt grows with silence.
+- **Pre-condition pauses save more time than they cost.** Both restart cycles were triggered by the subagent detecting state mismatch (wrong toml in v1, wrong HEAD + dirty tree in v2). Each restart was ~30s of human-in-the-loop review + prompt regeneration. The alternative (letting the subagent power through with a broken assumption) would have produced a bogus report that's expensive to catch and more expensive to invalidate.
+- **The CLAUDE.md FEAT-028 paragraph now ends on a positive measurement, not a pending follow-up.** Small thing, but every follow-up that escapes from "tracked but unverified" into "verified with numbers" reduces the ambient noise of the memory file. Worth the churn.
