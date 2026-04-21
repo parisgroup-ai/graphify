@@ -2376,4 +2376,48 @@ mod tests {
         assert_eq!(resolved, "foo");
         assert!(!is_local);
     }
+
+    #[test]
+    fn bug_019_go_bare_call_synthesizes_same_module_qualified_id() {
+        // Go parity test. The Go extractor emits bare Calls targets for
+        // `identifier` callees (see `go.rs::extract_calls_recursive`).
+        // Defines emits fully qualified symbol ids like `cmd.main.NewHandler`
+        // (see `go.rs::extract_function_declaration` at symbol_id = format!("{}.{}", module, name)).
+        // After BUG-018's Defines-target registration pass, those ids live in
+        // `known_modules`, so case 8.5's synthesis must promote the bare call
+        // shape to the qualified local id — same mechanism as Rust, language-
+        // agnostic by design.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.register_module("cmd.main");
+        resolver.register_module("cmd.main.NewHandler");
+
+        let (resolved, is_local, conf) = resolver.resolve("NewHandler", "cmd.main", false);
+        assert_eq!(resolved, "cmd.main.NewHandler");
+        assert!(is_local, "Go same-package bare call must resolve as local");
+        assert_eq!(conf, 1.0, "direct known-modules hit → confidence 1.0");
+    }
+
+    #[test]
+    fn bug_019_php_bare_call_synthesizes_same_module_qualified_id() {
+        // PHP parity test. The PHP extractor emits bare Calls targets for
+        // `name` callees inside `function_call_expression` (see
+        // `php.rs::extract_calls_recursive`). Defines emits fully qualified
+        // symbol ids like `App.Services.Main.helper` (see
+        // `php.rs::extract_function_declaration` at symbol_id = format!("{}.{}", ...)).
+        // Case 8.5 must fire on PHP bare calls too — the `.` check in the
+        // guard only rejects `.` in `raw`; a multi-segment `from_module`
+        // (PHP namespaces are typically `App\Services\Main` → normalized
+        // `App.Services.Main`) flows through correctly.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.register_module("App.Services.Main");
+        resolver.register_module("App.Services.Main.helper");
+
+        let (resolved, is_local, conf) = resolver.resolve("helper", "App.Services.Main", false);
+        assert_eq!(resolved, "App.Services.Main.helper");
+        assert!(
+            is_local,
+            "PHP same-namespace bare call must resolve as local"
+        );
+        assert_eq!(conf, 1.0, "direct known-modules hit → confidence 1.0");
+    }
 }
