@@ -209,3 +209,87 @@ local_prefix = "src"
         "std-library calls without `use` must not be spuriously promoted to local: {bogus_promotions:#?}"
     );
 }
+
+#[test]
+fn bug_018_local_calls_edge_keeps_extractor_confidence() {
+    // BUG-018: pre-fix, a scoped call `Node::module()` resolved to
+    // `src.types.Node.module` via the FEAT-031 `use`-alias fallback, but the
+    // resolver's `known_modules` only contained module-level ids — not the
+    // symbol-level `src.types.Node.module` — so `is_local` came back false,
+    // the pipeline's non-local downgrade ran, and the edge landed at
+    // `confidence: 0.5, kind: Ambiguous`. The extractor's contract was
+    // `0.7/Inferred`, and since the target actually is local, that's what we
+    // should see after resolution.
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = tmp.path().join("crate");
+    write_fixture(&repo);
+
+    let config_path = tmp.path().join("graphify.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"[settings]
+output = "."
+format = ["json"]
+
+[[project]]
+name = "crate"
+repo = "{}"
+lang = ["rust"]
+local_prefix = "src"
+"#,
+            repo.to_string_lossy(),
+        ),
+    )
+    .expect("write config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_graphify"))
+        .args([
+            "run",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--output",
+            tmp.path().to_str().unwrap(),
+            "--force",
+        ])
+        .output()
+        .expect("spawn graphify");
+    assert!(
+        output.status.success(),
+        "graphify run failed\n  stdout: {}\n  stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let graph: Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("crate/graph.json")).expect("read graph.json"),
+    )
+    .expect("parse graph.json");
+
+    let call_edge = graph["links"]
+        .as_array()
+        .expect("links array")
+        .iter()
+        .find(|link| {
+            link["kind"].as_str() == Some("Calls")
+                && link["source"].as_str() == Some("src.graph")
+                && link["target"].as_str() == Some("src.types.Node.module")
+        })
+        .unwrap_or_else(|| panic!("Calls edge missing; pipeline regression — got:\n{graph:#}"));
+
+    let kind = call_edge["confidence_kind"]
+        .as_str()
+        .expect("confidence_kind is a string");
+    assert_ne!(
+        kind, "Ambiguous",
+        "BUG-018 regression: local Calls edge tagged Ambiguous instead of Inferred\n  edge: {call_edge:#}",
+    );
+
+    let conf = call_edge["confidence"]
+        .as_f64()
+        .expect("confidence is a number");
+    assert!(
+        conf >= 0.7 - f64::EPSILON,
+        "BUG-018 regression: local Calls edge confidence {conf} is below the extractor floor 0.7 — the non-local cap still fired",
+    );
+}

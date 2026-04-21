@@ -2472,6 +2472,17 @@ fn run_extract_with_workspace(
         }
     }
 
+    // BUG-018: Register symbol-level `Defines` targets as known local modules
+    // so Calls edges that resolve to them (via FEAT-031's `use`-alias fallback,
+    // or directly by name) keep their extractor confidence instead of being
+    // downgraded to Ambiguous/0.5 by the non-local rule. Runs after barrel
+    // collapse so only canonical ids are registered.
+    for (_src_id, raw_target, edge) in &all_raw_edges {
+        if edge.kind == graphify_core::types::EdgeKind::Defines {
+            resolver.register_module(raw_target);
+        }
+    }
+
     // Build graph: add all nodes first.
     let mut graph = CodeGraph::new();
 

@@ -280,6 +280,15 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
         all_raw_edges.extend(result.edges);
     }
 
+    // BUG-018: Register symbol-level `Defines` targets as known local modules
+    // so Calls edges resolving to them keep their extractor confidence instead
+    // of being downgraded to Ambiguous/0.5 by the non-local rule.
+    for (_src_id, raw_target, edge) in &all_raw_edges {
+        if edge.kind == graphify_core::types::EdgeKind::Defines {
+            resolver.register_module(raw_target);
+        }
+    }
+
     let mut graph = CodeGraph::new();
 
     if let Some(lang) = languages.first() {
