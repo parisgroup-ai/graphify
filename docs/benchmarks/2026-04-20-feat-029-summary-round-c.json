@@ -1,0 +1,4218 @@
+{
+  "cross_dependencies": [
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 13
+      },
+      "edge_count": 13,
+      "from_project": "ana-service",
+      "shared_modules": 1,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 18
+      },
+      "edge_count": 18,
+      "from_project": "ana-service",
+      "shared_modules": 1,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 4,
+        "defines": 5,
+        "imports": 8
+      },
+      "edge_count": 17,
+      "from_project": "api",
+      "shared_modules": 12,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 0
+      },
+      "edge_count": 1,
+      "from_project": "api",
+      "shared_modules": 1,
+      "to_project": "mobile"
+    },
+    {
+      "by_kind": {
+        "calls": 13,
+        "defines": 0,
+        "imports": 16
+      },
+      "edge_count": 29,
+      "from_project": "api",
+      "shared_modules": 18,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 4,
+        "defines": 0,
+        "imports": 7
+      },
+      "edge_count": 11,
+      "from_project": "api",
+      "shared_modules": 3,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 4,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 7,
+      "from_project": "api",
+      "shared_modules": 2,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 4,
+        "defines": 0,
+        "imports": 0
+      },
+      "edge_count": 4,
+      "from_project": "api",
+      "shared_modules": 1,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 5,
+        "defines": 0,
+        "imports": 9
+      },
+      "edge_count": 14,
+      "from_project": "api",
+      "shared_modules": 6,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 10
+      },
+      "edge_count": 10,
+      "from_project": "mcp-server",
+      "shared_modules": 1,
+      "to_project": "ana-service"
+    },
+    {
+      "by_kind": {
+        "calls": 4,
+        "defines": 5,
+        "imports": 6
+      },
+      "edge_count": 15,
+      "from_project": "mcp-server",
+      "shared_modules": 12,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 81,
+        "defines": 6,
+        "imports": 104
+      },
+      "edge_count": 191,
+      "from_project": "mcp-server",
+      "shared_modules": 50,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 53,
+        "defines": 0,
+        "imports": 66
+      },
+      "edge_count": 119,
+      "from_project": "mcp-server",
+      "shared_modules": 15,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 31
+      },
+      "edge_count": 31,
+      "from_project": "mcp-server",
+      "shared_modules": 5,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 58,
+        "defines": 0,
+        "imports": 57
+      },
+      "edge_count": 115,
+      "from_project": "mcp-server",
+      "shared_modules": 14,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 10,
+        "defines": 0,
+        "imports": 5
+      },
+      "edge_count": 15,
+      "from_project": "mcp-server",
+      "shared_modules": 9,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 8
+      },
+      "edge_count": 8,
+      "from_project": "mcp-server",
+      "shared_modules": 2,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 30
+      },
+      "edge_count": 30,
+      "from_project": "mcp-server",
+      "shared_modules": 5,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 16,
+        "defines": 0,
+        "imports": 16
+      },
+      "edge_count": 32,
+      "from_project": "mcp-server",
+      "shared_modules": 18,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 74,
+        "defines": 9,
+        "imports": 37
+      },
+      "edge_count": 120,
+      "from_project": "mcp-server",
+      "shared_modules": 28,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 58,
+        "defines": 0,
+        "imports": 132
+      },
+      "edge_count": 190,
+      "from_project": "mcp-server",
+      "shared_modules": 33,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 2,
+        "defines": 0,
+        "imports": 0
+      },
+      "edge_count": 2,
+      "from_project": "mobile",
+      "shared_modules": 1,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 2,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 3,
+      "from_project": "mobile",
+      "shared_modules": 2,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 49
+      },
+      "edge_count": 49,
+      "from_project": "mobile",
+      "shared_modules": 1,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 2,
+      "from_project": "mobile",
+      "shared_modules": 2,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 168,
+        "defines": 0,
+        "imports": 72
+      },
+      "edge_count": 240,
+      "from_project": "mobile",
+      "shared_modules": 21,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 269,
+        "defines": 0,
+        "imports": 579
+      },
+      "edge_count": 848,
+      "from_project": "pkg-api",
+      "shared_modules": 19,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 663,
+        "defines": 6,
+        "imports": 866
+      },
+      "edge_count": 1535,
+      "from_project": "pkg-api",
+      "shared_modules": 53,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 2,
+      "from_project": "pkg-api",
+      "shared_modules": 2,
+      "to_project": "mobile"
+    },
+    {
+      "by_kind": {
+        "calls": 492,
+        "defines": 0,
+        "imports": 864
+      },
+      "edge_count": 1356,
+      "from_project": "pkg-api",
+      "shared_modules": 37,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 263,
+        "defines": 0,
+        "imports": 583
+      },
+      "edge_count": 846,
+      "from_project": "pkg-api",
+      "shared_modules": 14,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 896,
+        "defines": 2,
+        "imports": 921
+      },
+      "edge_count": 1819,
+      "from_project": "pkg-api",
+      "shared_modules": 54,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 516
+      },
+      "edge_count": 516,
+      "from_project": "pkg-api",
+      "shared_modules": 3,
+      "to_project": "pkg-llm-costs"
+    },
+    {
+      "by_kind": {
+        "calls": 8,
+        "defines": 0,
+        "imports": 534
+      },
+      "edge_count": 542,
+      "from_project": "pkg-api",
+      "shared_modules": 6,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 539
+      },
+      "edge_count": 540,
+      "from_project": "pkg-api",
+      "shared_modules": 11,
+      "to_project": "pkg-resilience"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 549
+      },
+      "edge_count": 549,
+      "from_project": "pkg-api",
+      "shared_modules": 12,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 6,
+        "defines": 0,
+        "imports": 719
+      },
+      "edge_count": 725,
+      "from_project": "pkg-api",
+      "shared_modules": 18,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 260,
+        "defines": 0,
+        "imports": 509
+      },
+      "edge_count": 769,
+      "from_project": "pkg-api",
+      "shared_modules": 4,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 609,
+        "defines": 0,
+        "imports": 654
+      },
+      "edge_count": 1263,
+      "from_project": "pkg-api",
+      "shared_modules": 15,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 759,
+        "defines": 0,
+        "imports": 598
+      },
+      "edge_count": 1357,
+      "from_project": "pkg-api",
+      "shared_modules": 59,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 2,
+      "from_project": "pkg-database",
+      "shared_modules": 1,
+      "to_project": "ana-service"
+    },
+    {
+      "by_kind": {
+        "calls": 11,
+        "defines": 0,
+        "imports": 62
+      },
+      "edge_count": 73,
+      "from_project": "pkg-database",
+      "shared_modules": 15,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 9,
+        "defines": 0,
+        "imports": 276
+      },
+      "edge_count": 285,
+      "from_project": "pkg-database",
+      "shared_modules": 36,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 4
+      },
+      "edge_count": 4,
+      "from_project": "pkg-database",
+      "shared_modules": 3,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 8,
+        "defines": 0,
+        "imports": 73
+      },
+      "edge_count": 81,
+      "from_project": "pkg-database",
+      "shared_modules": 13,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 4
+      },
+      "edge_count": 4,
+      "from_project": "pkg-database",
+      "shared_modules": 3,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-database",
+      "shared_modules": 1,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 3,
+        "defines": 0,
+        "imports": 6
+      },
+      "edge_count": 9,
+      "from_project": "pkg-database",
+      "shared_modules": 4,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 4
+      },
+      "edge_count": 5,
+      "from_project": "pkg-database",
+      "shared_modules": 4,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 8,
+        "defines": 0,
+        "imports": 44
+      },
+      "edge_count": 52,
+      "from_project": "pkg-database",
+      "shared_modules": 7,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 19,
+        "defines": 0,
+        "imports": 69
+      },
+      "edge_count": 88,
+      "from_project": "pkg-database",
+      "shared_modules": 21,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 4,
+      "from_project": "pkg-email",
+      "shared_modules": 3,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 63
+      },
+      "edge_count": 63,
+      "from_project": "pkg-email",
+      "shared_modules": 6,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 101
+      },
+      "edge_count": 101,
+      "from_project": "pkg-email",
+      "shared_modules": 1,
+      "to_project": "mobile"
+    },
+    {
+      "by_kind": {
+        "calls": 40,
+        "defines": 0,
+        "imports": 68
+      },
+      "edge_count": 108,
+      "from_project": "pkg-email",
+      "shared_modules": 13,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-email",
+      "shared_modules": 3,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 40,
+        "defines": 0,
+        "imports": 7
+      },
+      "edge_count": 47,
+      "from_project": "pkg-email",
+      "shared_modules": 9,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-email",
+      "shared_modules": 1,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 58
+      },
+      "edge_count": 58,
+      "from_project": "pkg-email",
+      "shared_modules": 2,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 2
+      },
+      "edge_count": 2,
+      "from_project": "pkg-email",
+      "shared_modules": 2,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 2,
+      "from_project": "pkg-email",
+      "shared_modules": 2,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-email",
+      "shared_modules": 1,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 53,
+        "defines": 0,
+        "imports": 166
+      },
+      "edge_count": 219,
+      "from_project": "pkg-email",
+      "shared_modules": 15,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 87,
+        "defines": 0,
+        "imports": 94
+      },
+      "edge_count": 181,
+      "from_project": "pkg-jobs",
+      "shared_modules": 3,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 68,
+        "defines": 0,
+        "imports": 107
+      },
+      "edge_count": 175,
+      "from_project": "pkg-jobs",
+      "shared_modules": 15,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 215,
+        "defines": 2,
+        "imports": 229
+      },
+      "edge_count": 446,
+      "from_project": "pkg-jobs",
+      "shared_modules": 56,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 57,
+        "defines": 0,
+        "imports": 113
+      },
+      "edge_count": 170,
+      "from_project": "pkg-jobs",
+      "shared_modules": 14,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 103,
+        "defines": 0,
+        "imports": 123
+      },
+      "edge_count": 226,
+      "from_project": "pkg-jobs",
+      "shared_modules": 10,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 87
+      },
+      "edge_count": 87,
+      "from_project": "pkg-jobs",
+      "shared_modules": 1,
+      "to_project": "pkg-llm-costs"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 88
+      },
+      "edge_count": 89,
+      "from_project": "pkg-jobs",
+      "shared_modules": 3,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 91
+      },
+      "edge_count": 91,
+      "from_project": "pkg-jobs",
+      "shared_modules": 4,
+      "to_project": "pkg-resilience"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 88
+      },
+      "edge_count": 88,
+      "from_project": "pkg-jobs",
+      "shared_modules": 2,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 106
+      },
+      "edge_count": 106,
+      "from_project": "pkg-jobs",
+      "shared_modules": 6,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 87,
+        "defines": 0,
+        "imports": 88
+      },
+      "edge_count": 175,
+      "from_project": "pkg-jobs",
+      "shared_modules": 3,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 58,
+        "defines": 0,
+        "imports": 101
+      },
+      "edge_count": 159,
+      "from_project": "pkg-jobs",
+      "shared_modules": 8,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 162,
+        "defines": 0,
+        "imports": 78
+      },
+      "edge_count": 240,
+      "from_project": "pkg-jobs",
+      "shared_modules": 22,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 4
+      },
+      "edge_count": 4,
+      "from_project": "pkg-llm-costs",
+      "shared_modules": 2,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-llm-costs",
+      "shared_modules": 1,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-llm-costs",
+      "shared_modules": 1,
+      "to_project": "pkg-resilience"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-llm-costs",
+      "shared_modules": 1,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-llm-costs",
+      "shared_modules": 1,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 4,
+        "defines": 0,
+        "imports": 6
+      },
+      "edge_count": 10,
+      "from_project": "pkg-logger",
+      "shared_modules": 10,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 3,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 6,
+      "from_project": "pkg-logger",
+      "shared_modules": 5,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-logger",
+      "shared_modules": 3,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-logger",
+      "shared_modules": 1,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 2,
+      "from_project": "pkg-logger",
+      "shared_modules": 2,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 10
+      },
+      "edge_count": 10,
+      "from_project": "pkg-logger",
+      "shared_modules": 1,
+      "to_project": "pkg-llm-costs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 10
+      },
+      "edge_count": 10,
+      "from_project": "pkg-logger",
+      "shared_modules": 1,
+      "to_project": "pkg-resilience"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-logger",
+      "shared_modules": 1,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 11
+      },
+      "edge_count": 11,
+      "from_project": "pkg-logger",
+      "shared_modules": 2,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 4,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 7,
+      "from_project": "pkg-logger",
+      "shared_modules": 7,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 12
+      },
+      "edge_count": 12,
+      "from_project": "pkg-logger",
+      "shared_modules": 3,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 4
+      },
+      "edge_count": 4,
+      "from_project": "pkg-logger",
+      "shared_modules": 4,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 14
+      },
+      "edge_count": 15,
+      "from_project": "pkg-resilience",
+      "shared_modules": 10,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 6
+      },
+      "edge_count": 6,
+      "from_project": "pkg-resilience",
+      "shared_modules": 3,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-resilience",
+      "shared_modules": 1,
+      "to_project": "pkg-llm-costs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-resilience",
+      "shared_modules": 1,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-resilience",
+      "shared_modules": 1,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-resilience",
+      "shared_modules": 1,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-types",
+      "shared_modules": 3,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 11
+      },
+      "edge_count": 11,
+      "from_project": "pkg-types",
+      "shared_modules": 11,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-types",
+      "shared_modules": 1,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 2
+      },
+      "edge_count": 2,
+      "from_project": "pkg-types",
+      "shared_modules": 2,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-types",
+      "shared_modules": 1,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-types",
+      "shared_modules": 1,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 2
+      },
+      "edge_count": 2,
+      "from_project": "pkg-types",
+      "shared_modules": 2,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-types",
+      "shared_modules": 1,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 2
+      },
+      "edge_count": 2,
+      "from_project": "pkg-types",
+      "shared_modules": 2,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 3
+      },
+      "edge_count": 3,
+      "from_project": "pkg-types",
+      "shared_modules": 3,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 16
+      },
+      "edge_count": 16,
+      "from_project": "pkg-validators",
+      "shared_modules": 5,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 29
+      },
+      "edge_count": 30,
+      "from_project": "pkg-validators",
+      "shared_modules": 17,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 1,
+        "defines": 0,
+        "imports": 13
+      },
+      "edge_count": 14,
+      "from_project": "pkg-validators",
+      "shared_modules": 4,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 2
+      },
+      "edge_count": 2,
+      "from_project": "pkg-validators",
+      "shared_modules": 2,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 6
+      },
+      "edge_count": 6,
+      "from_project": "pkg-validators",
+      "shared_modules": 5,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 6
+      },
+      "edge_count": 6,
+      "from_project": "pkg-validators",
+      "shared_modules": 1,
+      "to_project": "pkg-llm-costs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 7
+      },
+      "edge_count": 7,
+      "from_project": "pkg-validators",
+      "shared_modules": 2,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 6
+      },
+      "edge_count": 6,
+      "from_project": "pkg-validators",
+      "shared_modules": 1,
+      "to_project": "pkg-resilience"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 2
+      },
+      "edge_count": 2,
+      "from_project": "pkg-validators",
+      "shared_modules": 2,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 1
+      },
+      "edge_count": 1,
+      "from_project": "pkg-validators",
+      "shared_modules": 1,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 7
+      },
+      "edge_count": 7,
+      "from_project": "pkg-validators",
+      "shared_modules": 2,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 2,
+        "defines": 0,
+        "imports": 14
+      },
+      "edge_count": 16,
+      "from_project": "pkg-validators",
+      "shared_modules": 6,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 24,
+        "defines": 0,
+        "imports": 24
+      },
+      "edge_count": 48,
+      "from_project": "tostudy-cli",
+      "shared_modules": 2,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 12,
+        "defines": 0,
+        "imports": 95
+      },
+      "edge_count": 107,
+      "from_project": "tostudy-cli",
+      "shared_modules": 19,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 2,
+        "defines": 0,
+        "imports": 7
+      },
+      "edge_count": 9,
+      "from_project": "tostudy-cli",
+      "shared_modules": 2,
+      "to_project": "mobile"
+    },
+    {
+      "by_kind": {
+        "calls": 24,
+        "defines": 0,
+        "imports": 29
+      },
+      "edge_count": 53,
+      "from_project": "tostudy-cli",
+      "shared_modules": 4,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 2,
+        "defines": 0,
+        "imports": 61
+      },
+      "edge_count": 63,
+      "from_project": "tostudy-cli",
+      "shared_modules": 5,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 24,
+        "defines": 0,
+        "imports": 25
+      },
+      "edge_count": 49,
+      "from_project": "tostudy-cli",
+      "shared_modules": 3,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 24,
+        "defines": 0,
+        "imports": 25
+      },
+      "edge_count": 49,
+      "from_project": "tostudy-cli",
+      "shared_modules": 3,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 24
+      },
+      "edge_count": 24,
+      "from_project": "tostudy-cli",
+      "shared_modules": 1,
+      "to_project": "pkg-llm-costs"
+    },
+    {
+      "by_kind": {
+        "calls": 8,
+        "defines": 0,
+        "imports": 61
+      },
+      "edge_count": 69,
+      "from_project": "tostudy-cli",
+      "shared_modules": 8,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 24
+      },
+      "edge_count": 24,
+      "from_project": "tostudy-cli",
+      "shared_modules": 1,
+      "to_project": "pkg-resilience"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 25
+      },
+      "edge_count": 25,
+      "from_project": "tostudy-cli",
+      "shared_modules": 2,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 25
+      },
+      "edge_count": 25,
+      "from_project": "tostudy-cli",
+      "shared_modules": 2,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 50
+      },
+      "edge_count": 50,
+      "from_project": "tostudy-cli",
+      "shared_modules": 4,
+      "to_project": "tostudy-core"
+    },
+    {
+      "by_kind": {
+        "calls": 29,
+        "defines": 0,
+        "imports": 38
+      },
+      "edge_count": 67,
+      "from_project": "tostudy-cli",
+      "shared_modules": 9,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 23
+      },
+      "edge_count": 23,
+      "from_project": "tostudy-core",
+      "shared_modules": 1,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 66,
+        "defines": 9,
+        "imports": 54
+      },
+      "edge_count": 129,
+      "from_project": "tostudy-core",
+      "shared_modules": 29,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 56,
+        "defines": 0,
+        "imports": 42
+      },
+      "edge_count": 98,
+      "from_project": "tostudy-core",
+      "shared_modules": 15,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 31,
+        "defines": 0,
+        "imports": 44
+      },
+      "edge_count": 75,
+      "from_project": "tostudy-core",
+      "shared_modules": 8,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 24
+      },
+      "edge_count": 24,
+      "from_project": "tostudy-core",
+      "shared_modules": 2,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 37,
+        "defines": 0,
+        "imports": 40
+      },
+      "edge_count": 77,
+      "from_project": "tostudy-core",
+      "shared_modules": 8,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 41
+      },
+      "edge_count": 41,
+      "from_project": "tostudy-core",
+      "shared_modules": 2,
+      "to_project": "pkg-llm-costs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 46
+      },
+      "edge_count": 46,
+      "from_project": "tostudy-core",
+      "shared_modules": 4,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 41
+      },
+      "edge_count": 41,
+      "from_project": "tostudy-core",
+      "shared_modules": 2,
+      "to_project": "pkg-resilience"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 26
+      },
+      "edge_count": 26,
+      "from_project": "tostudy-core",
+      "shared_modules": 3,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 42
+      },
+      "edge_count": 42,
+      "from_project": "tostudy-core",
+      "shared_modules": 3,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 32
+      },
+      "edge_count": 32,
+      "from_project": "tostudy-core",
+      "shared_modules": 4,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 29,
+        "defines": 0,
+        "imports": 30
+      },
+      "edge_count": 59,
+      "from_project": "tostudy-core",
+      "shared_modules": 15,
+      "to_project": "web"
+    },
+    {
+      "by_kind": {
+        "calls": 168,
+        "defines": 0,
+        "imports": 272
+      },
+      "edge_count": 440,
+      "from_project": "web",
+      "shared_modules": 6,
+      "to_project": "api"
+    },
+    {
+      "by_kind": {
+        "calls": 34,
+        "defines": 0,
+        "imports": 343
+      },
+      "edge_count": 377,
+      "from_project": "web",
+      "shared_modules": 33,
+      "to_project": "mcp-server"
+    },
+    {
+      "by_kind": {
+        "calls": 1253,
+        "defines": 0,
+        "imports": 918
+      },
+      "edge_count": 2171,
+      "from_project": "web",
+      "shared_modules": 21,
+      "to_project": "mobile"
+    },
+    {
+      "by_kind": {
+        "calls": 228,
+        "defines": 0,
+        "imports": 512
+      },
+      "edge_count": 740,
+      "from_project": "web",
+      "shared_modules": 58,
+      "to_project": "pkg-api"
+    },
+    {
+      "by_kind": {
+        "calls": 19,
+        "defines": 0,
+        "imports": 96
+      },
+      "edge_count": 115,
+      "from_project": "web",
+      "shared_modules": 21,
+      "to_project": "pkg-database"
+    },
+    {
+      "by_kind": {
+        "calls": 179,
+        "defines": 0,
+        "imports": 904
+      },
+      "edge_count": 1083,
+      "from_project": "web",
+      "shared_modules": 14,
+      "to_project": "pkg-email"
+    },
+    {
+      "by_kind": {
+        "calls": 203,
+        "defines": 0,
+        "imports": 130
+      },
+      "edge_count": 333,
+      "from_project": "web",
+      "shared_modules": 23,
+      "to_project": "pkg-jobs"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 7
+      },
+      "edge_count": 7,
+      "from_project": "web",
+      "shared_modules": 4,
+      "to_project": "pkg-logger"
+    },
+    {
+      "by_kind": {
+        "calls": 0,
+        "defines": 0,
+        "imports": 29
+      },
+      "edge_count": 29,
+      "from_project": "web",
+      "shared_modules": 3,
+      "to_project": "pkg-types"
+    },
+    {
+      "by_kind": {
+        "calls": 3,
+        "defines": 0,
+        "imports": 48
+      },
+      "edge_count": 51,
+      "from_project": "web",
+      "shared_modules": 6,
+      "to_project": "pkg-validators"
+    },
+    {
+      "by_kind": {
+        "calls": 168,
+        "defines": 0,
+        "imports": 4
+      },
+      "edge_count": 172,
+      "from_project": "web",
+      "shared_modules": 9,
+      "to_project": "tostudy-cli"
+    },
+    {
+      "by_kind": {
+        "calls": 9,
+        "defines": 0,
+        "imports": 20
+      },
+      "edge_count": 29,
+      "from_project": "web",
+      "shared_modules": 16,
+      "to_project": "tostudy-core"
+    }
+  ],
+  "projects": [
+    {
+      "communities": 33,
+      "cycles": 0,
+      "edges": 5871,
+      "name": "ana-service",
+      "nodes": 1877,
+      "top_hotspot": {
+        "id": "app.llm.factory",
+        "score": 0.413
+      }
+    },
+    {
+      "communities": 93,
+      "cycles": 0,
+      "edges": 15076,
+      "name": "web",
+      "nodes": 5368,
+      "top_hotspot": {
+        "id": "src.trpc.react",
+        "score": 0.461
+      }
+    },
+    {
+      "communities": 4,
+      "cycles": 0,
+      "edges": 42,
+      "name": "api",
+      "nodes": 31,
+      "top_hotspot": {
+        "id": "src.sentry",
+        "score": 0.552
+      }
+    },
+    {
+      "communities": 24,
+      "cycles": 0,
+      "edges": 1427,
+      "name": "mcp-server",
+      "nodes": 830,
+      "top_hotspot": {
+        "id": "src.utils.logger",
+        "score": 0.572
+      }
+    },
+    {
+      "communities": 22,
+      "cycles": 0,
+      "edges": 982,
+      "name": "mobile",
+      "nodes": 297,
+      "top_hotspot": {
+        "id": "lib.trpc.client",
+        "score": 0.623
+      }
+    },
+    {
+      "communities": 15,
+      "cycles": 0,
+      "edges": 591,
+      "name": "tostudy-cli",
+      "nodes": 294,
+      "top_hotspot": {
+        "id": "src.auth.guards",
+        "score": 0.686
+      }
+    },
+    {
+      "communities": 239,
+      "cycles": 1,
+      "edges": 15610,
+      "name": "pkg-api",
+      "nodes": 7816,
+      "top_hotspot": {
+        "id": "src",
+        "score": 1.0
+      }
+    },
+    {
+      "communities": 13,
+      "cycles": 0,
+      "edges": 1201,
+      "name": "pkg-database",
+      "nodes": 507,
+      "top_hotspot": {
+        "id": "src.schema",
+        "score": 0.416
+      }
+    },
+    {
+      "communities": 10,
+      "cycles": 0,
+      "edges": 174,
+      "name": "pkg-types",
+      "nodes": 152,
+      "top_hotspot": {
+        "id": "src.common",
+        "score": 0.501
+      }
+    },
+    {
+      "communities": 10,
+      "cycles": 0,
+      "edges": 267,
+      "name": "pkg-logger",
+      "nodes": 204,
+      "top_hotspot": {
+        "id": "src.logger",
+        "score": 0.452
+      }
+    },
+    {
+      "communities": 11,
+      "cycles": 0,
+      "edges": 595,
+      "name": "tostudy-core",
+      "nodes": 373,
+      "top_hotspot": {
+        "id": "src",
+        "score": 1.0
+      }
+    },
+    {
+      "communities": 10,
+      "cycles": 0,
+      "edges": 283,
+      "name": "pkg-validators",
+      "nodes": 217,
+      "top_hotspot": {
+        "id": "src.types",
+        "score": 0.543
+      }
+    },
+    {
+      "communities": 8,
+      "cycles": 0,
+      "edges": 148,
+      "name": "pkg-resilience",
+      "nodes": 97,
+      "top_hotspot": {
+        "id": "src.domains.stripe-webhook",
+        "score": 0.596
+      }
+    },
+    {
+      "communities": 3,
+      "cycles": 0,
+      "edges": 52,
+      "name": "pkg-llm-costs",
+      "nodes": 36,
+      "top_hotspot": {
+        "id": "src.calculator",
+        "score": 0.566
+      }
+    },
+    {
+      "communities": 8,
+      "cycles": 0,
+      "edges": 724,
+      "name": "pkg-email",
+      "nodes": 280,
+      "top_hotspot": {
+        "id": "src.i18n",
+        "score": 0.428
+      }
+    },
+    {
+      "communities": 13,
+      "cycles": 0,
+      "edges": 1049,
+      "name": "pkg-jobs",
+      "nodes": 506,
+      "top_hotspot": {
+        "id": "src",
+        "score": 1.0
+      }
+    }
+  ],
+  "shared_modules": [
+    {
+      "module": "@aws-sdk/client-s3",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "@fastify/cors",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "@fastify/helmet",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "@parisgroup-ai/pageshell-core/formatters",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "@parisgroup-ai/pageshell-core/utils",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "@playwright/test",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/analytics",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/api",
+      "projects": [
+        "api",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/api/modules/credit-wallet/application",
+      "projects": [
+        "mcp-server",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/api/modules/credit-wallet/infrastructure",
+      "projects": [
+        "mcp-server",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/api/utils/ai-billing",
+      "projects": [
+        "mcp-server",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/database",
+      "projects": [
+        "mcp-server",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/database/repositories/relationships",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "@repo/database/schema",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/env",
+      "projects": [
+        "api",
+        "pkg-api",
+        "pkg-email",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/llm-costs",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "@repo/logger",
+      "projects": [
+        "api",
+        "mcp-server",
+        "pkg-api",
+        "pkg-email",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/resilience",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/tostudy-core/adapters/drizzle",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "@repo/tostudy-core/courses",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "@repo/tostudy-core/exercises",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "@repo/tostudy-core/learning",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "@repo/tostudy-core/types",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "@repo/tostudy-core/vault",
+      "projects": [
+        "tostudy-cli",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/tostudy-core/workspace",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "@repo/types",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/typesense/sync",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/validators",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-email",
+        "pkg-types",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/validators/business-constants",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "@repo/validators/engine",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "@repo/validators/mentorship",
+      "projects": [
+        "pkg-types",
+        "web"
+      ]
+    },
+    {
+      "module": "@sentry/nextjs",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "@sentry/node",
+      "projects": [
+        "api",
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "@tanstack/react-query",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "@trpc/client",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "@trpc/react-query",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "@trpc/server",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "@trpc/server/adapters/fastify",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "Fastify",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "and",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs",
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "asc",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "baseWithRetry",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "bcryptjs",
+      "projects": [
+        "pkg-api",
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "buildLessonExerciseData",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "calculateAIChargeFromUsage",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "calculateTokenCost",
+      "projects": [
+        "pkg-api",
+        "pkg-validators",
+        "web"
+      ]
+    },
+    {
+      "module": "captureException",
+      "projects": [
+        "api",
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "checkRateLimit",
+      "projects": [
+        "mcp-server",
+        "web"
+      ]
+    },
+    {
+      "module": "child_process",
+      "projects": [
+        "mcp-server",
+        "web"
+      ]
+    },
+    {
+      "module": "chmod",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "config",
+      "projects": [
+        "pkg-api",
+        "pkg-email",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "createCircuitBreaker",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "createContext",
+      "projects": [
+        "api",
+        "mobile",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "createDrizzleProvider",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "createLogger",
+      "projects": [
+        "api",
+        "pkg-api",
+        "pkg-email",
+        "pkg-jobs",
+        "tostudy-cli",
+        "web"
+      ]
+    },
+    {
+      "module": "createRelationshipsRepository",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "crypto",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "date-fns",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "date-fns/locale",
+      "projects": [
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "delay",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "desc",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-jobs",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "deserializeFromCache",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "dirname",
+      "projects": [
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "dotenv",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-email",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "dotenv-expand",
+      "projects": [
+        "mcp-server",
+        "web"
+      ]
+    },
+    {
+      "module": "drizzle",
+      "projects": [
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "drizzle-kit",
+      "projects": [
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "drizzle-orm",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs",
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "drizzle-orm/pg-core",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "drizzle-orm/postgres-js",
+      "projects": [
+        "pkg-api",
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "drizzleSum",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "eq",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs",
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "events",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "execFileSync",
+      "projects": [
+        "mobile",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "existsSync",
+      "projects": [
+        "mcp-server",
+        "pkg-logger",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "expect",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "extractBearerToken",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "fastify",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "fileURLToPath",
+      "projects": [
+        "mcp-server",
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "flushSentry",
+      "projects": [
+        "api",
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "format",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "fs",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-validators",
+        "web"
+      ]
+    },
+    {
+      "module": "generate",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "generateTraceId",
+      "projects": [
+        "pkg-api",
+        "pkg-logger"
+      ]
+    },
+    {
+      "module": "getAppUrl",
+      "projects": [
+        "pkg-api",
+        "pkg-email",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "getConfig",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "getEmailConfig",
+      "projects": [
+        "pkg-email",
+        "web"
+      ]
+    },
+    {
+      "module": "getEmailTranslations",
+      "projects": [
+        "pkg-email",
+        "web"
+      ]
+    },
+    {
+      "module": "getExerciseAcceptanceCriteria",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "getInitials",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "getProgress",
+      "projects": [
+        "tostudy-cli",
+        "web"
+      ]
+    },
+    {
+      "module": "getRedisPubSub",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "getRedisStats",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "getSession",
+      "projects": [
+        "tostudy-cli",
+        "web"
+      ]
+    },
+    {
+      "module": "getSystemConfigService",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "gt",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "gte",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "hash",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "httpBatchLink",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "ilike",
+      "projects": [
+        "pkg-api",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "inArray",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "indexCourse",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "initSentry",
+      "projects": [
+        "api",
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "initSystemConfigService",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "ioredis",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "isChallengingExercise",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "isGuidedExercise",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "isLessonContract",
+      "projects": [
+        "pkg-api",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "isNotNull",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "isNull",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-jobs",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "isRetryableError",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "isSemiGuidedExercise",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "isTeachingApproach",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "join",
+      "projects": [
+        "mcp-server",
+        "pkg-logger",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "jsonwebtoken",
+      "projects": [
+        "api",
+        "mcp-server",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "like",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "listCourses",
+      "projects": [
+        "tostudy-cli",
+        "web"
+      ]
+    },
+    {
+      "module": "logWebhookProcessing",
+      "projects": [
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "lt",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "lte",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "mkdirSync",
+      "projects": [
+        "mcp-server",
+        "pkg-logger",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "ne",
+      "projects": [
+        "pkg-api",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "node:async_hooks",
+      "projects": [
+        "mcp-server",
+        "pkg-logger"
+      ]
+    },
+    {
+      "module": "node:child_process",
+      "projects": [
+        "mobile",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "node:crypto",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-logger",
+        "web"
+      ]
+    },
+    {
+      "module": "node:fs",
+      "projects": [
+        "mcp-server",
+        "pkg-database",
+        "pkg-logger",
+        "tostudy-cli",
+        "web"
+      ]
+    },
+    {
+      "module": "node:fs/promises",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "node:http",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "node:os",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "node:path",
+      "projects": [
+        "mcp-server",
+        "pkg-database",
+        "pkg-logger",
+        "tostudy-cli",
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "or",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "os",
+      "projects": [
+        "ana-service",
+        "mcp-server"
+      ]
+    },
+    {
+      "module": "otplib",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "path",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-email",
+        "pkg-jobs",
+        "pkg-validators",
+        "web"
+      ]
+    },
+    {
+      "module": "postgres",
+      "projects": [
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "promisify",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "randomBytes",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "pkg-logger"
+      ]
+    },
+    {
+      "module": "randomUUID",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "react",
+      "projects": [
+        "mobile",
+        "pkg-email",
+        "web"
+      ]
+    },
+    {
+      "module": "readFile",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "readFileSync",
+      "projects": [
+        "pkg-database",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "registerTRPCRoutes",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "render",
+      "projects": [
+        "pkg-email",
+        "web"
+      ]
+    },
+    {
+      "module": "renderNewMentorshipQuestionEmail",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "resend",
+      "projects": [
+        "pkg-api",
+        "pkg-email",
+        "web"
+      ]
+    },
+    {
+      "module": "resolve",
+      "projects": [
+        "pkg-database",
+        "pkg-validators",
+        "web"
+      ]
+    },
+    {
+      "module": "sanitizeFilename",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "scanFile",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "selectCourse",
+      "projects": [
+        "tostudy-cli",
+        "web"
+      ]
+    },
+    {
+      "module": "sendEmail",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "sendRefundConfirmationEmail",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "serializeForCache",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "sql",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs",
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src",
+      "projects": [
+        "api",
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-email",
+        "pkg-jobs",
+        "pkg-llm-costs",
+        "pkg-logger",
+        "pkg-resilience",
+        "pkg-types",
+        "pkg-validators",
+        "tostudy-cli",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.adapters.drizzle",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.app-url",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.booking",
+      "projects": [
+        "pkg-api",
+        "pkg-types",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.browser-session",
+      "projects": [
+        "pkg-api",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.business-constants",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.calculator",
+      "projects": [
+        "pkg-api",
+        "pkg-llm-costs"
+      ]
+    },
+    {
+      "module": "src.channel-config",
+      "projects": [
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.circuit-breaker",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.circuit-breaker-observability",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.common",
+      "projects": [
+        "pkg-api",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.config",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-email"
+      ]
+    },
+    {
+      "module": "src.context",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-logger"
+      ]
+    },
+    {
+      "module": "src.course-category",
+      "projects": [
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.courses.get-progress",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.courses.list-courses",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.courses.select-course",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.database",
+      "projects": [
+        "pkg-api",
+        "pkg-types",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.defaults",
+      "projects": [
+        "pkg-api",
+        "pkg-llm-costs"
+      ]
+    },
+    {
+      "module": "src.domains.database",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.domains.email",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.domains.r2",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.domains.stripe-webhook",
+      "projects": [
+        "pkg-jobs",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.drizzle.config",
+      "projects": [
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "src.emails.creator-responded",
+      "projects": [
+        "pkg-email",
+        "web"
+      ]
+    },
+    {
+      "module": "src.enqueue",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.enqueue.create-payout-batch",
+      "projects": [
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "src.errors",
+      "projects": [
+        "mcp-server",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.exercise-type",
+      "projects": [
+        "pkg-api",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.exercises.validate-solution",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.file-upload",
+      "projects": [
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.handlers.relationship-analysis-handler",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.handlers.session-reminder-handler",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.lessons.get-content",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.lessons.get-hint",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.lessons.next-lesson",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.lessons.start-module",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.lessons.start-next-module",
+      "projects": [
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.lib.email-retry-utils",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.lib.email-retry-utils.logEmailOperation",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.lib.notifications",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "src.lib.stripe-webhook-utils",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.lib.stripe-webhook-utils.logWebhookProcessing",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.main",
+      "projects": [
+        "api",
+        "mcp-server"
+      ]
+    },
+    {
+      "module": "src.mcp",
+      "projects": [
+        "pkg-api",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.mentorship",
+      "projects": [
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.mobile",
+      "projects": [
+        "pkg-api",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.money",
+      "projects": [
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.obsidian",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.index",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.save-notes",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.save-notes.SaveNotesInput",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.save-notes.SaveNotesResult",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.save-notes.saveStudentNotes",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.sync-data",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.sync-data.SyncData",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.sync-data.SyncDataLesson",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.sync-data.SyncDataModule",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.obsidian.sync-data.getSyncData",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.pagination",
+      "projects": [
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.profiles.retry-profiles",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.queue",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "src.queue-health",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.redis",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "web"
+      ]
+    },
+    {
+      "module": "src.retry",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.revenue",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.schema.announcements",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.community",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.creator-portfolio-courses",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.gamification",
+      "projects": [
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.schema.generation-state",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.marketing",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.mentor-availability",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.mentorship-credits",
+      "projects": [
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.schema.mentorship-packages",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.mentorship-services",
+      "projects": [
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.schema.mentorship-sessions",
+      "projects": [
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.schema.mentorship-transactions",
+      "projects": [
+        "pkg-api",
+        "pkg-database",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.schema.platform-settings",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.portfolio-views",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.push-tokens",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.security-audit-log",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.session-resources",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.session-reviews",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.spark-chat-sessions",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.study-chat-sessions",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.schema.user-follows",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.sender",
+      "projects": [
+        "pkg-api",
+        "pkg-email",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.sentry",
+      "projects": [
+        "api",
+        "mcp-server"
+      ]
+    },
+    {
+      "module": "src.sentry.captureException",
+      "projects": [
+        "api",
+        "mcp-server"
+      ]
+    },
+    {
+      "module": "src.sentry.flushSentry",
+      "projects": [
+        "api",
+        "mcp-server"
+      ]
+    },
+    {
+      "module": "src.sentry.initSentry",
+      "projects": [
+        "api",
+        "mcp-server"
+      ]
+    },
+    {
+      "module": "src.sentry.sanitizeEmails",
+      "projects": [
+        "api",
+        "mcp-server"
+      ]
+    },
+    {
+      "module": "src.templates",
+      "projects": [
+        "pkg-api",
+        "pkg-email",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "src.timeout",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.timeouts",
+      "projects": [
+        "pkg-api",
+        "pkg-resilience"
+      ]
+    },
+    {
+      "module": "src.timing",
+      "projects": [
+        "pkg-api",
+        "pkg-validators"
+      ]
+    },
+    {
+      "module": "src.tokens",
+      "projects": [
+        "pkg-api",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.types",
+      "projects": [
+        "pkg-llm-costs",
+        "pkg-logger",
+        "pkg-resilience",
+        "pkg-validators",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.user",
+      "projects": [
+        "pkg-api",
+        "pkg-types"
+      ]
+    },
+    {
+      "module": "src.utils.cache-versioning",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.utils.cache-versioning.deserializeFromCache",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.utils.cache-versioning.serializeForCache",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.utils.cache-versioning.unwrapFromCache",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.utils.cache-versioning.wrapForCache",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.utils.date-helpers",
+      "projects": [
+        "pkg-api",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "src.utils.redis-keys",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.utils.redis-keys.getEnvPrefix",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.utils.redis-keys.getUserCleanupKeys",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "src.vault",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.vault.types",
+      "projects": [
+        "mcp-server",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "src.vitest.config",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-email",
+        "pkg-jobs",
+        "pkg-logger",
+        "pkg-types",
+        "pkg-validators",
+        "tostudy-cli",
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "src.vitest.setup",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "stripe",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "superjson",
+      "projects": [
+        "mobile",
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "syncEnrollmentProgress",
+      "projects": [
+        "pkg-api",
+        "tostudy-core"
+      ]
+    },
+    {
+      "module": "url",
+      "projects": [
+        "mcp-server",
+        "pkg-database",
+        "web"
+      ]
+    },
+    {
+      "module": "useCallback",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useContext",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useEffect",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useMemo",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useReducer",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useRef",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useRouter",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useState",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "useTheme",
+      "projects": [
+        "mobile",
+        "web"
+      ]
+    },
+    {
+      "module": "uuid",
+      "projects": [
+        "ana-service",
+        "pkg-database"
+      ]
+    },
+    {
+      "module": "validateChannelAccess",
+      "projects": [
+        "mcp-server",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "verifySessionToken",
+      "projects": [
+        "api",
+        "pkg-api"
+      ]
+    },
+    {
+      "module": "vitest",
+      "projects": [
+        "pkg-api",
+        "web"
+      ]
+    },
+    {
+      "module": "vitest/config",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-email",
+        "pkg-jobs",
+        "pkg-logger",
+        "pkg-types",
+        "pkg-validators",
+        "tostudy-cli",
+        "tostudy-core",
+        "web"
+      ]
+    },
+    {
+      "module": "withDatabaseRetry",
+      "projects": [
+        "pkg-api",
+        "pkg-jobs"
+      ]
+    },
+    {
+      "module": "writeFile",
+      "projects": [
+        "mcp-server",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "writeFileSync",
+      "projects": [
+        "mcp-server",
+        "pkg-logger",
+        "tostudy-cli"
+      ]
+    },
+    {
+      "module": "zod",
+      "projects": [
+        "mcp-server",
+        "pkg-api",
+        "pkg-database",
+        "pkg-validators",
+        "web"
+      ]
+    }
+  ],
+  "summary": {
+    "total_cross_edges": 24587,
+    "total_cycles": 1,
+    "total_edges": 44092,
+    "total_nodes": 18885,
+    "total_projects": 16,
+    "total_shared_modules": 288
+  },
+  "top_hotspots": [
+    {
+      "betweenness": 3773581.371,
+      "id": "src",
+      "in_cycle": true,
+      "in_degree": 507,
+      "pagerank": 0.0103,
+      "project": "pkg-api",
+      "score": 1.0
+    },
+    {
+      "betweenness": 4701.665,
+      "id": "src",
+      "in_cycle": true,
+      "in_degree": 23,
+      "pagerank": 0.0184,
+      "project": "tostudy-core",
+      "score": 1.0
+    },
+    {
+      "betweenness": 19774.48,
+      "id": "src",
+      "in_cycle": true,
+      "in_degree": 87,
+      "pagerank": 0.0194,
+      "project": "pkg-jobs",
+      "score": 1.0
+    },
+    {
+      "betweenness": 888.064,
+      "id": "src.auth.guards",
+      "in_cycle": false,
+      "in_degree": 20,
+      "pagerank": 0.0083,
+      "project": "tostudy-cli",
+      "score": 0.686
+    },
+    {
+      "betweenness": 1620.685,
+      "id": "src.types",
+      "in_cycle": true,
+      "in_degree": 18,
+      "pagerank": 0.0135,
+      "project": "tostudy-core",
+      "score": 0.633
+    },
+    {
+      "betweenness": 767.003,
+      "id": "lib.trpc.client",
+      "in_cycle": false,
+      "in_degree": 34,
+      "pagerank": 0.0071,
+      "project": "mobile",
+      "score": 0.623
+    },
+    {
+      "betweenness": 20.0,
+      "id": "src.domains.stripe-webhook",
+      "in_cycle": false,
+      "in_degree": 2,
+      "pagerank": 0.0106,
+      "project": "pkg-resilience",
+      "score": 0.596
+    },
+    {
+      "betweenness": 399.487,
+      "id": "src.utils.logger",
+      "in_cycle": false,
+      "in_degree": 79,
+      "pagerank": 0.0112,
+      "project": "mcp-server",
+      "score": 0.572
+    },
+    {
+      "betweenness": 13.0,
+      "id": "src.calculator",
+      "in_cycle": false,
+      "in_degree": 2,
+      "pagerank": 0.0295,
+      "project": "pkg-llm-costs",
+      "score": 0.566
+    },
+    {
+      "betweenness": 19.0,
+      "id": "src.retry",
+      "in_cycle": false,
+      "in_degree": 2,
+      "pagerank": 0.0103,
+      "project": "pkg-resilience",
+      "score": 0.562
+    }
+  ]
+}
