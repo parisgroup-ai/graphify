@@ -1,41 +1,40 @@
-# Session Brief — Next Session (post-2026-04-20 FEAT-029 benchmark close)
+# Session Brief — Next Session (post-2026-04-20 CHORE-004/005 close)
 
-**Last session:** 2026-04-20 late evening (fifth session of the day, following the v0.11.2 release close at `21c5c7d`). FEAT-029 benchmark session — verified FEAT-028's "2,165 cross-project edges redistribute" claim quantitatively on `parisgroup-ai/cursos @ 8ff36cc1`. Three-round A/B/C pin×toml benchmark dispatched via `claude -p --dangerously-skip-permissions` in background, two restarts handling pre-condition mismatches (wrong toml expectation at pin; concurrent session mutating cursos HEAD mid-benchmark). Final run landed clean. Two commits shipped, both pushed; CI green (1m10s).
+**Last session:** 2026-04-20 late evening (sixth session of the day, picking up the two remaining `tn` backlog items that lived outside the graphify codebase). Small session — ~60 min wall-clock, 2 commits in `parisgroup-ai/tasknotes-cli` + 1 commit in graphify. Both CHOREs shipped and pushed. Local binaries rebuilt and aligned with source: `tn 0.5.7` (carries the new wording), `graphify 0.11.2` (was drifting at 0.11.1 on PATH despite source + tag being at 0.11.2).
 
 ## Current State
 
-- Branch: `main` — **in sync with origin** (2 session commits pushed: `159758b` + `e45c82e`)
+- Branch: `main` — **in sync with origin** (1 session commit pushed: `9d42582`)
 - Working tree clean
-- Open tn backlog unchanged: `CHORE-004`, `CHORE-005` (both outside graphify codebase — tasknotes-cli + `/tn-plan-session` skill)
-- `v0.11.2` release from prior session remains the current published binary
+- Open `tn` backlog: **empty** (sprint 29/29 done; no open tasks outside sprint)
+- Local CLIs: `tn 0.5.7` (with CHORE-004 rename), `graphify 0.11.2` (upgraded from stale 0.11.1)
 
 ## What shipped this session
 
-- **`159758b`** — `docs(benchmarks): FEAT-029 verify cross-project edge redistribution on cursos (+14.3% vs claim)` — 5 files, 12,284 insertions (benchmark report + 3 summary JSONs + CLAUDE.md edit on the FEAT-028 paragraph)
-- **`e45c82e`** — `chore(tasks): close FEAT-029 as done`
+- **`tasknotes-cli 5ae5205`** — `chore(session): rename main-context budget → snapshot in session log output (CHORE-004)`. 2-line surface change (`rust/crates/tasknotes-cli/src/commands/session.rs:887` output string + `tasknotes-core/src/session.rs:232` doc comment). 418 tests pass, `cargo fmt` clean, `cargo clippy --workspace -- -D warnings` clean. Pushed by sibling session.
+- **`tasknotes-cli 8221d67`** — `chore(skill): guard /tn-plan-session step 8 against closing on subagent_tokens_sum near budget (CHORE-005)`. Added Step 8 bullet 6 (verbatim from task body) + Exit Conditions table row. Edit wrote through `~/.claude/commands/tn-plan-session.md → tasknotes-cli/claude/commands/tn-plan-session.md` symlink — no sync needed.
+- **`graphify 9d42582`** — `chore(tasks): close CHORE-004 and CHORE-005 as done`. Frontmatter status flip on both task files.
 
 ## Decisions Made (don't re-debate)
 
-*(carried from prior sessions — see commit history + CLAUDE.md for full ledger)*
-
-*(added 2026-04-20 FEAT-029 close)*
-
-- **"Option 1" benchmark methodology: A and B use pin's toml (`8ff36cc1`), C uses `main`'s toml.** Corpus is identical in all three rounds (detached HEAD at pin); only the config varies. Captured `main:graphify.toml` via `git show main:graphify.toml > /tmp/cursos-toml-main.txt` **before** the detached-HEAD checkout to avoid ref resolution ambiguity. The pin's toml was always pre-mitigation (only `allowlist=["logger"]`) because BUG-015's `suppress_barrel_cycles` was a response to FEAT-028's damage — temporally newer. Documented for reproducibility in the benchmark report § "Option 1".
-- **Redistribution claim is confirmed within +14.3%** (measured +2,475 edges, claimed ~2,165). Nuance recorded: effect is **both redistributive and additive** — not just "barrels rerouting to canonical packages" but also "pkg-api→@repo/* alias edges that the pre-0.11 extractor didn't emit". Net +2,475 = ~+4,000 new pkg-api→@repo/* edges minus ~−1,600 consumer-app→barrel redistributions.
-- **Mitigation is zero-cost observability layer.** `[consolidation] suppress_barrel_cycles=true` + `allowlist=["logger","src"]` removes 541 synthetic cycles (99.8%) with 0 impact on edge count or graph shape. Pure filter over cycle detection + hotspot gating.
-- **Conflict resolution on stash pop: take HEAD version when concurrent session finalized the affected work.** Parallel Claude instance committed `dde8d67d3` (CHORE-1346 close) while the benchmark ran, mutating the same `CHORE-1346-*.md` that was in the benchmark's stash. Resolved with `git checkout --ours` (HEAD=done) because the stash preserved an obsolete in-progress state (open timer from before the concurrent session finished).
-- **Running `claude -p --dangerously-skip-permissions` in background is the right dispatch shape for long multi-step benchmarks.** ~8m total across 3 graphify runs + report + CLAUDE.md edit. Two restarts were legitimate pauses (pre-condition checks) — the subagent stopped cleanly and asked instead of contorting. Stashes were preserved across restarts. Total wall clock felt longer but no rework.
-
-## Suggested Next Steps
-
-1. **Close the other two backlog items if appetite surfaces:** `CHORE-004` (tn-side, rename `main-context budget:` → `snapshot:` in tn session log) lives in `parisgroup-ai/tasknotes-cli`; `CHORE-005` (skill-side, step 8 guard in `/tn-plan-session`) lives in `~/.claude/skills/tn-plan-session/`. Both are small (~30–45m each). Neither is graphify code.
-2. **Dogfood graphify on itself** — `graphify.toml` is NOT checked into this repo. Configuring a self-analysis run against the graphify workspace could surface Rust-extractor dogfooding insights (FEAT-003 added Rust support). Would need a `graphify.toml` at repo root with 5 `[[project]]` entries for the 5 crates. Nice-to-have, not urgent.
-3. **Consider publishing the graphify skills upstream.** Skills Sync flagged 18 local-only skills including `graphify-drift-check`, `graphify-onboarding`, `graphify-refactor-plan`. These ship via `graphify install-integrations` today but don't live in `ai-skills-parisgroup` — other operators wouldn't get them without installing graphify locally first. If intentional (delivery channel = graphify binary), leave as-is.
-4. **Cleanup optional:** `/tmp/` artifacts already cleared at session close; no residual debt.
+- **CHORE-004: minimal rename only, no line splitting.** The task body permitted splitting the output into two statements (`main-context snapshot: ... (last turn; trust Claude Code % ctx for real-time headroom)`) but that would break any downstream parser expecting one line. v1 = word-swap preserving shape. If ever needed, the split is a cheap follow-up.
+- **CHORE-005: new bullet 6, not a rewrite of bullet 5.** Bullet 5 already said "don't close on the token advisory alone" in abstract terms. Bullet 6 names the specific wrong shape (`subagent_tokens_sum / budget.tokens near 100%`) and the specific right signal (Claude Code `% ctx`). Abstract rules fail under pressure; concrete ones don't. The Exit Conditions table row is the second line of defense — makes the forbidden move visible in the table itself, not buried in prose.
+- **Local binary ≠ tagged version.** `cargo install --path --force` is manual after `fix: bump version to X`. `~/.cargo/bin/graphify` reported 0.11.1 even though `v0.11.2` had been tagged + pushed + released (CI artifacts built for download), because the tag-triggered release workflow does not touch local PATH binaries. Added a one-liner to `CLAUDE.md § Version bump` so the next release ritual doesn't leave a stale local binary.
+- **`~/.claude/commands/tn-plan-session.md` is a symlink into `tasknotes-cli/claude/commands/`.** Discovered during CHORE-005 when the user asked to push the skill edit and `git status` in tasknotes-cli already showed it as modified. `Edit` tool wrote through the symlink transparently. Distribution model for this command file is "clone the repo, `ln -s` into `~/.claude/commands/`" — no separate sync script, no `share-skill` round-trip.
+- **No tasknotes-cli version bump for CHORE-004/005.** Both are cosmetic — rename + skill file — with no API/behavior change. Staying on 0.5.7. A release bump is worth it only if/when the changes need to reach other machines via Homebrew tap.
 
 ## Meta Learnings This Session
 
-- **Multi-instance safety relies on stash discipline, not avoidance.** The benchmark ran successfully across two concurrent Claude sessions touching `parisgroup-ai/cursos`. Each run's stash carried a distinct message tag (`feat-029-benchmark-<epoch>`); the other instance's commits happened on main while the benchmark was in detached HEAD. The only friction was the final `stash pop` conflict, which was resolvable by semantic inspection (in-progress obsolete vs. committed done). **Takeaway:** `git stash push -u -m "<scope>-<epoch>"` is the right defensive pattern for any `claude -p` that touches a shared working tree.
-- **Buffered `claude -p` stdout looks like a hang.** The background run's `/tmp/*.log` was 0 bytes for ~8 minutes while the subprocess was active (state R on CPU). Confirming liveness via `ps` state column + `/tmp/cursos-benchmark/` mtimes was the right move instead of killing. Recorded here because the temptation to interrupt grows with silence.
-- **Pre-condition pauses save more time than they cost.** Both restart cycles were triggered by the subagent detecting state mismatch (wrong toml in v1, wrong HEAD + dirty tree in v2). Each restart was ~30s of human-in-the-loop review + prompt regeneration. The alternative (letting the subagent power through with a broken assumption) would have produced a bogus report that's expensive to catch and more expensive to invalidate.
-- **The CLAUDE.md FEAT-028 paragraph now ends on a positive measurement, not a pending follow-up.** Small thing, but every follow-up that escapes from "tracked but unverified" into "verified with numbers" reduces the ambient noise of the memory file. Worth the churn.
+- **Binary-on-disk vs source-on-disk is a real drift axis.** `tn --version` and `graphify --version` are cheap checks — each surfaces the drift in one line. Worth running proactively at `/session-start` on any project with its own CLI, not just when something's clearly wrong. Particularly relevant for any repo where the local binary is consumed by other workflows (tn for session logging, graphify for checks).
+- **Pushing from a sibling session works fine when no local staged diff contends.** The sibling session pushed `5ae5205` while this session was mid-edit on the skill file. No conflict because the skill edit was uncommitted; by the time we committed + pushed CHORE-005, `tasknotes-cli/main` was already ahead of where our local branch had been forked from, but the fast-forward push still succeeded. Contrast with the FEAT-029 benchmark pattern (stash-push with epoch tag, explicit scope isolation) — this simpler pattern works when the concurrent session isn't touching the same files.
+- **CLI output rename discipline: match surface word to semantic truth in the same commit.** The CHORE-004 fix had to touch the `consumed.tokens` doc comment (semantic half: "is the main-context **snapshot**") AND the output string (surface half) together. If one had shipped without the other, the two halves would have disagreed and the "budget" word would have partially survived.
+
+## Suggested Next Steps
+
+1. **Pre-existing skills drift** — `design-usabilidade/SKILL.md` has local edits from `Apr 16` (not this session) that never got shared to `ai-skills-parisgroup`. Either `/share-skill design-usabilidade` or drop a `.skills-sync-ignore` marker if intentional. 18 other unshared skills also standing (graphify-*, paperclip-*, vault-cak-*, etc.) — most are bundled via `graphify install-integrations` and intentionally local-only, but worth a one-pass triage.
+2. **Dogfood graphify on itself** remains open (no `graphify.toml` at repo root). Would surface Rust-extractor dogfooding insights (FEAT-003 added Rust support). Nice-to-have, not urgent; ~15m to draft the toml for the 5 workspace crates.
+3. **Consider batching a tn 0.5.8 release** if any substantive fix lands alongside CHORE-004/005 in the near term. Cosmetic rename alone doesn't justify a bump.
+
+## Open Debts
+
+- None. This session was purely a backlog drain — no new work opened, no follow-ups generated.

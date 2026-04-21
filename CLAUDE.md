@@ -233,6 +233,7 @@ git add Cargo.toml Cargo.lock
 git commit -m "fix: bump version to X.Y.Z"
 git tag vX.Y.Z
 git push origin main --tags            # triggers CI release
+cargo install --path crates/graphify-cli --force  # refresh ~/.cargo/bin/graphify — CI release only builds downloadable artifacts, not the local PATH binary
 ```
 
 ### Current workflow
@@ -240,6 +241,7 @@ git push origin main --tags            # triggers CI release
 - Solo-dev mode: changes may go directly to `main`
 - Releases are published from pushed tags, not from PR merges
 - Keep `Cargo.lock` aligned with workspace version bumps to avoid post-release CI drift
+- `cargo install --path …` after every version bump — `graphify --version` is the cheap drift check; expect 0.11.1-era binaries on PATH if you skipped this step on a prior release
 
 ## Design docs
 
