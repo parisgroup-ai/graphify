@@ -4,6 +4,42 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.8] - 2026-04-21
+
+### Fixed
+- fix(extract): local Calls edges that FEAT-031's `use`-alias fallback rewrote to canonical local symbol ids (e.g. `src.types.Node.module`) were still being capped to `0.5/Ambiguous` because `ModuleResolver::known_modules` only contained module-level ids. Now iterate `all_raw_edges` after barrel collapse and register each `EdgeKind::Defines` target as a known local module, so the subsequent `is_local` check succeeds and the edge keeps its extractor confidence (`0.7/Inferred` for scoped calls). Self-dogfood: 13 local Calls promoted `Ambiguous → Inferred` across 5 crates (BUG-018).
+
+## [0.11.7] - 2026-04-21
+
+### Added
+- feat(config): `[settings].external_stubs` merge layer — the shared list is chained ahead of each `[[project]].external_stubs` at the two `ExternalStubs::new` call sites, concatenation not override. Lets monorepos lift a shared language prelude (e.g. Rust `std` + `Vec`/`String`/`Option`/… + `format`/`println`/… + `assert*`) to the top level instead of duplicating it per project. `ExternalStubs::new` sorts by descending prefix length and dedupes, so overlap between settings and project lists is harmless. Self-dogfood `graphify.toml` shrank 119 → 77 lines (35%). Unit guard asserts chained input matches single-list input (FEAT-034).
+
+## [0.11.6] - 2026-04-21
+
+### Changed
+- feat(core): all scoring inputs (betweenness, PageRank, in/out-degree, cycle membership, hotspot classification) now run over a filtered view of the graph that excludes `ConfidenceKind::ExpectedExternal` edges. New helper `CodeGraph::filter_edges<F>` clones nodes and applies the predicate to edges; the original graph stays untouched for `query`/`explain`/report writers. Semantic contract: "hotspot view = filtered view" — every `NodeMetrics` field reflects the scoring graph, so an external stub like `std::path::PathBuf` reports `score=0.000, in_degree=0`, but `graphify explain` still shows its full-graph dependents via `QueryEngine`. Cycle detection uses the filtered graph for consistency (behavioural no-op since `ExpectedExternal` targets are leaves). Self-dogfood: top 10 hotspots of every crate now 100% actionable — zero `std`/`serde`/`tree_sitter`/`rayon`/`petgraph`/`clap`/`tokio` in any top 10 (FEAT-033).
+
+## [0.11.5] - 2026-04-21
+
+### Fixed
+- fix(extract): cap the FEAT-031 `use`-alias rewrite recursion depth at 4 iterations. Pathological self-referential aliases of the shape `("X", "X::Y")` (common in Rust `pub use` re-exports — e.g. `use crate::types::Node` inside `crate::types`) would recurse with an ever-growing rewritten string, burning ~17 GB RSS in the first 10 seconds of the graphify-cli dogfood extraction before OS-level OOM kill. Depth cap terminates the rewrite with a non-local result, preserving the legitimate one-hop case (`Node::module` → `crate::types::Node::module` → canonical local id) while preventing the runaway (BUG-017).
+- fix(stubs): extend the external-stubs prefix matcher to accept Rust `::` path separators in addition to the `.` dot-notation (`std::path::PathBuf` now matches the `std` prefix) (FEAT-032).
+
+## [0.11.4] - 2026-04-21 — **BROKEN, DO NOT USE**
+
+> **Skip this release.** Extracting any Rust project that uses a re-export pattern of the shape `use crate::types::Node;` in `crate::types` hits an unbounded alias-rewrite recursion and consumes all available memory within seconds. The fix landed in v0.11.5 (BUG-017). If you installed 0.11.4, upgrade immediately.
+
+### Added
+- feat(extract): FEAT-031 — Rust scoped-identifier calls (`Node::module()`) and bare-name calls (`validate()` after `use crate::validator::validate;`) now resolve to their canonical local symbol ids via a per-source-module `use`-alias fallback in `ModuleResolver::resolve`. Closes the intra-crate visibility gap that left ~40–60% of Rust call edges invisible post-BUG-016.
+
+## [0.11.3] - 2026-04-20
+
+### Fixed
+- fix(extract): Rust `crate::` resolution now re-prepends the project-level `local_prefix` when stripping the `crate::` root. Previously `crate::types::Node` from any module in a Rust crate resolved to `types.Node` instead of `src.types.Node` (auto-detected prefix), missed `known_modules`, and landed on a non-local placeholder — making intra-crate hub structure invisible across every Rust analysis with a non-empty `local_prefix`. Same shape as BUG-001 (Python relative) and BUG-007/011 (TS workspace alias): a language-specific resolver branch forgetting to apply the project-level prefix re-prepend. Discovered via self-dogfood of v0.11.2 on graphify's own workspace (BUG-016).
+
+### Added
+- chore(dogfood): ship a self-analysis `graphify.toml` at the repo root with one `[[project]]` per crate. Enables `cargo build && ./target/release/graphify run` as a fast feedback loop for resolver/metric changes.
+
 ## [0.11.2] - 2026-04-20
 
 ### Added
@@ -11,6 +47,20 @@ All notable changes to Graphify will be documented in this file.
 
 ### Changed
 - chore(repo): untrack `target/` build artifacts so `git status` stays clean after `cargo build` (CHORE-006). Historical tags (`v0.11.0`, `v0.11.1`) remain valid; blob weight reclaimed via future `gc`.
+
+## [0.11.1] - 2026-04-20
+
+### Fixed
+- fix(cycles): `[consolidation].suppress_barrel_cycles = true` (opt-in, default `false`) drops cycles whose only cycle-making edges route through the project's root barrel node, but only when that barrel node (`id == local_prefix`) is also matched by the `[consolidation].allowlist`. Counters the synthetic barrel cycles FEAT-028 surfaced on consumers like `parisgroup-ai/cursos` where `src/index.ts` is the npm entry point. Applied at all 4 `run_analyze` call sites (Analyze, Diff baseline-vs-live, Run pipeline helper, Check); query engine skips it since consolidation config isn't in scope for `query`/`explain`/`path`/`shell`. `--ignore-allowlist` debug flag disables barrel suppression too (BUG-015).
+
+## [0.11.0] - 2026-04-20
+
+### Added
+- feat(extract): FEAT-028 — workspace-wide `ReExportGraph` fan-out closes the cross-project alias gap left by FEAT-027. New `WorkspaceReExportGraph` aggregate in `crates/graphify-extract/src/workspace_reexport.rs` merges per-project `ReExportGraph`s via a first-wins `modules_to_project` index plus a collision log. `ModuleResolver::apply_ts_alias_workspace` returns a `WorkspaceAliasTarget { project, module_id }` when an alias target path falls inside a sibling `[[project]]` root. `run_extract` split into `build_project_reexport_context` (phase 1, collect-only) + `run_extract_with_workspace` (phase 2, fan-out against a workspace graph). Before v0.11.0, cross-project aliases (`@repo/*` spanning sibling `[[project]]`s) terminated at the raw alias string with `is_local=false` — consumer app → package barrel only, no fan-out into the package's internal structure. Workspace graph only built when ≥2 projects AND ≥1 TS project; single-project and non-TS-only configs keep the legacy fast path with zero overhead. Namespacing decision (option 2, ADR in module doc-comment): public node ids stay per-project; the workspace lookup is internal. Self-dogfood on `parisgroup-ai/cursos @ 8ff36cc1`: +2,475 cross-project edges A→B (pre-0.10.0 vs post-0.11.1 pin), both redistributive (−1,622 edges across top-5 consumer-app pairs that previously terminated at barrels) and additive (+~4,000 pkg-api→`@repo/*` alias edges previously invisible). Benchmark report at `docs/benchmarks/2026-04-20-feat-029-cross-project-edges.md`.
+- feat(extract): `match_alias_target` supports inner-glob tsconfig forms (`"@repo/*": ["../../packages/*/src"]`), not just trailing-`*` or exact-match. Final pre-existing blocker called out in FEAT-028 slice 4.
+
+### Deprecated
+- The cross-project barrel-termination behaviour (`is_local=false` on `@repo/*` alias targets in multi-project configs) was the intentional tripwire pinned by FEAT-027's `feat_027_cross_project_alias_stays_at_barrel_v1_contract` test. That test is now inverted to `feat_028_cross_project_alias_fans_out_to_canonical_workspace_scope`.
 
 ## [0.8.2] - 2026-04-16
 
