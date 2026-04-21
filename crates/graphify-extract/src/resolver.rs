@@ -3,6 +3,34 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::workspace_reexport::{WorkspaceAliasTarget, WorkspaceReExportGraph};
 
+/// Maximum number of consecutive alias rewrites the resolver is willing to
+/// follow before giving up and returning the raw id as non-local (FEAT-031
+/// case 9 depth guard, BUG-017 fix).
+///
+/// Legitimate Rust chains need exactly one rewrite:
+///   - bare `Node` → `crate::types::Node` (one rewrite → case 6 `crate::` →
+///     canonical local id).
+///   - scoped `Node::module` → `crate::types::Node::module` (same shape).
+///
+/// A depth of 4 leaves headroom for any indirection we haven't seen yet
+/// without allowing the self-referential alias loops (`("X", "X::Y")`) that
+/// caused v0.11.4's OOM to grow the rewrite string unbounded.
+const MAX_ALIAS_REWRITE_DEPTH: u8 = 4;
+
+/// Returns `true` when `full` begins with `root` followed by a `::` boundary
+/// (or equals `root` exactly). Used by the alias-rewrite fallback to skip
+/// self-amplifying aliases like `("X", "X::Y")` that would otherwise grow
+/// the rewritten string on every recursion.
+fn full_starts_with_root(full: &str, root: &str) -> bool {
+    if full == root {
+        return true;
+    }
+    match full.strip_prefix(root) {
+        Some(rest) => rest.starts_with("::"),
+        None => false,
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TsAliasContext {
     alias_pattern: String,
@@ -281,6 +309,29 @@ impl ModuleResolver {
     ///
     /// Returns `(resolved_id, is_local, confidence)`.
     pub fn resolve(&self, raw: &str, from_module: &str, is_package: bool) -> (String, bool, f64) {
+        self.resolve_with_depth(raw, from_module, is_package, MAX_ALIAS_REWRITE_DEPTH)
+    }
+
+    /// Internal recursive form of [`resolve`] with a depth budget for the
+    /// FEAT-031 alias-rewrite fallback (case 9).
+    ///
+    /// BUG-017 regression fix: the original implementation called
+    /// `self.resolve(&rewritten, …)` unconditionally on every alias hit.
+    /// Self-referential aliases (`("X", "X::Y")`) or cycles between two
+    /// aliases would grow the rewritten string unbounded inside repeated
+    /// `format!()` calls, burning ~17 GB RSS in the first 10 s of the
+    /// graphify-cli dogfood extraction. The depth budget terminates rewrites
+    /// after [`MAX_ALIAS_REWRITE_DEPTH`] iterations with a non-local result,
+    /// preserving the legitimate one-hop-rewrite case (the common shape
+    /// `Node::module` → `crate::types::Node::module` → canonical local id)
+    /// while preventing the runaway.
+    fn resolve_with_depth(
+        &self,
+        raw: &str,
+        from_module: &str,
+        is_package: bool,
+        depth_remaining: u8,
+    ) -> (String, bool, f64) {
         // 1. Python relative imports (start with one or more dots).
         if raw.starts_with('.') && !raw.starts_with("./") && !raw.starts_with("../") {
             let resolved = resolve_python_relative(raw, from_module, is_package);
@@ -367,23 +418,50 @@ impl ModuleResolver {
         //    target isn't a registered local module directly, consult the
         //    per-source-module alias map captured by the Rust extractor and
         //    rewrite the root segment (or the whole name) to its fully-
-        //    qualified form. Recurses back through `resolve` so the rewritten
-        //    path flows through the language-specific branches (typically the
-        //    `crate::` branch, case 6). Confidence is governed at the edge
-        //    level — Calls edges arrive here at 0.7/Inferred from the
-        //    extractor, so the recursive resolver's 0.9 is capped back down
-        //    by the pipeline's `min(edge.confidence, resolver_confidence)`.
-        if let Some(aliases) = self.use_aliases_by_module.get(from_module) {
-            // Bare-name form: the whole raw matches a `use`-imported short name.
-            if let Some(full) = aliases.get(raw) {
-                let full = full.clone();
-                return self.resolve(&full, from_module, is_package);
-            }
-            // Scoped form: rewrite only the root segment.
-            if let Some((root, tail)) = raw.split_once("::") {
-                if let Some(full) = aliases.get(root) {
-                    let rewritten = format!("{}::{}", full, tail);
-                    return self.resolve(&rewritten, from_module, is_package);
+        //    qualified form. Recurses back through `resolve_with_depth` so
+        //    the rewritten path flows through the language-specific branches
+        //    (typically the `crate::` branch, case 6). Confidence is governed
+        //    at the edge level — Calls edges arrive here at 0.7/Inferred from
+        //    the extractor, so the recursive resolver's 0.9 is capped back
+        //    down by the pipeline's `min(edge.confidence, resolver_confidence)`.
+        //
+        //    The depth budget guards against BUG-017: self-referential or
+        //    cyclic aliases would otherwise grow the rewritten string without
+        //    termination. When the budget is exhausted we fall through to
+        //    the no-match return below so the call still produces a bounded
+        //    result (non-local, raw id preserved).
+        if depth_remaining > 0 {
+            if let Some(aliases) = self.use_aliases_by_module.get(from_module) {
+                // Bare-name form: the whole raw matches a `use`-imported short
+                // name. Skip when the alias value equals the key — a
+                // `("X", "X")` self-alias would recurse with identical
+                // arguments and do nothing useful even under the depth cap.
+                if let Some(full) = aliases.get(raw).filter(|f| f.as_str() != raw) {
+                    let full = full.clone();
+                    return self.resolve_with_depth(
+                        &full,
+                        from_module,
+                        is_package,
+                        depth_remaining - 1,
+                    );
+                }
+                // Scoped form: rewrite only the root segment. Skip when the
+                // alias value starts with `root::` — the rewrite would just
+                // re-prepend the same root segment and recurse on a longer
+                // string (the BUG-017 growth signature).
+                if let Some((root, tail)) = raw.split_once("::") {
+                    if let Some(full) = aliases
+                        .get(root)
+                        .filter(|f| !full_starts_with_root(f, root))
+                    {
+                        let rewritten = format!("{}::{}", full, tail);
+                        return self.resolve_with_depth(
+                            &rewritten,
+                            from_module,
+                            is_package,
+                            depth_remaining - 1,
+                        );
+                    }
                 }
             }
         }
@@ -2088,6 +2166,64 @@ mod tests {
         assert!(
             !is_local,
             "rewritten id not in known_modules → not marked local"
+        );
+    }
+
+    #[test]
+    fn feat_031_use_alias_rewrite_is_bounded_against_self_referential_alias() {
+        // Regression guard for the v0.11.4 OOM (BUG-017): if an alias value
+        // starts with the alias key, the naive recursive rewrite at case 9
+        // grows the string forever (`X::foo` → `X::Y::foo` → `X::Y::Y::foo`
+        // → …). The depth cap must return a finite, non-local result even
+        // for this pathological input, without allocating unbounded memory.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.main");
+
+        let mut aliases = HashMap::new();
+        // Pathological: the alias value's first segment equals the key.
+        aliases.insert("X".to_owned(), "X::Y".to_owned());
+        resolver.register_use_aliases("src.main", &aliases);
+
+        // Must return in bounded time with a finite resolved id; exact value
+        // is less important than the finite-time contract. The id should
+        // reflect the last rewrite attempt before the cap fired (non-local).
+        let (resolved, is_local, _conf) = resolver.resolve("X::foo", "src.main", false);
+        assert!(
+            !is_local,
+            "self-referential alias chain must not be treated as local"
+        );
+        assert!(
+            !resolved.is_empty(),
+            "resolved id must be a non-empty string"
+        );
+        // String should not have grown to any huge length. Even a few
+        // rewrite iterations with an allowed depth of 4 can produce at
+        // most 4 `::Y` insertions, so length stays well under 200 chars.
+        assert!(
+            resolved.len() < 256,
+            "resolved id length {} suggests unbounded rewrite (expected bounded by depth cap)",
+            resolved.len(),
+        );
+    }
+
+    #[test]
+    fn feat_031_use_alias_bare_name_self_reference_is_bounded() {
+        // Even simpler pathology: bare `use X;` (single-segment) registered
+        // as `("X", "X")`. Bare-name rewrite must not infinite-loop.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.main");
+
+        let mut aliases = HashMap::new();
+        aliases.insert("X".to_owned(), "X".to_owned());
+        resolver.register_use_aliases("src.main", &aliases);
+
+        let (resolved, is_local, _conf) = resolver.resolve("X", "src.main", false);
+        assert!(!is_local);
+        assert_eq!(
+            resolved, "X",
+            "self-referential bare alias collapses to the raw name"
         );
     }
 

@@ -13,27 +13,106 @@ exclude = [
 ]
 format = ["json", "csv", "md", "html"]
 
+# Rust prelude + std shared by every crate. Extracted as an informal
+# shared list — duplicated per-project until `[settings].external_stubs`
+# merging lands (tracked as FEAT-033).
+#
+# Covers: standard library (`std::*`), prelude types (`Vec`, `String`,
+# `Box`, `Option`, `Result` and their variants `Some`/`None`/`Ok`/`Err`),
+# prelude macros captured as bare names after FEAT-031 macro extraction
+# strips the trailing `!` (`format`, `writeln`, `println`, `eprintln`,
+# `print`, `eprint`, `vec`, `write`, `assert*`, `panic`, `todo`,
+# `unimplemented`, `unreachable`, `dbg`), and `Self` for method-body
+# associated-function calls like `Self::new()`.
+
 [[project]]
 name = "graphify-core"
 repo = "./crates/graphify-core"
 lang = ["rust"]
+external_stubs = [
+  # std + prelude
+  "std",
+  "Vec", "String", "Box", "Option", "Result",
+  "Some", "None", "Ok", "Err", "Self",
+  "format", "writeln", "println", "eprintln", "print", "eprint",
+  "vec", "write",
+  "assert", "assert_eq", "assert_ne",
+  "debug_assert", "debug_assert_eq", "debug_assert_ne",
+  "panic", "todo", "unimplemented", "unreachable", "dbg",
+  # crate dependencies
+  "petgraph", "rand", "regex", "serde", "serde_json",
+]
 
 [[project]]
 name = "graphify-extract"
 repo = "./crates/graphify-extract"
 lang = ["rust"]
+external_stubs = [
+  "std",
+  "Vec", "String", "Box", "Option", "Result",
+  "Some", "None", "Ok", "Err", "Self",
+  "format", "writeln", "println", "eprintln", "print", "eprint",
+  "vec", "write",
+  "assert", "assert_eq", "assert_ne",
+  "debug_assert", "debug_assert_eq", "debug_assert_ne",
+  "panic", "todo", "unimplemented", "unreachable", "dbg",
+  # crate dependencies
+  "tree_sitter",
+  "tree_sitter_python", "tree_sitter_typescript", "tree_sitter_go",
+  "tree_sitter_rust", "tree_sitter_php",
+  "rayon", "sha2", "serde", "serde_json", "tempfile",
+]
 
 [[project]]
 name = "graphify-report"
 repo = "./crates/graphify-report"
 lang = ["rust"]
+external_stubs = [
+  "std",
+  "Vec", "String", "Box", "Option", "Result",
+  "Some", "None", "Ok", "Err", "Self",
+  "format", "writeln", "println", "eprintln", "print", "eprint",
+  "vec", "write",
+  "assert", "assert_eq", "assert_ne",
+  "debug_assert", "debug_assert_eq", "debug_assert_ne",
+  "panic", "todo", "unimplemented", "unreachable", "dbg",
+  # crate dependencies
+  "serde", "serde_json", "csv", "tempfile",
+]
 
 [[project]]
 name = "graphify-cli"
 repo = "./crates/graphify-cli"
 lang = ["rust"]
+external_stubs = [
+  "std",
+  "Vec", "String", "Box", "Option", "Result",
+  "Some", "None", "Ok", "Err", "Self",
+  "format", "writeln", "println", "eprintln", "print", "eprint",
+  "vec", "write",
+  "assert", "assert_eq", "assert_ne",
+  "debug_assert", "debug_assert_eq", "debug_assert_ne",
+  "panic", "todo", "unimplemented", "unreachable", "dbg",
+  # crate dependencies
+  "clap", "toml", "serde", "serde_json", "serde_yaml",
+  "rayon", "notify", "notify_debouncer_mini",
+  "sha2", "include_dir", "thiserror", "chrono", "anyhow",
+]
 
 [[project]]
 name = "graphify-mcp"
 repo = "./crates/graphify-mcp"
 lang = ["rust"]
+external_stubs = [
+  "std",
+  "Vec", "String", "Box", "Option", "Result",
+  "Some", "None", "Ok", "Err", "Self",
+  "format", "writeln", "println", "eprintln", "print", "eprint",
+  "vec", "write",
+  "assert", "assert_eq", "assert_ne",
+  "debug_assert", "debug_assert_eq", "debug_assert_ne",
+  "panic", "todo", "unimplemented", "unreachable", "dbg",
+  # crate dependencies
+  "rmcp", "tokio", "clap", "toml",
+  "serde", "serde_json", "schemars", "rayon", "tempfile",
+]
