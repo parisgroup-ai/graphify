@@ -1,0 +1,39 @@
+[settings]
+output = "./report"
+weights = [0.4, 0.2, 0.2, 0.2]
+exclude = [
+  "target",
+  "node_modules",
+  ".git",
+  "dist",
+  "tests",
+  "__tests__",
+  ".next",
+  "build",
+]
+format = ["json", "csv", "md", "html"]
+
+[[project]]
+name = "graphify-core"
+repo = "./crates/graphify-core"
+lang = ["rust"]
+
+[[project]]
+name = "graphify-extract"
+repo = "./crates/graphify-extract"
+lang = ["rust"]
+
+[[project]]
+name = "graphify-report"
+repo = "./crates/graphify-report"
+lang = ["rust"]
+
+[[project]]
+name = "graphify-cli"
+repo = "./crates/graphify-cli"
+lang = ["rust"]
+
+[[project]]
+name = "graphify-mcp"
+repo = "./crates/graphify-mcp"
+lang = ["rust"]
