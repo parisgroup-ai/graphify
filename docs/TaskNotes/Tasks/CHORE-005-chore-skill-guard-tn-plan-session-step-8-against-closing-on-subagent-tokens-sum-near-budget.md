@@ -14,6 +14,8 @@ timeEntries:
   type: manual
   executor: claude-solo
   tokens: 44086
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - skill
 - tn-plan-session

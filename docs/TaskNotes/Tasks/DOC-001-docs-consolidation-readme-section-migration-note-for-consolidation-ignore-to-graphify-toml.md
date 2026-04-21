@@ -13,6 +13,8 @@ timeEntries:
   type: manual
   executor: claude-solo
   tokens: 48000
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - consolidation
 - docs

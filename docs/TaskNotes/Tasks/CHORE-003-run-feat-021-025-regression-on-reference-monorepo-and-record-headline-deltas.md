@@ -14,6 +14,8 @@ timeEntries:
   type: manual
   executor: claude-solo
   tokens: 62642
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - benchmark
 - regression

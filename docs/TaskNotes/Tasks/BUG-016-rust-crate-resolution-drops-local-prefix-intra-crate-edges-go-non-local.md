@@ -4,6 +4,8 @@ status: done
 priority: normal
 scheduled: 2026-04-20
 pomodoros: 0
+projects:
+- '[[sprint.md|Current Sprint]]'
 tags:
 - task
 - bug

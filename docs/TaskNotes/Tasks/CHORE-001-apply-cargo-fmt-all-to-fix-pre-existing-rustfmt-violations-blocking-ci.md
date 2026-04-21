@@ -5,6 +5,8 @@ priority: normal
 scheduled: 2026-04-15
 completed: 2026-04-17
 pomodoros: 0
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - ci
 - fmt

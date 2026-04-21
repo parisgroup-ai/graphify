@@ -5,6 +5,8 @@ priority: low
 scheduled: 2026-04-14
 completed: 2026-04-15
 pomodoros: 0
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - diff
 - trend

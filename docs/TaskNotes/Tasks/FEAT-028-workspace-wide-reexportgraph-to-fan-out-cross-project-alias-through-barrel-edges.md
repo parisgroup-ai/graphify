@@ -38,6 +38,8 @@ timeEntries:
   type: manual
   executor: claude-solo
   tokens: 142248
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - extract
 - typescript

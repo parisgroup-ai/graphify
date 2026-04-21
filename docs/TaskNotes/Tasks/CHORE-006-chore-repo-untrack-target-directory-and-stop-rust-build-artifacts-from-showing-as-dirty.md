@@ -7,6 +7,8 @@ completed: 2026-04-20
 timeEstimate: 20
 pomodoros: 0
 timeSpent: 0
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - repo
 - gitignore

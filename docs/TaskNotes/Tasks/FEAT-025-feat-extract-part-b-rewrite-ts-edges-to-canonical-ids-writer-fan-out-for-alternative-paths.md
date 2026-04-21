@@ -14,6 +14,8 @@ timeEntries:
   type: manual
   executor: claude-solo
   tokens: 136306
+projects:
+- '[[sprint.md|Current Sprint]]'
 tags:
 - task
 - feat

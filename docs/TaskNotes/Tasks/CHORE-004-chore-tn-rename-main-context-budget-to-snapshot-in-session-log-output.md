@@ -14,6 +14,8 @@ timeEntries:
   type: manual
   executor: claude-solo
   tokens: 46474
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - tn
 - dx

@@ -13,6 +13,8 @@ timeEntries:
   note: 'spike outcome: same-project covered, cross-project needs FEAT-028'
   type: manual
   executor: claude-solo
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - extract
 - typescript

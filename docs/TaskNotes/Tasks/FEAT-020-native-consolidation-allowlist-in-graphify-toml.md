@@ -1,8 +1,8 @@
 ---
 uid: feat-020
 status: done
-completed: 2026-04-18
 priority: normal
+completed: 2026-04-18
 pomodoros: 0
 timeSpent: 45
 timeEntries:
@@ -11,6 +11,8 @@ timeEntries:
   type: manual
   executor: claude-solo
   tokens: 72000
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - consolidation
 - config

@@ -5,6 +5,8 @@ priority: normal
 scheduled: 2026-04-14
 completed: 2026-04-14
 pomodoros: 0
+projects:
+- '[[sprint.md|Current Sprint]]'
 contexts:
 - report
 - dx
