@@ -4,6 +4,11 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.10] - 2026-04-21
+
+### Added
+- docs(php): `load_config` now emits a non-fatal stderr warning when a `[[project]]` declares `lang = ["php"]` AND a non-empty `local_prefix` — PSR-4 mappings from `composer.json` already provide the namespace prefix structure and resolver case 7 silently ignores `local_prefix` for PHP. `graphify init` template gains an inline comment steering PHP users away from the combination. CLAUDE.md documents the landmine under the PHP conventions cluster. Surfaced by CHORE-007's resolver-branch audit as the only "latent landmine" across all 10 branches; not a bug today, pure preventative documentation so future refactors to case 7 don't retroactively double-prefix existing configs (DOC-002).
+
 ## [0.11.9] - 2026-04-21
 
 ### Fixed

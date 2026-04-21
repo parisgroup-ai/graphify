@@ -1160,7 +1160,8 @@ output = "./report"
 name = "my-project"
 repo = "./src"
 lang = ["python"]           # Options: python, typescript, go, rust, php
-local_prefix = "app"
+local_prefix = "app"        # Leave unset for PHP — PSR-4 from composer.json
+                            # provides the namespace prefix structure.
 
 # Optional: declare packages that are intentionally external. Edges to these
 # are tagged `ExpectedExternal` instead of `Ambiguous`, so the ambiguity
@@ -1502,6 +1503,26 @@ fn load_config(path: &Path) -> Config {
     if let Err(err) = ConsolidationConfig::compile(raw) {
         eprintln!("Invalid [consolidation] section in {:?}: {err}", path);
         std::process::exit(1);
+    }
+    // DOC-002: PSR-4 mappings from composer.json already provide the PHP
+    // namespace prefix structure; resolver case 7 does not re-apply
+    // `local_prefix`, so setting one for a PHP project is silently ignored.
+    // Non-fatal warning — changing resolver behavior retroactively would
+    // double-prefix any config that does set one.
+    for project in &cfg.project {
+        let is_php = project.lang.iter().any(|l| l.eq_ignore_ascii_case("php"));
+        let has_prefix = project
+            .local_prefix
+            .as_deref()
+            .is_some_and(|p| !p.is_empty());
+        if is_php && has_prefix {
+            eprintln!(
+                "Warning: project '{}' sets local_prefix for a PHP project — \
+                 PSR-4 mappings from composer.json should be used instead. \
+                 Consider removing local_prefix.",
+                project.name
+            );
+        }
     }
     cfg
 }
