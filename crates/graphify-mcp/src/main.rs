@@ -42,6 +42,10 @@ struct Settings {
     exclude: Option<Vec<String>>,
     #[allow(dead_code)]
     format: Option<Vec<String>>,
+    /// Shared `external_stubs` prefixes that merge with every project's own
+    /// `external_stubs` list. Kept in sync with the CLI's `Settings`
+    /// (FEAT-034).
+    external_stubs: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -292,7 +296,15 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
         .map(|f| f.module_name.as_str())
         .collect();
 
-    let external_stubs = ExternalStubs::new(project.external_stubs.iter().cloned());
+    // FEAT-034: merge `[settings].external_stubs` with the project-level list.
+    let external_stubs = ExternalStubs::new(
+        settings
+            .external_stubs
+            .iter()
+            .flatten()
+            .chain(project.external_stubs.iter())
+            .cloned(),
+    );
 
     for (src_id, raw_target, mut edge) in all_raw_edges {
         let is_package = package_modules.contains(src_id.as_str());

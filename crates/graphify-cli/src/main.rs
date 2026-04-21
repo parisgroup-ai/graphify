@@ -165,6 +165,11 @@ struct Settings {
     /// (absent or `true`) keeps the FEAT-028 behaviour. See
     /// `docs/adr/0001-workspace-reexport-graph-gate.md`.
     workspace_reexport_graph: Option<bool>,
+    /// Shared `external_stubs` prefixes that merge with every project's own
+    /// `external_stubs` list. Lets single-language workspaces (e.g. Rust
+    /// with its prelude + std) declare the common set once instead of
+    /// repeating it per `[[project]]`. See FEAT-034.
+    external_stubs: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -1148,6 +1153,8 @@ output = "./report"
 # format = ["json", "csv", "md", "html"]    # output formats (also: neo4j, graphml, obsidian)
 # workspace_reexport_graph = true   # multi-project TS fan-out (FEAT-028);
 #                                     set to `false` to pin pre-v0.11.0 edges
+# external_stubs = ["std", "serde"] # shared prelude stubs; merges with each
+#                                     project's own external_stubs (FEAT-034)
 
 [[project]]
 name = "my-project"
@@ -2481,7 +2488,17 @@ fn run_extract_with_workspace(
 
     // Compile external-stub prefixes (issue #12): edges resolving to these
     // packages are tagged `ExpectedExternal` instead of `Ambiguous`.
-    let external_stubs = ExternalStubs::new(project.external_stubs.iter().cloned());
+    // FEAT-034: `[settings].external_stubs` contributes a shared list that
+    // merges with the project-level array. Overlap is harmless — the matcher
+    // sorts by length and dedupes identical prefixes.
+    let external_stubs = ExternalStubs::new(
+        settings
+            .external_stubs
+            .iter()
+            .flatten()
+            .chain(project.external_stubs.iter())
+            .cloned(),
+    );
 
     // Resolve edges and add them.
     for (src_id, raw_target, mut edge) in all_raw_edges {

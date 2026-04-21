@@ -173,6 +173,40 @@ mod tests {
     }
 
     #[test]
+    fn feat_034_chained_settings_and_project_inputs_match_identically() {
+        // FEAT-034: callers concatenate `settings.external_stubs` and
+        // `project.external_stubs` before passing to `ExternalStubs::new`.
+        // The constructor's longest-prefix-wins sort + dedup must leave the
+        // matcher behaviour identical to the equivalent single-list form,
+        // regardless of input order and harmless overlap.
+        let settings_stubs = ["std", "serde"];
+        let project_stubs = ["serde", "petgraph", "rand"];
+
+        let merged = ExternalStubs::new(
+            settings_stubs
+                .iter()
+                .copied()
+                .chain(project_stubs.iter().copied()),
+        );
+        let single = ExternalStubs::new(["std", "serde", "petgraph", "rand"]);
+
+        for target in [
+            "std::path::Path",
+            "serde::Serialize",
+            "petgraph::graph::DiGraph",
+            "rand::rngs::StdRng",
+            "tokio::runtime",
+            "local::module",
+        ] {
+            assert_eq!(
+                merged.matches(target),
+                single.matches(target),
+                "chained input must match identically to single-list input for '{target}'",
+            );
+        }
+    }
+
+    #[test]
     fn feat_032_rust_stub_coexists_with_legacy_slash_dot_boundaries() {
         // The new `::` boundary is additive. Existing npm/Python-shape
         // targets (which FEAT-032 was not designed to affect) must keep
