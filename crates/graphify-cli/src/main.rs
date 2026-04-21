@@ -1749,6 +1749,7 @@ fn build_phase1_for_workspace(
     let php_extractor = PhpExtractor::new();
 
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
+    resolver.set_local_prefix(&effective_local_prefix);
     for file in &files {
         resolver.register_module_path(&file.module_name, &file.path, file.is_package);
     }
@@ -1999,6 +2000,7 @@ fn run_extract_with_workspace(
 
     // Build resolver.
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
+    resolver.set_local_prefix(&effective_local_prefix);
     for file in &files {
         resolver.register_module_path(&file.module_name, &file.path, file.is_package);
     }

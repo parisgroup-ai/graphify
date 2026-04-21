@@ -218,6 +218,7 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
     let php_extractor = PhpExtractor::new();
 
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
+    resolver.set_local_prefix(local_prefix);
     for file in &files {
         resolver.register_module(&file.module_name);
     }

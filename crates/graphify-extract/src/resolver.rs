@@ -38,6 +38,11 @@ pub struct ModuleResolver {
     /// PSR-4 autoload mappings from `composer.json`: `(namespace_prefix, dir_prefix)`.
     /// Example: `("App\\", "src/")`.
     psr4_mappings: Vec<(String, String)>,
+    /// Project-level module prefix applied by the walker (e.g. `"src"` for a
+    /// typical Rust crate, `"app"` for a Python project, often empty for TS).
+    /// Used by language-specific resolver branches that need to re-prepend the
+    /// prefix when stripping a language-rooted prefix like Rust's `crate::`.
+    local_prefix: String,
     /// Workspace / project root (reserved for future use).
     #[allow(dead_code)]
     root: PathBuf,
@@ -57,8 +62,35 @@ impl ModuleResolver {
             ts_aliases_by_module: HashMap::new(),
             go_module_path: None,
             psr4_mappings: Vec::new(),
+            local_prefix: String::new(),
             root: normalize_path(root),
         }
+    }
+
+    /// Set the project-level module prefix (e.g. `"src"`).
+    ///
+    /// Required for correct Rust `crate::` resolution when the walker
+    /// auto-prefixes module names — without this, `crate::types::Node` from
+    /// any module in the crate resolves to `types.Node` instead of
+    /// `src.types.Node` and never matches a known local module (BUG-016).
+    pub fn set_local_prefix(&mut self, prefix: &str) {
+        self.local_prefix = prefix.to_owned();
+    }
+
+    /// Prepend `self.local_prefix` to `id` when non-empty and not already
+    /// present. Empty `id` collapses to the bare prefix; empty prefix is a
+    /// no-op.
+    fn apply_local_prefix(&self, id: &str) -> String {
+        if self.local_prefix.is_empty() {
+            return id.to_owned();
+        }
+        if id.is_empty() {
+            return self.local_prefix.clone();
+        }
+        if id == self.local_prefix || id.starts_with(&format!("{}.", self.local_prefix)) {
+            return id.to_owned();
+        }
+        format!("{}.{}", self.local_prefix, id)
     }
 
     /// Register a dot-notation module name as a local module.
@@ -270,7 +302,12 @@ impl ModuleResolver {
 
         // 6. Rust `crate::`, `super::`, `self::` imports.
         if let Some(rest) = raw.strip_prefix("crate::") {
-            let resolved = rest.replace("::", ".");
+            // `crate::` is rooted at the crate's source root, which the walker
+            // names with `local_prefix` (e.g. `src` for a Rust crate). Strip
+            // `crate::`, normalize separators, then re-prepend the prefix so
+            // the lookup matches registered modules. (BUG-016)
+            let stripped = rest.replace("::", ".");
+            let resolved = self.apply_local_prefix(&stripped);
             let is_local = self.known_modules.contains_key(&resolved);
             return (resolved, is_local, 0.9);
         }
@@ -1467,7 +1504,11 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn make_rust_resolver() -> ModuleResolver {
+        // Mirrors a real Rust crate after walker auto-detects local_prefix="src":
+        // every registered module name carries the "src" prefix, so the
+        // resolver must know about the prefix to canonicalize `crate::` paths.
         let mut r = ModuleResolver::new(Path::new("/repo"));
+        r.set_local_prefix("src");
         for m in &[
             "src",
             "src.handler",
@@ -1484,20 +1525,51 @@ mod tests {
     #[test]
     fn resolve_rust_crate_import() {
         let r = make_rust_resolver();
-        let (id, _is_local, confidence) = r.resolve("crate::handler", "src.services.db", false);
-        assert_eq!(id, "handler");
-        // Note: "handler" is not in known_modules (it's "src.handler").
-        // The crate:: prefix strips to root-relative, which is just "handler".
-        // In practice, the registered module might be prefixed differently.
+        let (id, is_local, confidence) = r.resolve("crate::handler", "src.services.db", false);
+        // BUG-016: `crate::` is rooted at the crate's source root, which the
+        // walker names with `local_prefix`. Pre-fix this returned "handler"
+        // (non-local placeholder) — now correctly canonicalized to "src.handler".
+        assert_eq!(id, "src.handler");
+        assert!(is_local);
         assert!((confidence - 0.9).abs() < f64::EPSILON);
     }
 
     #[test]
     fn resolve_rust_crate_nested_import() {
         let r = make_rust_resolver();
-        let (id, _, confidence) = r.resolve("crate::models::user", "src.handler", false);
-        assert_eq!(id, "models.user");
+        let (id, is_local, confidence) = r.resolve("crate::models::user", "src.handler", false);
+        assert_eq!(id, "src.models.user");
+        assert!(is_local);
         assert!((confidence - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resolve_rust_crate_import_smoking_gun_bug_016() {
+        // The exact case observed when dogfooding graphify on graphify-core:
+        // `crate::types::Node` from any module in the crate must resolve to
+        // `src.types.Node` (the canonical local id) so intra-crate edges land
+        // on the local node and contribute to in-degree / hotspot scoring.
+        let mut r = ModuleResolver::new(Path::new("/repo"));
+        r.set_local_prefix("src");
+        r.register_module("src.types");
+        r.register_module("src.types.Node");
+        r.register_module("src.graph");
+
+        let (id, is_local, _) = r.resolve("crate::types::Node", "src.graph", false);
+        assert_eq!(id, "src.types.Node");
+        assert!(is_local, "intra-crate `crate::` reference must be local");
+    }
+
+    #[test]
+    fn resolve_rust_crate_import_no_prefix_unchanged() {
+        // Empty local_prefix (legacy/unset) must keep the pre-fix behaviour:
+        // strip `crate::` and replace `::` with `.`, no prepend.
+        let mut r = ModuleResolver::new(Path::new("/repo"));
+        r.register_module("handler");
+
+        let (id, is_local, _) = r.resolve("crate::handler", "services.db", false);
+        assert_eq!(id, "handler");
+        assert!(is_local);
     }
 
     #[test]

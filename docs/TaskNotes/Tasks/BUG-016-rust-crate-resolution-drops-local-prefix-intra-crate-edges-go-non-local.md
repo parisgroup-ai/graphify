@@ -1,6 +1,6 @@
 ---
 uid: bug-016
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-20
 pomodoros: 0
