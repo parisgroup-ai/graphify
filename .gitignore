@@ -27,3 +27,7 @@ tests/fixtures/*/monorepo/report/
 
 # tn (tasknotes-cli) per-machine calibration — not shareable
 .tasknotes/
+
+# Claude Code runtime state — never commit
+.claude/scheduled_tasks.lock
+.claude/session-journal.md
