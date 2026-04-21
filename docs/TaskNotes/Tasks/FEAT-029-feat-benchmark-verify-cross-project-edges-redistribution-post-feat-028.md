@@ -1,8 +1,9 @@
 ---
 uid: feat-029
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-20
+completed: 2026-04-20
 timeEstimate: 75
 pomodoros: 0
 timeSpent: 0
