@@ -1,3 +1,27 @@
+//! Module resolver: raw import string → canonical dot-notation id, plus an
+//! `is_local` signal and a confidence score.
+//!
+//! The resolver dispatches raw input through a sequence of language-specific
+//! branches in [`ModuleResolver::resolve_with_depth`]. Each branch has two
+//! cross-cutting invariants:
+//!
+//! 1. **`local_prefix` application.** If the branch rebuilds a module id
+//!    from raw input (stripping a language-specific root like Python dots,
+//!    Rust `crate::`, TS aliases), the returned id must re-prepend
+//!    `self.local_prefix` so it matches ids registered by the walker.
+//!    Branches that look up `from_module`-derived ids are prefix-safe by
+//!    construction — `from_module` already carries the prefix.
+//! 2. **Termination bound.** Branches that recurse must carry a depth
+//!    counter that decrements on every recursion and returns a finite
+//!    non-local result when exhausted. Guard against self-referential
+//!    rewrites that grow the input unbounded (the BUG-017 shape).
+//!
+//! ## Audit log
+//!
+//! | Date       | Auditor | Result | Notes                                      |
+//! |------------|---------|--------|--------------------------------------------|
+//! | 2026-04-21 | CHORE-007 | PASS | All 10 branches pass invariants; see task |
+
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
