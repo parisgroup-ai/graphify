@@ -1,71 +1,76 @@
-# Session Brief — Next Session (post-2026-04-22 afternoon, FEAT-035 + FEAT-036 ship, FEAT-037/038 queued)
+# Session Brief — Next Session (post-2026-04-22 late-afternoon, FEAT-037 ship)
 
-**Last session:** 2026-04-22 afternoon. Comparative-analysis → feature-implementation pipeline. Started by comparing graphify with the unrelated `safishamsi/graphify` Python project (at `/Users/cleitonparis/www/pg/repos_outros/graphify`); extracted 3 portable ideas as task proposals, implemented 2 of them (FEAT-035 + FEAT-036) back-to-back with full TDD cycles, landed a follow-up ticket (FEAT-038) from dogfood-exposed limitations of FEAT-036.
+**Last session:** 2026-04-22 late afternoon. Picked up FEAT-037 (architectural smell edges in pr-summary) from the prior session's explicit hand-off. Shipped in six TDD slices end-to-end: analysis.json schema extension → AnalysisSnapshot deserialization → pure `score_smells` scorer → `render_with_smells` integration → `--top N` CLI flag → two integration tests. No code changed for FEAT-038 (deferred, low priority).
 
 ## Current State
 
-- **Graphify**: branch `main`, **working tree DIRTY — 8 modified files + 4 new task files staged as untracked, NO commits this session yet**. Version **0.11.10** on PATH (unchanged — no release intended this session).
-- **Session commits**: **zero**. All FEAT-035 + FEAT-036 work is pre-commit, staged in the working tree. The session-close auto-commit will land it as `chore(session): close 2026-04-22 FEAT-035 + FEAT-036 community cohesion + split oversized`.
-- **Task state**: 3 new FEATs opened this session (FEAT-035/036/037) + 1 follow-up (FEAT-038). FEAT-035 and FEAT-036 marked `done` via `tn done` before the close. FEAT-037 and FEAT-038 remain `open`.
+- **Graphify**: branch `main`, **working tree DIRTY — 8 modified files + 1 new file (`crates/graphify-report/src/smells.rs`), NO commits this session yet**. Version **0.11.10** on PATH (unchanged — no release intended).
+- **Session commits**: **zero**. All FEAT-037 work is pre-commit, staged in the working tree. The session-close auto-commit will land it as `chore(session): close 2026-04-22 late afternoon FEAT-037 architectural smell edges`.
+- **Task state**: FEAT-037 marked `done` via `tn done` (all 7 acceptance criteria ticked). FEAT-038 remains `open` (low priority, 0/5 subtasks).
 - **Local binaries**: `graphify 0.11.10`, `tn 0.5.9`.
-- **Architectural health (`graphify check`)**: all 5 projects PASS, 0 cycles, max_hotspot **0.559 (`src.server` in graphify-mcp)** — unchanged vs prior session, but the community counts shifted (graphify-report 6 → 7 from FEAT-036 split).
+- **Architectural health (`graphify check`)**: all 5 projects PASS, 0 cycles. Max_hotspot **0.559 (`src.server` in graphify-mcp)** — unchanged vs prior session. `src.pr_summary` at 0.433 (rose slightly as expected after smell scoring integration; not a new hotspot direction).
+- **Test tally**: 754 → **778 passed** (+24 net-new tests across 4 crates). 0 failed. `cargo fmt --all -- --check` clean. `cargo clippy --workspace -- -D warnings` clean.
 
 ## What shipped this session
 
-**FEAT-035 — community cohesion score (13 new tests)**
+**FEAT-037 — architectural smell edges in pr-summary (24 new tests, ~500 LOC)**
 
-- New `cohesion: f64` field on `Community` (graphify-core), `HistoricalCommunity` (history.rs, with `#[serde(default)]`), and `CommunityRecord` (graphify-report analysis.json writer).
-- Pure helpers in `crates/graphify-core/src/community.rs`: `cohesion_from_counts(n, intra_edges)` (formula) + `cohesion(members, raw)` (single-pass walker with HashSet-deduped unordered pairs).
-- Markdown report now renders `### Community N (M members, cohesion X.XX)`.
-- Dogfood numbers (5 crates): cohesion spans 0.01 (graphify-cli 197-member catch-all) to 0.105 (graphify-cli 15-member tight group). Confirmed serialization landed in both `analysis.json` AND Markdown report.
-- **Trap captured in CLAUDE.md**: `Community` has TWO independent serialization surfaces (`HistoricalCommunity` for history/drift, `CommunityRecord` for analysis.json). Adding the field only to one leaves the other unchanged. Regression test `write_analysis_json_includes_cohesion_per_community` guards both paths now.
-
-**FEAT-036 — split oversized communities Phase 3 (7 new tests, ~135 LOC)**
-
-- New `split_oversized(community, adj, n)` wired after `merge_singletons` in BOTH `detect_communities` and `label_propagation`.
-- Threshold `max(MIN_SPLIT_SIZE=10, round(n * MAX_COMMUNITY_FRACTION=0.25))`, sub-pass tries Louvain from singletons → falls back to label-propagation → leaves community untouched if both converge to 1 sub-label.
-- Refactor: Phase-1 loop extracted to `louvain_local_moves` helper; label-prop loop extracted to `label_prop_local` helper. Both top-level functions are now thin wrappers over the helpers. Zero duplication, zero behavioral change for pre-FEAT-036 paths.
-- Recursion depth capped at 1 by construction.
-- Dogfood: graphify-report's 75-member community SPLIT into 46 + 29 (1/4 oversized). Three other oversized communities (graphify-cli 197, graphify-mcp 59 + 42) remain unsplit — known limitation of Louvain/label-prop greedy moves on internally-connected subgraphs, aligned with Python ref behavior. **Tracked as FEAT-038 follow-up**.
-
-**FEAT-037 — architectural smell edges in pr-summary (task opened, no code)**
-
-- Task body captures full design: composite score per edge (confidence bonus + cross-community + in-cycle + peripheral→hub + hotspot-adjacent), pure-renderer additions to `graphify pr-summary`, 8 unit tests + 1 integration.
-- Adapted from the Python ref's `surprising_connections` / `_surprise_score` (`analyze.py:131`), reframed from AI-explainability ("tell me interesting") to code-review triage ("which edges should I read first in this PR").
-
-**FEAT-038 — Leiden refinement or spectral bisection follow-up (task opened, no code)**
-
-- Direct follow-up from FEAT-036 dogfood evidence: 3 of 4 oversized communities resist Louvain+LP split. Design outlines 3 options (A: port Leiden refinement step, B: spectral bisection via `nalgebra`, C: Kernighan-Lin modularity bisection). Recommendation: Option A — closest to Python ref's Leiden behavior, no new dependency.
+- **Slice 1**: `analysis.json` schema extension in `graphify-report/src/json.rs`. New `edges` array; each record carries source/target/kind/confidence/confidence_kind/source_community/target_community/in_cycle. Cycle-edge set built by walking each `cycles` entry with `(i+1) % n` wraparound (closed-ring convention). Community lookup sourced from `NodeMetrics.community_id` (node-indexed).
+- **Slice 2**: `AnalysisSnapshot` + `EdgeSnapshot` in graphify-core with `#[serde(default)]` on the new field → legacy snapshots (including trend history) still deserialize. Live-mode `graphify diff` gets `edges: vec![]` since drift computation doesn't use per-edge data.
+- **Slice 3**: new `graphify-report/src/smells.rs` module with pure `score_smells(analysis, drift, top_n) -> Vec<SmellEdge>`. Formula per task body: `confidence_bonus + 2·cross_community + 2·in_cycle + 1·peripheral→hub + 1·hotspot_adjacent`, floor=3, deterministic tie-break (drift-new first, then lex).
+- **Slice 4**: `render` gets sibling `render_with_smells(…, smells_top_n)` entry point. `render` is now a thin wrapper passing `DEFAULT_SMELLS_TOP_N = 5`. New `#### Architectural smells` section renders only when `score_smells` returns non-empty.
+- **Slice 5**: CLI flag `graphify pr-summary <dir> --top N` (default 5, `--top 0` suppresses).
+- **Slice 6**: two end-to-end integration tests in `crates/graphify-cli/tests/pr_summary_integration.rs` — smelly-fixture renders + `--top 0` suppresses.
+- **Dogfood**: real coupling signal surfaces across all 5 crates. graphify-extract top 3 smells are all `src.drizzle → graphify_core::contract::*` (Ambiguous, 7) — drizzle tightly coupled to contract types across the crate boundary.
 
 ## Decisions Made (don't re-debate)
 
-- **False positives impossible by construction.** FEAT-036's split only fires when sub-Louvain/sub-LP find ≥2 sub-labels. Never breaks a genuinely cohesive community. This is the safety guarantee that makes FEAT-036 shippable even with the known limitation.
-- **Python ref's Leiden vs our Louvain is a real capability gap, not just implementation detail.** The Python impl reliably splits because Leiden has a refinement step that guarantees well-connected output communities. Our sub-Louvain from singletons collapses back to 1 label on sparse-but-connected subgraphs. Documented in FEAT-036 task body + CLAUDE.md; actionable via FEAT-038.
-- **TDD cycles per feature were the right unit of discipline.** FEAT-035 and FEAT-036 each went red-green-refactor-red-green-refactor through 3 cycles (helper → walker → integration), landing 20 tests total across the two features, zero regressions on 754 pre-existing tests. The discipline specifically caught the dual-serialization-surface trap on FEAT-035 (Community field added to `HistoricalCommunity` but not `CommunityRecord` — first dogfood surfaced the gap immediately).
-- **No version bump / no release.** Changes are pre-commit; when they land via `chore(session): close` auto-commit they still won't trigger a release (no tag push). Version bump + release is a separate decision; FEAT-035/036 are in main on 0.11.10 until a deliberate 0.11.11 or 0.12.0 bump.
-- **FEAT-037 stays open, not picked up this session.** Two features shipped with full TDD was a rich session already; starting a third feature with remaining context would have compressed the cycle. Better to close clean and let the next session pick it up fresh.
+- **Smells-section heading uses `####`, not `##`.** Task body wrote `## Architectural smells`; I used `#### Architectural smells` to match the existing section hierarchy (`### Graphify —` top header, `####` for `Drift in this PR` / `Outstanding issues`). Stylistically consistent with the rest of pr-summary. If a future PR reviewer prefers the literal task-body form, one-line change in `render_smells_section`.
+- **Per-edge data lives in `analysis.json`, not loaded from `graph.json` at render time.** Task body explicitly specified "pure function over `AnalysisSnapshot`" and authorized extending analysis.json. Alternative (load `graph.json` alongside in pr-summary) would break the "pure renderer" contract. File-size impact: modest (~3x nodes in edge records), fine at graphify's scale. Can revisit with a gate toggle if a larger monorepo shows bloat.
+- **Hotspot-adjacent reason names the TARGET when both endpoints are hotspots.** Rationale: the typical "leaf coupling INTO a hub" shape is the useful direction to surface for a reviewer. Hotspot-depending-on-leaf is rare. Documented in the `score_edge` fn body.
+- **Confidence bonus matches on Debug-formatted strings, not the enum.** `EdgeSnapshot.confidence_kind: String` (writer uses `format!("{:?}", kind)`). Unknown variants fall through to 0 defensively — future `ConfidenceKind` additions won't crash old scorers. Trade: one match arm needs to be kept in sync manually, but the enum lives in graphify-core and the matcher in graphify-report — a compile-time link would require an unnecessary re-export. String-match is the lighter coupling.
+- **FEAT-037 shipped with minimum bonuses (5, matching task body).** No addition of "low-cohesion-community edge" bonus (FEAT-035 follow-up) or hub/bridge/mixed-based scoring (FEAT-017 integration). These are explicitly called out in the task body's "Related" section as optional future refinements — defer until real-world PR use identifies which missing signal actually matters.
+- **Test fixtures ≤10 nodes make EVERY node implicitly a top-10 hotspot.** 3 tests initially failed with off-by-one scores because of this. Fix: assert on the `reasons` list (intent check: which bonus fired) rather than exact score (fixture-accident check: which other bonuses also fired). Now the recommended pattern for future scoring-formula tests. Documented in CLAUDE.md.
+- **No version bump / no release.** Changes are pre-commit; when they land via `chore(session): close` auto-commit they still won't trigger a release (no tag push). Version bump + release is a separate deliberate decision; FEAT-037 is in main on 0.11.10 until 0.11.11 or 0.12.0.
 
 ## Meta Learnings This Session
 
-- **`replace_all` rename can silently collapse function-name space.** A straight `replace_all` of `compute_cohesion` → `cohesion` collapsed 7 test functions in `community.rs` into 5 distinct names (two pairs collided — formula tests vs walker tests). Rust compiler flagged the dupes at build time but the fix required reading + renaming retroactively. Lesson: any `replace_all` that renames an identifier referenced across a test module's fn names needs a name-collision audit before running. Now documented in CLAUDE.md as a specific class of bug pattern.
-- **Dogfood as immediate feedback loop is worth the 8-second rebuild.** The FEAT-035 serialization gap (cohesion in `HistoricalCommunity` but not `CommunityRecord`) was caught in the first post-implementation dogfood — before commit, before PR, before anyone else saw the code. `cargo build --release && ./target/release/graphify run && python -c "...check json..."` is a 15-second cycle. Invoking it eagerly at feature-complete found a bug that unit tests had missed.
-- **Known-limitation documentation is load-bearing.** FEAT-036 shipped with 3 of 4 oversized communities unsplit. Without the task-body + CLAUDE.md + FEAT-038 follow-up, a future maintainer reviewing the code could easily mistake the partial coverage for a bug and "fix" it by making the split more aggressive (introducing false positives). The explicit "false positives impossible by construction, Python ref has same failure mode, Leiden is the real fix" chain of reasoning in the docs prevents that regression.
-- **Comparing to an unrelated project produces usefully-different priors.** The survey of `safishamsi/graphify` (Python, GraphRAG for AI assistants) exposed 3 concrete features worth porting conceptually (cohesion, community splitting, architectural smells). None of those were on my radar before the comparison. The ROI on a 2-hour comparative analysis was two landed features + two queued ones in the same session.
-- **Session-journal still absent (7 consecutive sessions).** Pattern persists. This session would have particularly benefited — the comparative analysis → implementation pipeline had lots of mid-flight insights (the LanguageConfig pattern deliberation, the choice to port cohesion but NOT the cross-file-imports pattern) that are captured only in the session summary I typed to the user, not in a structured record.
+- **"Audit step 1" in a task body isn't always accurate.** FEAT-037's Step 1 said "most are already there — audit `graphify-core/src/analysis.rs` (or the equivalent) to confirm." The audit found **zero** per-edge data in `analysis.json` — it only had per-*node* fields. Task author confused node-level (community_id, in_cycle) with edge-level data. Lesson: treat task-body "confirmations" as hypotheses to test, not facts to assume. The step-1 audit IS the work.
+- **Pure-renderer contract is load-bearing.** The temptation to load `graph.json` in pr-summary to avoid bloating analysis.json would have worked functionally but broken the contract that other downstream consumers may rely on. Resisting shortcuts at the architecture boundary paid off — the `render(project_name, analysis, drift, check)` signature is now extended but still pure-in with the same inputs-only pattern.
+- **TDD slices naturally surface scope gaps.** Slice 1 (analysis.json emit) landed before any logic needed it. Slice 3 (the scorer) landed before any UI needed it. This sequencing meant each slice had self-contained tests and each slice could be shipped independently if the session ran out of time. By the time I reached Slice 4 (pr_summary integration), the scorer was battle-tested against 11 unit tests — integration was boilerplate.
+- **Session-journal still absent (8 consecutive sessions).** Pattern persists. Would have particularly benefited this session — the scope-gap-vs-task-body reveal (analysis.json has no edges) was a real mid-flight insight that only got captured in the CLAUDE.md entry, not in structured session record.
+- **File-move staleness trap on session-brief from prior session.** The prior session brief said "FEAT-037 stays open, not picked up this session" and recommended it as next pick. That recommendation was still live at session start — reading the brief first saved a brainstorm cycle. Handoff artifact working as intended.
 
 ## Open Debts
 
-- **FEAT-037 architectural smell edges** — task open, full design in body, not yet implemented. Natural next pick.
-- **FEAT-038 Leiden refinement / spectral bisection** — task open, priority low (graphify-report split gave partial value; deferring is safe).
-- **15 unshared skills** in `~/.claude/skills/` — unchanged list from prior 7 briefs. 0 modified skills this session. `.skills-sync-ignore` pass still deferred. (prior-brief carry-over, 7 sessions)
-- **`sprint.md` YAML frontmatter error** — `missing field 'uid'` firing on every `tn list`. Deferred pending tn upstream. (prior-brief carry-over, 7 sessions)
-- **Score-tie HashMap non-determinism** — analysis.json `metrics` array reorders between runs when many nodes have identical scores (documented pre-existing in FEAT-034 entry of CLAUDE.md). Not blocking. The `communities` section itself is deterministic post-FEAT-036 (verified via hash comparison this session).
-- **Session-journal absent across 7 consecutive sessions.** Low-cost habit, still not blocking, still not started.
+- **FEAT-038 Leiden refinement / spectral bisection** — task open, priority low. Follow-up from FEAT-036 partial split coverage. Next-session candidate if user wants to finish the cohesion-community story before moving to new territory.
+- **16 unshared skills** in `~/.claude/skills/` — incremented from 15 last session (one more skill appeared in the directory without being in the cache). Same list, `.skills-sync-ignore` pass still deferred. 0 modified skills this session. (prior-brief carry-over, now 8 sessions)
+- **Release 0.11.11 or 0.12.0 deferred.** FEAT-035 + FEAT-036 + FEAT-037 all shipped on main but 0.11.10 binary still. User decision required: minor bump (0.12.0) would acknowledge the community-cohesion + smell-edge feature additions; patch bump (0.11.11) would align with the "no breaking changes" convention. Tag + CI release workflow unchanged from prior session notes.
+- **FEAT-037 follow-on ideas not yet ticketed**: (a) HTML report integration for smells (`graphify-report/src/html.rs` could surface a sidebar panel); (b) `--format json` output for smells (for CI integration); (c) `graphify check --smells-threshold N` gating (explicitly out-of-scope per FEAT-037 task body, but worth re-evaluating once dogfood shows how stable the scoring is across real PRs). None opened because FEAT-037 as shipped is already a complete story; these are optimizations to revisit after use.
 
 ## Suggested Next Steps
 
-1. **FEAT-037 (architectural smell edges in pr-summary)** — cleanest next pick. Self-contained pure-renderer addition, full design in task body, 8 unit + 1 integration test. ~2-3 hour scope. Would give the pr-summary its first "actionable triage" signal beyond hotspot deltas.
-2. **Commit the session's pre-commit work intentionally** — when next session starts, check if the `chore(session): close 2026-04-22` commit actually landed or got deferred. The session-close flow includes an auto-commit step; confirm it ran before assuming main is in sync.
-3. **FEAT-038 only if FEAT-037 is blocked or uncomfortable** — Leiden refinement is interesting work but not high-signal-per-hour; low priority compared to FEAT-037's visible user impact.
+1. **FEAT-038** (Leiden refinement / spectral bisection) — natural next pick if user wants to finish the cohesion-community story the prior two sessions started. Task body is already drafted with 3 options analyzed; pick one and ship.
+2. **Release 0.12.0** — FEAT-035/036/037 all shipped and tested; binary is stale. Version bump + tag push + `cargo install --path` refresh. One-session chore.
+3. **Brainstorm new feature direction** — backlog is thin (2 open tasks, one low-priority). Options: (a) cross-project smell detection in pr-summary (show smells across the whole monorepo, not per-project); (b) HTML-report smell surfacing; (c) smells-as-gate in `graphify check` (explicitly deferred by FEAT-037 task body); (d) new territory (language support, integration target, etc.)
 
-Prior session suggested "true brainstorm rather than ranked list" — this session executed on that: brainstormed from the comparative analysis first, then ranked 3 derived ideas, then prioritized FEAT-035 as the cheapest warmup. The pattern worked — two features shipped clean in one session.
+## Quick-start commands for the next session
+
+```bash
+# Orient
+/session-start
+
+# Option A — keep going on cohesion/community work
+tn start FEAT-038
+
+# Option B — release cycle
+# (edit Cargo.toml, bump to 0.12.0, then)
+cargo build --release -p graphify-cli
+git commit -am "fix: bump version to 0.12.0"
+git tag v0.12.0
+git push origin main --tags
+cargo install --path crates/graphify-cli --force
+
+# Option C — brainstorm
+# describe goal, then /tn-plan-session
+```

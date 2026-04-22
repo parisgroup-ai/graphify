@@ -524,6 +524,11 @@ enum Commands {
     PrSummary {
         /// Path to a single project's Graphify output directory (for example ./report/my-app).
         dir: PathBuf,
+
+        /// Number of architectural-smell rows to surface in the summary.
+        /// Pass 0 to suppress the smells section entirely. Default: 5.
+        #[arg(long, default_value_t = 5)]
+        top: usize,
     },
 
     /// Emit consolidation candidates — symbols whose leaf name is shared by
@@ -1097,8 +1102,8 @@ fn main() {
             cmd_trend(&config, project.as_deref(), output.as_deref(), limit, json);
         }
 
-        Commands::PrSummary { dir } => {
-            run_pr_summary(&dir);
+        Commands::PrSummary { dir, top } => {
+            run_pr_summary(&dir, top);
         }
 
         Commands::Consolidation {
@@ -1296,6 +1301,7 @@ fn cmd_diff(
                     total_cycles,
                 },
                 allowlisted_symbols: None,
+                edges: vec![],
             };
             (b, a)
         }
@@ -4257,7 +4263,7 @@ fn resolve_project_name(dir: &std::path::Path) -> String {
 // pr-summary command
 // ---------------------------------------------------------------------------
 
-fn run_pr_summary(dir: &std::path::Path) {
+fn run_pr_summary(dir: &std::path::Path, smells_top_n: usize) {
     use graphify_core::diff::{AnalysisSnapshot, DiffReport};
     use graphify_report::check_report::CheckReport;
     use graphify_report::pr_summary;
@@ -4317,7 +4323,13 @@ fn run_pr_summary(dir: &std::path::Path) {
         load_optional_json::<CheckReport>(&dir.join("check-report.json"), "check-report.json");
 
     let project_name = resolve_project_name(dir);
-    let output = pr_summary::render(&project_name, &analysis, drift.as_ref(), check.as_ref());
+    let output = pr_summary::render_with_smells(
+        &project_name,
+        &analysis,
+        drift.as_ref(),
+        check.as_ref(),
+        smells_top_n,
+    );
     print!("{}", output);
 }
 

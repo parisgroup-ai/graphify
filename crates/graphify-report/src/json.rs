@@ -115,6 +115,18 @@ struct CommunityRecord<'a> {
 }
 
 #[derive(Serialize)]
+struct EdgeRecord<'a> {
+    source: &'a str,
+    target: &'a str,
+    kind: String,
+    confidence: f64,
+    confidence_kind: String,
+    source_community: usize,
+    target_community: usize,
+    in_cycle: bool,
+}
+
+#[derive(Serialize)]
 struct Summary {
     total_nodes: usize,
     total_edges: usize,
@@ -140,6 +152,7 @@ struct ConfidenceSummary {
 #[derive(Serialize)]
 struct AnalysisJson<'a> {
     nodes: Vec<MetricsRecord<'a>>,
+    edges: Vec<EdgeRecord<'a>>,
     communities: Vec<CommunityRecord<'a>>,
     cycles: &'a [Cycle],
     summary: Summary,
@@ -202,6 +215,33 @@ pub fn write_analysis_json_with_allowlist(
             id: c.id,
             members: &c.members,
             cohesion: c.cohesion,
+        })
+        .collect();
+
+    // FEAT-037: per-edge records for architectural-smell scoring downstream.
+    let community_lookup: std::collections::HashMap<&str, usize> = metrics
+        .iter()
+        .map(|m| (m.id.as_str(), m.community_id))
+        .collect();
+    let cycle_edges: std::collections::HashSet<(&str, &str)> = cycles
+        .iter()
+        .flat_map(|cycle| {
+            let n = cycle.len();
+            (0..n).map(move |i| (cycle[i].as_str(), cycle[(i + 1) % n].as_str()))
+        })
+        .collect();
+    let edges_rec: Vec<EdgeRecord<'_>> = graph
+        .edges()
+        .into_iter()
+        .map(|(src, tgt, edge)| EdgeRecord {
+            source: src,
+            target: tgt,
+            kind: format!("{:?}", edge.kind),
+            confidence: edge.confidence,
+            confidence_kind: format!("{:?}", edge.confidence_kind),
+            source_community: community_lookup.get(src).copied().unwrap_or(0),
+            target_community: community_lookup.get(tgt).copied().unwrap_or(0),
+            in_cycle: cycle_edges.contains(&(src, tgt)),
         })
         .collect();
 
@@ -271,6 +311,7 @@ pub fn write_analysis_json_with_allowlist(
 
     let payload = AnalysisJson {
         nodes,
+        edges: edges_rec,
         communities: communities_rec,
         cycles,
         summary,
@@ -482,6 +523,138 @@ mod tests {
         let content = std::fs::read_to_string(&path).unwrap();
         let value: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(value.get("allowlisted_symbols").is_none());
+    }
+
+    // ---- FEAT-037: per-edge records in analysis.json ----
+
+    /// Builds a graph with a 2-node cycle a→b, b→a plus a non-cycle edge a→c.
+    /// Metrics place a,b in community 0 and c in community 1.
+    fn make_cycle_fixture() -> (CodeGraph, Vec<NodeMetrics>, Vec<Cycle>) {
+        use graphify_core::types::ConfidenceKind;
+        let mut g = CodeGraph::new();
+        g.add_node(Node::module("a", "a.py", Language::Python, 1, true));
+        g.add_node(Node::module("b", "b.py", Language::Python, 1, true));
+        g.add_node(Node::module("c", "c.py", Language::Python, 1, true));
+        g.add_edge(
+            "a",
+            "b",
+            Edge::imports(1).with_confidence(0.5, ConfidenceKind::Ambiguous),
+        );
+        g.add_edge(
+            "b",
+            "a",
+            Edge::imports(1).with_confidence(0.7, ConfidenceKind::Inferred),
+        );
+        g.add_edge(
+            "a",
+            "c",
+            Edge::imports(1).with_confidence(1.0, ConfidenceKind::Extracted),
+        );
+
+        let metrics = vec![
+            NodeMetrics {
+                id: "a".into(),
+                community_id: 0,
+                ..Default::default()
+            },
+            NodeMetrics {
+                id: "b".into(),
+                community_id: 0,
+                ..Default::default()
+            },
+            NodeMetrics {
+                id: "c".into(),
+                community_id: 1,
+                ..Default::default()
+            },
+        ];
+
+        let cycles: Vec<Cycle> = vec![vec!["a".into(), "b".into()]];
+
+        (g, metrics, cycles)
+    }
+
+    #[test]
+    fn write_analysis_json_emits_edges_array_with_per_edge_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let (graph, metrics, cycles) = make_cycle_fixture();
+
+        write_analysis_json(&metrics, &[], &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let edges = value["edges"]
+            .as_array()
+            .expect("analysis.json must expose `edges` as an array");
+        assert_eq!(edges.len(), 3, "expected one record per graph edge");
+        for edge in edges {
+            assert!(edge["source"].is_string());
+            assert!(edge["target"].is_string());
+            assert!(edge["kind"].is_string());
+            assert!(edge["confidence"].is_number());
+            assert!(edge["confidence_kind"].is_string());
+            assert!(edge["source_community"].is_number());
+            assert!(edge["target_community"].is_number());
+            assert!(edge["in_cycle"].is_boolean());
+        }
+    }
+
+    #[test]
+    fn analysis_edge_in_cycle_flag_matches_cycle_membership() {
+        // FEAT-037: an edge is in_cycle iff (src, tgt) appears as a consecutive
+        // pair in any simple cycle, including wraparound (last -> first).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let (graph, metrics, cycles) = make_cycle_fixture();
+
+        write_analysis_json(&metrics, &[], &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let edges = value["edges"].as_array().unwrap();
+
+        let find = |src: &str, tgt: &str| -> &serde_json::Value {
+            edges
+                .iter()
+                .find(|e| e["source"] == src && e["target"] == tgt)
+                .unwrap_or_else(|| panic!("edge {src}->{tgt} missing"))
+        };
+
+        // Both cycle edges flagged true.
+        assert_eq!(find("a", "b")["in_cycle"], true);
+        assert_eq!(find("b", "a")["in_cycle"], true);
+        // Non-cycle edge flagged false.
+        assert_eq!(find("a", "c")["in_cycle"], false);
+    }
+
+    #[test]
+    fn analysis_edge_carries_source_and_target_community_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let (graph, metrics, cycles) = make_cycle_fixture();
+
+        write_analysis_json(&metrics, &[], &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let edges = value["edges"].as_array().unwrap();
+
+        let ac = edges
+            .iter()
+            .find(|e| e["source"] == "a" && e["target"] == "c")
+            .unwrap();
+        // Cross-community edge (a in 0, c in 1).
+        assert_eq!(ac["source_community"], 0);
+        assert_eq!(ac["target_community"], 1);
+
+        let ab = edges
+            .iter()
+            .find(|e| e["source"] == "a" && e["target"] == "b")
+            .unwrap();
+        // Same-community edge.
+        assert_eq!(ab["source_community"], 0);
+        assert_eq!(ab["target_community"], 0);
     }
 
     #[test]

@@ -161,3 +161,86 @@ fn pr_summary_end_to_end_against_realistic_fixture() {
     // Footer
     assert!(stdout.contains("graphify pr-summary <dir>"));
 }
+
+// ---- FEAT-037: architectural smells end-to-end ----
+
+/// Analysis fixture with one smelly edge — Ambiguous, cross-community, in a cycle.
+/// Scores 3 (Ambiguous) + 2 (cross) + 2 (in-cycle) + 1 (hotspot-adjacent via
+/// tiny-graph) = 8. Above the smell floor (3).
+const SMELLY_ANALYSIS_JSON: &str = r#"{
+    "nodes": [
+        {"id":"app.repo","betweenness":0.0,"pagerank":0.0,"in_degree":1,"out_degree":2,"in_cycle":true,"score":0.10,"community_id":0},
+        {"id":"app.svc","betweenness":0.0,"pagerank":0.0,"in_degree":2,"out_degree":1,"in_cycle":true,"score":0.90,"community_id":1}
+    ],
+    "edges": [
+        {
+            "source":"app.repo","target":"app.svc",
+            "kind":"Imports",
+            "confidence":0.45,"confidence_kind":"Ambiguous",
+            "source_community":0,"target_community":1,
+            "in_cycle":true
+        }
+    ],
+    "communities": [],
+    "cycles": [["app.repo","app.svc"]],
+    "summary": {
+        "total_nodes": 2,
+        "total_edges": 1,
+        "total_communities": 0,
+        "total_cycles": 1
+    }
+}"#;
+
+#[test]
+fn pr_summary_renders_architectural_smells_section_for_smelly_analysis() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let project_dir = dir.path().join("my-app");
+    fs::create_dir(&project_dir).unwrap();
+    fs::write(project_dir.join("analysis.json"), SMELLY_ANALYSIS_JSON)
+        .expect("write analysis.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_graphify"))
+        .args(["pr-summary", project_dir.to_str().unwrap()])
+        .output()
+        .expect("run pr-summary");
+
+    assert!(
+        output.status.success(),
+        "pr-summary failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("#### Architectural smells"),
+        "expected smells section in stdout:\n{}",
+        stdout
+    );
+    assert!(stdout.contains("`app.repo → app.svc`"));
+    assert!(stdout.contains("Ambiguous"));
+    // Why column should expose the specific bonuses that fired.
+    assert!(stdout.contains("low-confidence"));
+    assert!(stdout.contains("cross-community"));
+    assert!(stdout.contains("in-cycle"));
+}
+
+#[test]
+fn pr_summary_top_zero_suppresses_smells_section() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let project_dir = dir.path().join("my-app");
+    fs::create_dir(&project_dir).unwrap();
+    fs::write(project_dir.join("analysis.json"), SMELLY_ANALYSIS_JSON)
+        .expect("write analysis.json");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_graphify"))
+        .args(["pr-summary", project_dir.to_str().unwrap(), "--top", "0"])
+        .output()
+        .expect("run pr-summary");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("#### Architectural smells"),
+        "smells section should be suppressed when --top 0:\n{}",
+        stdout
+    );
+}

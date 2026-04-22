@@ -1,8 +1,9 @@
 ---
 uid: feat-037
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-22
+completed: 2026-04-22
 pomodoros: 0
 contexts:
 - pr-summary
@@ -100,13 +101,13 @@ Emit zero rows (no section) if nothing scores above a minimum (floor = 3, to avo
 
 ## Acceptance criteria
 
-- [ ] `graphify pr-summary` emits an `## Architectural smells` section with up to N rows
-- [ ] Score formula produces ties-broken, deterministic output for identical inputs
-- [ ] All 8 unit tests pass
-- [ ] Integration test with fixture analysis.json green
-- [ ] `--top 0` suppresses the section entirely
-- [ ] Floor = 3 filters out trivial single-attribute edges
-- [ ] Reviewer-facing `why` column explains each score contribution
+- [x] `graphify pr-summary` emits an `## Architectural smells` section with up to N rows
+- [x] Score formula produces ties-broken, deterministic output for identical inputs
+- [x] All 8 unit tests pass (shipped 11)
+- [x] Integration test with fixture analysis.json green
+- [x] `--top 0` suppresses the section entirely
+- [x] Floor = 3 filters out trivial single-attribute edges
+- [x] Reviewer-facing `why` column explains each score contribution
 
 ## Out of scope
 

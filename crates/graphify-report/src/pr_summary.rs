@@ -10,10 +10,15 @@ use graphify_core::diff::{AnalysisSnapshot, DiffReport};
 use graphify_core::metrics::HotspotType;
 
 use crate::check_report::CheckReport;
+use crate::smells::{score_smells, SmellEdge};
 
 /// Max rows emitted per bulleted list in the Drift in this PR section before
 /// an "…and N more" overflow hint takes over.
 const MAX_ROWS_PER_LIST: usize = 5;
+
+/// Default number of architectural-smell rows surfaced by `render`.
+/// Callers pass 0 to suppress the smells section entirely.
+pub const DEFAULT_SMELLS_TOP_N: usize = 5;
 
 /// Render a PR summary Markdown string.
 ///
@@ -30,15 +35,65 @@ pub fn render(
     drift: Option<&DiffReport>,
     check: Option<&CheckReport>,
 ) -> String {
+    render_with_smells(project_name, analysis, drift, check, DEFAULT_SMELLS_TOP_N)
+}
+
+/// Like [`render`] but lets the caller override the architectural-smells
+/// section's row count. Pass 0 to suppress the section.
+pub fn render_with_smells(
+    project_name: &str,
+    analysis: &AnalysisSnapshot,
+    drift: Option<&DiffReport>,
+    check: Option<&CheckReport>,
+    smells_top_n: usize,
+) -> String {
     let mut out = String::new();
     let type_lookup = build_hotspot_type_lookup(analysis);
     let allowlist = build_allowlist_set(analysis);
     render_header(&mut out, project_name);
     render_stats_line(&mut out, analysis, drift);
     render_drift_section(&mut out, drift, &type_lookup, &allowlist);
+    render_smells_section(&mut out, analysis, drift, smells_top_n);
     render_outstanding_section(&mut out, check);
     render_footer(&mut out);
     out
+}
+
+fn render_smells_section(
+    out: &mut String,
+    analysis: &AnalysisSnapshot,
+    drift: Option<&DiffReport>,
+    top_n: usize,
+) {
+    let smells = score_smells(analysis, drift, top_n);
+    if smells.is_empty() {
+        return;
+    }
+    out.push_str("#### Architectural smells\n\n");
+    out.push_str(&format!(
+        "_Edges flagged by the smell detector (top {} of {} considered)._\n\n",
+        smells.len(),
+        analysis.edges.len(),
+    ));
+    out.push_str("| Source → Target | Kind | Confidence | Score | Why |\n");
+    out.push_str("|---|---|---|---|---|\n");
+    for s in &smells {
+        out.push_str(&format!(
+            "| `{} → {}` | {} | {} ({:.2}) | {} | {} |\n",
+            s.source,
+            s.target,
+            s.edge_kind,
+            s.confidence_kind,
+            s.confidence,
+            s.score,
+            format_reasons(s),
+        ));
+    }
+    out.push('\n');
+}
+
+fn format_reasons(s: &SmellEdge) -> String {
+    s.reasons.join("; ")
 }
 
 /// Builds a node-id → classification map from the snapshot's nodes.
@@ -1230,6 +1285,114 @@ mod tests {
         assert!(out.contains("`app.services.auth` (0.71 → 0.83)"));
         assert!(!out.contains("[allowlisted]"));
         assert!(!out.contains("[intentional mirror]"));
+    }
+
+    // ---- FEAT-037: architectural smells section ----
+
+    /// Builds a snapshot with 3 edges, one designed to score above the floor.
+    /// `a` is a leaf in community 0; `hub` is a high-scoring node in community 1.
+    /// Edge `a → hub` is Ambiguous — should score highly.
+    fn analysis_with_smelly_edge() -> AnalysisSnapshot {
+        let json = r#"{
+            "nodes": [
+                {"id":"a","betweenness":0.0,"pagerank":0.0,"in_degree":1,"out_degree":0,"in_cycle":false,"score":0.01,"community_id":0},
+                {"id":"hub","betweenness":0.0,"pagerank":0.0,"in_degree":5,"out_degree":5,"in_cycle":false,"score":0.90,"community_id":1}
+            ],
+            "edges": [
+                {
+                    "source":"a","target":"hub",
+                    "kind":"Imports",
+                    "confidence":0.45,"confidence_kind":"Ambiguous",
+                    "source_community":0,"target_community":1,
+                    "in_cycle":false
+                }
+            ],
+            "communities": [],
+            "cycles": [],
+            "summary": {
+                "total_nodes":2,
+                "total_edges":1,
+                "total_communities":0,
+                "total_cycles":0
+            }
+        }"#;
+        serde_json::from_str(json).expect("smelly snapshot")
+    }
+
+    #[test]
+    fn renders_architectural_smells_section_when_edges_score_above_floor() {
+        let a = analysis_with_smelly_edge();
+        let out = render("my-app", &a, None, None);
+        assert!(
+            out.contains("#### Architectural smells"),
+            "expected smells section, got:\n{}",
+            out
+        );
+        assert!(out.contains("| `a → hub` |"));
+        assert!(out.contains("Ambiguous"));
+    }
+
+    #[test]
+    fn smells_section_shows_top_n_header_with_considered_count() {
+        let a = analysis_with_smelly_edge();
+        let out = render("my-app", &a, None, None);
+        // "top 1 of 1 considered" — 1 rendered out of 1 candidate edge.
+        assert!(
+            out.contains("top 1 of 1 considered"),
+            "expected 'top 1 of 1 considered' header, got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn smells_section_lists_contributing_reasons() {
+        let a = analysis_with_smelly_edge();
+        let out = render("my-app", &a, None, None);
+        // The Ambiguous / cross-community / hotspot-adjacent reasons should all
+        // appear joined in the Why column.
+        assert!(out.contains("low-confidence"));
+        assert!(out.contains("cross-community"));
+        assert!(out.contains("touches hotspot"));
+    }
+
+    #[test]
+    fn smells_section_omitted_when_top_n_zero() {
+        let a = analysis_with_smelly_edge();
+        let out = render_with_smells("my-app", &a, None, None, 0);
+        assert!(!out.contains("#### Architectural smells"));
+    }
+
+    #[test]
+    fn smells_section_omitted_when_snapshot_has_no_edges() {
+        // Legacy snapshot (no `edges` field) defaults to empty vec; section suppressed.
+        let a = minimal_analysis();
+        let out = render("my-app", &a, None, None);
+        assert!(!out.contains("#### Architectural smells"));
+    }
+
+    #[test]
+    fn smells_section_omitted_when_all_edges_below_floor() {
+        // Single Extracted same-community edge = score 1, below floor.
+        let json = r#"{
+            "nodes": [
+                {"id":"a","betweenness":0.0,"pagerank":0.0,"in_degree":1,"out_degree":1,"in_cycle":false,"score":0.1,"community_id":0},
+                {"id":"b","betweenness":0.0,"pagerank":0.0,"in_degree":1,"out_degree":1,"in_cycle":false,"score":0.1,"community_id":0}
+            ],
+            "edges": [
+                {
+                    "source":"a","target":"b","kind":"Imports",
+                    "confidence":1.0,"confidence_kind":"Extracted",
+                    "source_community":0,"target_community":0,
+                    "in_cycle":false
+                }
+            ],
+            "communities": [],
+            "cycles": [],
+            "summary":{"total_nodes":2,"total_edges":1,"total_communities":0,"total_cycles":0}
+        }"#;
+        let a: AnalysisSnapshot = serde_json::from_str(json).unwrap();
+        let out = render("my-app", &a, None, None);
+        assert!(!out.contains("#### Architectural smells"));
     }
 
     #[test]

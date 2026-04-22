@@ -12,6 +12,7 @@ pub mod markdown;
 pub mod neo4j;
 pub mod obsidian;
 pub mod pr_summary;
+pub mod smells;
 pub mod trend_json;
 pub mod trend_markdown;
 

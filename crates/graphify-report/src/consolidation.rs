@@ -485,6 +485,7 @@ mod tests {
                 total_cycles: 0,
             },
             allowlisted_symbols: None,
+            edges: vec![],
         }
     }
 

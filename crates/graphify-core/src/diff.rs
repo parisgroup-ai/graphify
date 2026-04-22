@@ -24,6 +24,22 @@ pub struct AnalysisSnapshot {
     /// analysis.json files written before the consolidation allowlist landed.
     #[serde(default)]
     pub allowlisted_symbols: Option<Vec<String>>,
+    /// Per-edge records for downstream smell scoring (FEAT-037). Empty vector
+    /// on legacy snapshots written before `edges` was emitted.
+    #[serde(default)]
+    pub edges: Vec<EdgeSnapshot>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct EdgeSnapshot {
+    pub source: String,
+    pub target: String,
+    pub kind: String,
+    pub confidence: f64,
+    pub confidence_kind: String,
+    pub source_community: usize,
+    pub target_community: usize,
+    pub in_cycle: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -563,6 +579,54 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_analysis_snapshot_with_edges_populates_field() {
+        // FEAT-037: AnalysisSnapshot carries per-edge records when present.
+        let json = r#"{
+            "nodes": [],
+            "edges": [
+                {
+                    "source": "a",
+                    "target": "b",
+                    "kind": "Imports",
+                    "confidence": 0.5,
+                    "confidence_kind": "Ambiguous",
+                    "source_community": 0,
+                    "target_community": 1,
+                    "in_cycle": true
+                }
+            ],
+            "communities": [],
+            "cycles": [],
+            "summary": {
+                "total_nodes": 0,
+                "total_edges": 1,
+                "total_communities": 0,
+                "total_cycles": 0
+            }
+        }"#;
+        let snapshot: AnalysisSnapshot = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(snapshot.edges.len(), 1);
+        let e = &snapshot.edges[0];
+        assert_eq!(e.source, "a");
+        assert_eq!(e.target, "b");
+        assert_eq!(e.kind, "Imports");
+        assert!((e.confidence - 0.5).abs() < 1e-9);
+        assert_eq!(e.confidence_kind, "Ambiguous");
+        assert_eq!(e.source_community, 0);
+        assert_eq!(e.target_community, 1);
+        assert!(e.in_cycle);
+    }
+
+    #[test]
+    fn deserialize_legacy_analysis_snapshot_without_edges_defaults_to_empty() {
+        // FEAT-037 backward compat: legacy analysis.json files pre-FEAT-037 omit
+        // the `edges` key entirely. Must deserialize to an empty Vec, not error.
+        let snapshot: AnalysisSnapshot =
+            serde_json::from_str(sample_analysis_json()).expect("deserialize");
+        assert!(snapshot.edges.is_empty());
+    }
+
+    #[test]
     fn deserialize_ignores_unknown_fields() {
         // analysis.json has confidence_summary and top_hotspots which are not
         // in our snapshot structs — serde should ignore them silently.
@@ -591,6 +655,7 @@ mod tests {
                 total_cycles,
             },
             allowlisted_symbols: None,
+            edges: vec![],
         }
     }
 
