@@ -111,6 +111,7 @@ struct MetricsRecord<'a> {
 struct CommunityRecord<'a> {
     id: usize,
     members: &'a [String],
+    cohesion: f64,
 }
 
 #[derive(Serialize)]
@@ -200,6 +201,7 @@ pub fn write_analysis_json_with_allowlist(
         .map(|c| CommunityRecord {
             id: c.id,
             members: &c.members,
+            cohesion: c.cohesion,
         })
         .collect();
 
@@ -363,6 +365,7 @@ mod tests {
         let communities = vec![Community {
             id: 0,
             members: vec!["app.main".to_string(), "app.utils".to_string()],
+            cohesion: 0.0,
         }];
         let cycles: Vec<Cycle> = vec![vec!["app.main".to_string(), "app.utils".to_string()]];
 
@@ -378,6 +381,29 @@ mod tests {
             .as_array()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn write_analysis_json_includes_cohesion_per_community() {
+        // FEAT-035: every community in analysis.json carries a `cohesion` field.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("analysis.json");
+        let graph = make_graph();
+        let metrics = make_metrics();
+        let communities = vec![Community {
+            id: 0,
+            members: vec!["app.main".to_string(), "app.utils".to_string()],
+            cohesion: 0.42,
+        }];
+        let cycles: Vec<Cycle> = vec![];
+
+        write_analysis_json(&metrics, &communities, &cycles, &graph, &path);
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let comm = &value["communities"][0];
+        assert_eq!(comm["id"], 0);
+        assert_eq!(comm["cohesion"], 0.42);
     }
 
     #[test]
@@ -467,6 +493,7 @@ mod tests {
         let communities = vec![Community {
             id: 0,
             members: vec!["app.main".to_string(), "app.utils".to_string()],
+            cohesion: 0.0,
         }];
         let cycles: Vec<Cycle> = vec![];
 

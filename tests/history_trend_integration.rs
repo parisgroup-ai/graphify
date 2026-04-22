@@ -58,6 +58,7 @@ fn make_snapshot(
             .map(|(id, members)| HistoricalCommunity {
                 id,
                 members: members.into_iter().map(|member| member.into()).collect(),
+                cohesion: 0.0,
             })
             .collect(),
     }

@@ -93,10 +93,12 @@ fn build_test_graph() -> (CodeGraph, Vec<NodeMetrics>, Vec<Community>, Vec<Cycle
         Community {
             id: 0,
             members: vec!["app.main".into(), "app.utils".into()],
+            cohesion: 0.0,
         },
         Community {
             id: 1,
             members: vec!["app.db".into(), "app.api".into()],
+            cohesion: 0.0,
         },
     ];
 

@@ -64,6 +64,11 @@ pub struct HistoricalNode {
 pub struct HistoricalCommunity {
     pub id: usize,
     pub members: Vec<String>,
+    /// Structural density: intra-community edges ÷ max possible (undirected).
+    /// Range `[0.0, 1.0]`. Absent in pre-FEAT-035 snapshots; `#[serde(default)]`
+    /// materializes legacy snapshots with `0.0`.
+    #[serde(default)]
+    pub cohesion: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -167,6 +172,7 @@ pub fn build_historical_snapshot(
         .map(|community| HistoricalCommunity {
             id: community.id,
             members: community.members.clone(),
+            cohesion: community.cohesion,
         })
         .collect();
 
@@ -661,10 +667,12 @@ mod tests {
                 HistoricalCommunity {
                     id: 1,
                     members: vec!["app.alpha".into()],
+                    cohesion: 0.0,
                 },
                 HistoricalCommunity {
                     id: 2,
                     members: vec!["app.beta".into()],
+                    cohesion: 0.0,
                 },
             ],
         );
@@ -692,10 +700,12 @@ mod tests {
                 HistoricalCommunity {
                     id: 8,
                     members: vec!["app.alpha".into()],
+                    cohesion: 0.0,
                 },
                 HistoricalCommunity {
                     id: 9,
                     members: vec!["app.beta".into()],
+                    cohesion: 0.0,
                 },
             ],
         );

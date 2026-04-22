@@ -393,6 +393,7 @@ mod tests {
         let communities = vec![Community {
             id: 0,
             members: vec!["app.main".to_string(), "app.utils".to_string()],
+            cohesion: 0.0,
         }];
         let cycles: Vec<Cycle> = vec![];
 
@@ -413,6 +414,7 @@ mod tests {
         let communities = vec![Community {
             id: 0,
             members: vec!["app.main".to_string(), "app.utils".to_string()],
+            cohesion: 0.0,
         }];
         let cycles: Vec<Cycle> = vec![];
 
@@ -542,6 +544,7 @@ mod tests {
         let communities = vec![Community {
             id: 0,
             members: vec!["a".to_string(), "b".to_string()],
+            cohesion: 0.0,
         }];
         let cycles = vec![vec!["a".to_string(), "b".to_string()]];
 

@@ -244,7 +244,14 @@ pub fn write_report(
     writeln!(buf, "## Communities").unwrap();
     writeln!(buf).unwrap();
     for community in communities {
-        writeln!(buf, "### Community {}", community.id).unwrap();
+        writeln!(
+            buf,
+            "### Community {} ({} members, cohesion {:.2})",
+            community.id,
+            community.members.len(),
+            community.cohesion
+        )
+        .unwrap();
         writeln!(buf).unwrap();
         for member in &community.members {
             writeln!(buf, "- `{member}`").unwrap();
@@ -305,6 +312,7 @@ mod tests {
         vec![Community {
             id: 0,
             members: vec!["app.main".to_string(), "app.utils".to_string()],
+            cohesion: 0.0,
         }]
     }
 

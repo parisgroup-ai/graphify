@@ -282,6 +282,7 @@ mod tests {
         vec![Community {
             id: 0,
             members: vec!["app.main".to_string(), "app.utils".to_string()],
+            cohesion: 0.0,
         }]
     }
 
