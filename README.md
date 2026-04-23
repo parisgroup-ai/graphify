@@ -234,6 +234,34 @@ graphify check --config graphify.toml --json                 # policy-only check
 
 Exit code 0 = all checks pass, non-zero = violations found.
 
+### Per-project threshold overrides (v0.12.2+)
+
+When a workspace wants a strict default gate but one project is a legitimate exception (a theme provider, an i18n context, a shared router hook), declare a `[project.check]` sub-table under the `[[project]]` block to override the CLI flags for that project only:
+
+```toml
+[[project]]
+name = "pageshell-native"
+repo = "./pageshell-native/src"
+lang = ["typescript"]
+local_prefix = "@parisgroup-ai/pageshell-native"
+
+[project.check]
+max_hotspot_score = 0.75
+max_cycles = 0
+# Rationale: NativeThemeContext is a legitimate 48-consumer facade.
+```
+
+**Precedence per field:** `[project.check]` > CLI flag > None (no gate).
+
+| Scenario | CLI flag | `[project.check]` | Effective gate |
+|---|---|---|---|
+| Workspace default only | `--max-hotspot-score 0.70` | (absent) | 0.70 |
+| Project override in place | `--max-hotspot-score 0.70` | `max_hotspot_score = 0.75` | 0.75 |
+| Override on CLI-less run | (omitted) | `max_hotspot_score = 0.75` | 0.75 |
+| No limits at all | (omitted) | (absent) | no gate (passes) |
+
+The project-wins rule lets a workspace CI keep `graphify check --max-cycles 0 --max-hotspot-score 0.70` as the default for every project, while specific exceptions opt out inline with a committed, version-controlled comment. Typos inside `[project.check]` (e.g. `max_hoptspot_score`) fail the parse rather than silently disabling the gate.
+
 Example policy recipes:
 
 ```toml

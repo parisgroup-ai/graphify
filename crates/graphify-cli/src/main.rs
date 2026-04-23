@@ -1195,6 +1195,18 @@ local_prefix = "app"        # Leave unset for PHP — PSR-4 from composer.json
 # metric reflects real extraction noise, not legitimate external imports.
 # external_stubs = ["drizzle-orm", "zod", "@repo/types"]
 
+# Optional per-project override for `graphify check` thresholds (issue #14).
+# Precedence: `[project.check]` > CLI flag > None. Use this to acknowledge a
+# legitimate facade (theme provider, i18n context, shared router hook) without
+# relaxing the workspace-wide gate for every sibling project. Typos inside
+# `[project.check]` fail the parse, so misspelled keys cannot silently disable
+# a gate.
+#
+# [project.check]
+# max_hotspot_score = 0.75
+# max_cycles = 0
+# # Rationale: pin a 1-3 line comment explaining why this project is an exception.
+
 # Optional policy rules for graphify check:
 #
 # [[policy.group]]
