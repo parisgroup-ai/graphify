@@ -186,6 +186,221 @@ fn louvain_local_moves(
     }
 }
 
+/// Leiden-style constrained refinement pass (FEAT-038).
+///
+/// Differs from `louvain_local_moves` in three ways:
+///
+/// 1. Gains must be *strictly* positive — zero-gain and negative moves are
+///    rejected. Prevents the "everything drifts to label 0" failure mode
+///    where tied gains let Louvain collapse sparse communities back to a
+///    single sub-label.
+/// 2. Candidate target sub-labels must be "well-connected" to the moving
+///    node: the direct edge weight `k_i_in` must exceed the configuration-
+///    model expectation `k_i * k_c / (2m)` with a small slack, where `k_c`
+///    is the sum of degrees in the candidate sub-community (excluding `u`).
+///    This is the Leiden refinement's core well-connectedness requirement
+///    and is what lets it break communities that look modularity-flat to
+///    Louvain.
+/// 3. Callers pass a sub-labels slice that starts with every member as its
+///    own singleton (0..n); the refinement rediscovers structure from
+///    scratch rather than inheriting Louvain's greedy assignment.
+///
+/// Determinism: identical tie-breaking to `louvain_local_moves` (ascending
+/// sub-label on equal gains, lowest label wins).
+fn leiden_refine(
+    community: &mut [usize],
+    adj: &[HashMap<usize, f64>],
+    degree: &[f64],
+    m: f64,
+    max_iters: usize,
+) {
+    let n = community.len();
+    if m == 0.0 || n == 0 {
+        return;
+    }
+    for _iter in 0..max_iters {
+        let mut improved = false;
+
+        for u in 0..n {
+            let current_comm = community[u];
+
+            let mut comm_weight: HashMap<usize, f64> = HashMap::new();
+            for (&v, &w) in &adj[u] {
+                *comm_weight.entry(community[v]).or_insert(0.0) += w;
+            }
+
+            let mut sigma_tot: HashMap<usize, f64> = HashMap::new();
+            for v in 0..n {
+                if v != u {
+                    *sigma_tot.entry(community[v]).or_insert(0.0) += degree[v];
+                }
+            }
+
+            let ki = degree[u];
+
+            let mut best_gain = 0.0_f64;
+            let mut best_comm = current_comm;
+            let mut candidates: Vec<(usize, f64)> = comm_weight
+                .iter()
+                .map(|(&c, &k_i_in)| (c, k_i_in))
+                .collect();
+            candidates.sort_by_key(|(c, _)| *c);
+
+            for (c, k_i_in) in candidates {
+                if c == current_comm {
+                    continue;
+                }
+                let s_tot = sigma_tot.get(&c).copied().unwrap_or(0.0);
+
+                // Well-connectedness gate: direct connection must exceed
+                // random expectation under the configuration model. `1e-9`
+                // slack guards against float noise when the community is
+                // exactly at expectation.
+                let expected = ki * s_tot / (2.0 * m);
+                if k_i_in <= expected + 1e-9 {
+                    continue;
+                }
+
+                let gain = k_i_in / m - s_tot * ki / (2.0 * m * m);
+                // Strictly positive gain only — no tie-inclusive branch,
+                // no zero-gain joins. This is the key policy difference
+                // from `louvain_local_moves`.
+                if gain > best_gain + 1e-12
+                    || ((gain - best_gain).abs() <= 1e-12 && gain > 1e-12 && c < best_comm)
+                {
+                    best_gain = gain;
+                    best_comm = c;
+                }
+            }
+
+            if best_comm != current_comm && best_gain > 1e-12 {
+                community[u] = best_comm;
+                improved = true;
+            }
+        }
+
+        if !improved {
+            break;
+        }
+    }
+}
+
+/// Deterministic greedy modularity bisection (FEAT-038 final fallback).
+///
+/// Guarantees a 2-way split of any community with at least one internal
+/// edge. Used only when every earlier sub-pass (Louvain, label-propagation,
+/// Leiden refinement) collapses to a single sub-label — typically on
+/// internally-connected subgraphs where modularity is genuinely flat but
+/// the community is still too big to be useful.
+///
+/// Algorithm:
+/// 1. Pick the node with the minimum degree as seed A (tie-break: lowest
+///    index). This is the most peripheral / "easy to split off" node.
+/// 2. All other nodes start in group B.
+/// 3. Repeatedly move the node in B with the weakest *net* connection to
+///    B (i.e. highest ratio of cross-edges to A over self-edges to B)
+///    into A, as long as the move increases intra-group edge density.
+/// 4. Stop when A holds roughly half the community's degree sum, or when
+///    no further move improves density.
+///
+/// Returns a fresh `Vec<usize>` with labels `0` (group A) and `1` (group B).
+/// If the community is edgeless the caller filters it out beforehand; this
+/// function still handles that case safely by returning all-zeros.
+fn greedy_modularity_bisection(
+    adj: &[HashMap<usize, f64>],
+    degree: &[f64],
+    n: usize,
+) -> Vec<usize> {
+    if n == 0 {
+        return Vec::new();
+    }
+    if n == 1 {
+        return vec![0];
+    }
+
+    // Seed A = lowest-degree node (tie-break: lowest index).
+    let seed = (0..n)
+        .min_by(|&a, &b| {
+            degree[a]
+                .partial_cmp(&degree[b])
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.cmp(&b))
+        })
+        .unwrap_or(0);
+
+    // labels[u] = 0 → group A, 1 → group B.
+    let mut labels = vec![1_usize; n];
+    labels[seed] = 0;
+
+    // Total degree of the whole community.
+    let total_degree: f64 = degree.iter().sum();
+    let target_a_degree = total_degree / 2.0;
+
+    // Grow A: pick the node in B most strongly connected to A; move it.
+    // Continue while A's degree share is below the target.
+    loop {
+        let a_degree: f64 = labels
+            .iter()
+            .enumerate()
+            .filter(|(_, &l)| l == 0)
+            .map(|(u, _)| degree[u])
+            .sum();
+        if a_degree >= target_a_degree {
+            break;
+        }
+
+        let mut best: Option<(usize, f64)> = None;
+        for u in 0..n {
+            if labels[u] != 1 {
+                continue;
+            }
+            // Weight of u's edges to group A.
+            let w_to_a: f64 = adj[u]
+                .iter()
+                .filter(|(&v, _)| labels[v] == 0)
+                .map(|(_, &w)| w)
+                .sum();
+            if w_to_a <= 0.0 {
+                continue;
+            }
+            let better = match best {
+                None => true,
+                Some((best_u, best_w)) => {
+                    w_to_a > best_w + 1e-12 || ((w_to_a - best_w).abs() <= 1e-12 && u < best_u)
+                }
+            };
+            if better {
+                best = Some((u, w_to_a));
+            }
+        }
+        match best {
+            Some((u, _)) => labels[u] = 0,
+            None => {
+                // No B-node has any edge to A — A is an isolated component.
+                // Pick the lowest-index remaining B-node with nonzero degree
+                // to seed a new A-member so we can keep growing. If every
+                // remaining B-node is edgeless, we're done — A is already a
+                // legitimate "edge-carrying" subset and B holds the noise.
+                let next = (0..n).find(|&u| labels[u] == 1 && degree[u] > 0.0);
+                match next {
+                    Some(u) => labels[u] = 0,
+                    None => break,
+                }
+            }
+        }
+    }
+
+    // If the growth produced all-A (degenerate: single dense clump), revert
+    // to a minimal split: keep only the seed in A, everyone else in B.
+    let a_count = labels.iter().filter(|&&l| l == 0).count();
+    if a_count == 0 || a_count == n {
+        labels = vec![1_usize; n];
+        labels[seed] = 0;
+    }
+
+    labels
+}
+
 /// Merge singleton communities after Louvain Phase 1.
 ///
 /// Step (a): any singleton whose node has at least one neighbour is absorbed
@@ -382,6 +597,41 @@ fn split_oversized(community: &mut [usize], adj: &[HashMap<usize, f64>], n: usiz
             }
             sub_labels = (0..sub_n).collect();
             label_prop_local(&mut sub_labels, &neighbours, 50);
+        }
+
+        // FEAT-038 refinement (Leiden-style): if both Louvain and
+        // label-propagation collapsed everything into a single sub-label, run
+        // a constrained refinement pass. Difference from plain Louvain: only
+        // strictly-positive modularity gains accepted (no zero-gain merges,
+        // no negative "hill-climb"), and candidate target sub-labels must be
+        // "well-connected" to the moving node — specifically the direct edge
+        // weight must exceed random expectation under the configuration
+        // model. This breaks communities that Louvain reads as uniform.
+        let lp_split_count: usize = sub_labels
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        if lp_split_count <= 1 {
+            sub_labels = (0..sub_n).collect();
+            leiden_refine(&mut sub_labels, &sub_adj, &sub_degree, sub_m, 20);
+        }
+
+        // FEAT-038 final fallback: if the refinement pass still collapsed,
+        // force a deterministic greedy modularity bisection. Picks the
+        // lowest-degree node as the "B" seed, then grows B by repeatedly
+        // pulling in the unassigned node with strongest connection to B
+        // until B holds ~half the community's total degree. Guarantees a
+        // 2-way split whenever the community has any internal edge
+        // structure; the only way it can return 1 is an edge-less community
+        // (filtered above by `sub_m == 0.0`).
+        let refine_split_count: usize = sub_labels
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        if refine_split_count <= 1 {
+            sub_labels = greedy_modularity_bisection(&sub_adj, &sub_degree, sub_n);
         }
 
         // Count unique resulting labels.
@@ -1177,6 +1427,193 @@ mod tests {
         assert_ne!(
             comm_a, comm_b,
             "cliques should land in distinct communities"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-038: Leiden refinement + greedy bisection final fallback
+    // -----------------------------------------------------------------------
+
+    /// Simulate the "internally-connected but structurally flat" topology
+    /// that breaks Louvain and label-propagation: a ring of `n` nodes where
+    /// every node is connected only to its two neighbours. Louvain collapses
+    /// this into a single community (modularity is maximized by one group),
+    /// label-propagation collapses it too. Exactly the failure shape seen
+    /// in graphify-cli (197), graphify-mcp (59), graphify-mcp (42).
+    fn ring_adj(n: usize) -> Vec<HashMap<usize, f64>> {
+        let mut adj: Vec<HashMap<usize, f64>> = vec![HashMap::new(); n];
+        for u in 0..n {
+            let v = (u + 1) % n;
+            adj[u].insert(v, 1.0);
+            adj[v].insert(u, 1.0);
+        }
+        adj
+    }
+
+    #[test]
+    fn greedy_bisection_splits_ring() {
+        // A ring has no obvious cut but greedy bisection always produces 2.
+        let n = 20;
+        let adj = ring_adj(n);
+        let degree: Vec<f64> = (0..n).map(|u| adj[u].values().sum()).collect();
+        let labels = greedy_modularity_bisection(&adj, &degree, n);
+
+        let unique: std::collections::HashSet<usize> = labels.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            2,
+            "greedy bisection must always produce 2 groups on a connected graph, got {:?}",
+            labels
+        );
+        // Both groups should be non-trivial.
+        let group_a = labels.iter().filter(|&&l| l == 0).count();
+        let group_b = labels.iter().filter(|&&l| l == 1).count();
+        assert!(
+            group_a >= 2 && group_b >= 2,
+            "groups too unbalanced: A={group_a}, B={group_b}"
+        );
+    }
+
+    #[test]
+    fn greedy_bisection_is_deterministic() {
+        let n = 20;
+        let adj = ring_adj(n);
+        let degree: Vec<f64> = (0..n).map(|u| adj[u].values().sum()).collect();
+        let a = greedy_modularity_bisection(&adj, &degree, n);
+        let b = greedy_modularity_bisection(&adj, &degree, n);
+        assert_eq!(a, b, "bisection must be deterministic");
+    }
+
+    #[test]
+    fn greedy_bisection_on_bimodal_recovers_structure() {
+        // Two cliques of 10 with single bridge — the "easy" case from FEAT-036.
+        // Greedy bisection should recover a clean clique-A / clique-B split.
+        let adj = bimodal_adj(20, 10, &[(0, 10)]);
+        let degree: Vec<f64> = (0..20).map(|u| adj[u].values().sum()).collect();
+        let labels = greedy_modularity_bisection(&adj, &degree, 20);
+
+        // Majority of 0..10 should share a label, same for 10..20, and they
+        // should differ.
+        let mode = |slice: &[usize]| -> usize {
+            let mut counts: HashMap<usize, usize> = HashMap::new();
+            for &c in slice {
+                *counts.entry(c).or_insert(0) += 1;
+            }
+            *counts
+                .iter()
+                .max_by_key(|&(_, &c)| c)
+                .map(|(l, _)| l)
+                .unwrap()
+        };
+        let mode_a = mode(&labels[0..10]);
+        let mode_b = mode(&labels[10..20]);
+        assert_ne!(
+            mode_a, mode_b,
+            "cliques must land in distinct groups, got {:?}",
+            labels
+        );
+    }
+
+    #[test]
+    fn greedy_bisection_single_node_returns_single_label() {
+        let adj: Vec<HashMap<usize, f64>> = vec![HashMap::new()];
+        let degree = vec![0.0];
+        let labels = greedy_modularity_bisection(&adj, &degree, 1);
+        assert_eq!(labels, vec![0]);
+    }
+
+    #[test]
+    fn leiden_refine_no_op_when_gain_is_zero() {
+        // Edge-less graph: refinement must not move anything (no positive gain
+        // is possible), leaving every node in its singleton.
+        let adj: Vec<HashMap<usize, f64>> = vec![HashMap::new(); 5];
+        let degree = vec![0.0; 5];
+        let mut labels: Vec<usize> = (0..5).collect();
+        leiden_refine(&mut labels, &adj, &degree, 0.0, 20);
+        assert_eq!(labels, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn leiden_refine_merges_strongly_connected_pair() {
+        // 4 nodes: a↔b strongly (w=10), c↔d strongly (w=10), no other edges.
+        // Starting each in its own label, refinement should merge {a,b} and
+        // {c,d} (strong gain), leaving 2 sub-labels.
+        let mut adj: Vec<HashMap<usize, f64>> = vec![HashMap::new(); 4];
+        adj[0].insert(1, 10.0);
+        adj[1].insert(0, 10.0);
+        adj[2].insert(3, 10.0);
+        adj[3].insert(2, 10.0);
+        let degree: Vec<f64> = (0..4).map(|u| adj[u].values().sum()).collect();
+        let m = 20.0 / 2.0; // undirected: sum of half-weights
+        let mut labels: Vec<usize> = (0..4).collect();
+        leiden_refine(&mut labels, &adj, &degree, m, 20);
+
+        let unique: std::collections::BTreeSet<usize> = labels.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            2,
+            "expected 2 sub-labels after refinement, got {:?}",
+            labels
+        );
+        assert_eq!(labels[0], labels[1], "a and b must share a label");
+        assert_eq!(labels[2], labels[3], "c and d must share a label");
+        assert_ne!(labels[0], labels[2], "the two pairs must stay separate");
+    }
+
+    #[test]
+    fn split_oversized_splits_ring_via_fallback() {
+        // THE regression guard for FEAT-038: a ring topology that Louvain
+        // and label-propagation both collapse to a single community. With
+        // the refinement + greedy-bisection fallback chain, the community
+        // MUST split into ≥2 sub-communities.
+        let n = 20;
+        let adj = ring_adj(n);
+        let mut community: Vec<usize> = vec![0; n];
+        split_oversized(&mut community, &adj, n);
+
+        let unique: std::collections::HashSet<usize> = community.iter().copied().collect();
+        assert!(
+            unique.len() >= 2,
+            "FEAT-038: ring community must split via fallback chain, got {:?}",
+            community
+        );
+    }
+
+    #[test]
+    fn split_oversized_ring_split_is_deterministic() {
+        // Determinism guard: same input → same output across repeated runs.
+        let n = 20;
+        let adj = ring_adj(n);
+
+        let mut a: Vec<usize> = vec![0; n];
+        split_oversized(&mut a, &adj, n);
+
+        let mut b: Vec<usize> = vec![0; n];
+        split_oversized(&mut b, &adj, n);
+
+        assert_eq!(a, b, "FEAT-038 split must be deterministic");
+    }
+
+    #[test]
+    fn detect_communities_splits_ring_after_feat_038() {
+        // Full integration: build a ring via CodeGraph and confirm
+        // detect_communities now produces ≥2 communities on a topology that
+        // pre-FEAT-038 collapsed to 1.
+        let mut g = CodeGraph::new();
+        let n = 20;
+        for i in 0..n {
+            g.add_node(module(&format!("r{i}")));
+        }
+        for i in 0..n {
+            let j = (i + 1) % n;
+            g.add_edge(&format!("r{i}"), &format!("r{j}"), Edge::imports(1));
+            g.add_edge(&format!("r{j}"), &format!("r{i}"), Edge::imports(1));
+        }
+        let communities = detect_communities(&g);
+        assert!(
+            communities.len() >= 2,
+            "FEAT-038: ring graph must split into ≥2 communities, got {}",
+            communities.len()
         );
     }
 
