@@ -138,8 +138,8 @@ pub struct ExplainReport {
     pub community_id: usize,
     pub in_cycle: bool,
     pub cycle_peers: Vec<String>,
-    pub direct_dependents: Vec<String>,
-    pub direct_dependencies: Vec<String>,
+    pub direct_dependents: Vec<ExplainEdge>,
+    pub direct_dependencies: Vec<ExplainEdge>,
     pub transitive_dependent_count: usize,
     pub top_transitive_dependents: Vec<String>,
 }
@@ -152,6 +152,18 @@ pub struct ExplainMetrics {
     pub pagerank: f64,
     pub in_degree: usize,
     pub out_degree: usize,
+}
+
+/// A single directed edge surfaced in an [`ExplainReport`].
+///
+/// For `direct_dependencies`, `target` is the neighbour `node_id` points to.
+/// For `direct_dependents`, `target` is the neighbour pointing AT `node_id`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ExplainEdge {
+    pub target: String,
+    pub edge_kind: EdgeKind,
+    pub confidence: f64,
+    pub confidence_kind: ConfidenceKind,
 }
 
 // ---------------------------------------------------------------------------
@@ -608,16 +620,30 @@ impl QueryEngine {
             .collect();
 
         // Direct dependents and dependencies
-        let direct_dependents: Vec<String> = self
+        let direct_dependents: Vec<ExplainEdge> = self
             .dependents(node_id)
             .into_iter()
-            .map(|(id, _, _, _)| id)
+            .map(
+                |(target, edge_kind, confidence, confidence_kind)| ExplainEdge {
+                    target,
+                    edge_kind,
+                    confidence,
+                    confidence_kind,
+                },
+            )
             .collect();
 
-        let direct_dependencies: Vec<String> = self
+        let direct_dependencies: Vec<ExplainEdge> = self
             .dependencies(node_id)
             .into_iter()
-            .map(|(id, _, _, _)| id)
+            .map(
+                |(target, edge_kind, confidence, confidence_kind)| ExplainEdge {
+                    target,
+                    edge_kind,
+                    confidence,
+                    confidence_kind,
+                },
+            )
             .collect();
 
         // Transitive dependents (max_depth=10, take top 10)
@@ -1033,6 +1059,32 @@ mod tests {
         let engine = build_engine();
         let report = engine.explain("nonexistent");
         assert!(report.is_none());
+    }
+
+    #[test]
+    fn explain_carries_edge_kind_and_confidence() {
+        // FEAT-039 regression guard: ExplainReport preserves edge_kind + confidence
+        // per edge (previously collapsed to Vec<String>).
+        let engine = build_engine();
+        let report = engine.explain("app.main").unwrap();
+        assert!(
+            !report.direct_dependencies.is_empty(),
+            "app.main has outgoing edges in the fixture"
+        );
+        for edge in &report.direct_dependencies {
+            assert!(
+                !edge.target.is_empty(),
+                "target node id should not be empty"
+            );
+            assert!(
+                (0.0..=1.0).contains(&edge.confidence),
+                "confidence in [0.0, 1.0]: got {}",
+                edge.confidence
+            );
+            // confidence_kind is an enum — just assert it round-trips serializable
+            let _ = serde_json::to_string(&edge.confidence_kind).unwrap();
+            let _ = serde_json::to_string(&edge.edge_kind).unwrap();
+        }
     }
 
     #[test]

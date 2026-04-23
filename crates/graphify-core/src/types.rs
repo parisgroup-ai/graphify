@@ -125,7 +125,7 @@ impl Node {
 // EdgeKind
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum EdgeKind {
     Imports,
     Defines,

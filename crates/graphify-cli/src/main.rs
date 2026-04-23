@@ -414,6 +414,11 @@ enum Commands {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+
+        /// Disable ANSI color output (auto-off when stdout is not a TTY or
+        /// `NO_COLOR` is set to a non-empty value)
+        #[arg(long)]
+        no_color: bool,
     },
 
     /// Find dependency paths between two nodes
@@ -931,10 +936,12 @@ fn main() {
             config,
             project,
             json,
+            no_color,
         } => {
             let cfg = load_config(&config);
             let projects = filter_projects(&cfg, project.as_deref());
             let multi_project = cfg.project.len() > 1;
+            let palette = ExplainPalette::new(no_color);
             let mut found = false;
 
             for proj in &projects {
@@ -951,7 +958,7 @@ fn main() {
                         }
                         println!("{}", serde_json::to_string_pretty(&val).unwrap());
                     } else {
-                        print_explain_report(&report, &proj.name, multi_project);
+                        print_explain_report(&report, &proj.name, multi_project, &palette);
                     }
                     break;
                 }
@@ -3404,66 +3411,237 @@ fn parse_node_kind(s: &str) -> Option<graphify_core::types::NodeKind> {
     }
 }
 
+/// Maximum rows shown per edge-kind subsection before `... and N more` kicks in.
+const EXPLAIN_MAX_PER_SECTION: usize = 10;
+
+/// Color policy for `print_explain_report` output.
+///
+/// Honors the `NO_COLOR` environment variable (any non-empty value disables
+/// color, matching https://no-color.org convention) and auto-disables when
+/// stdout is not a TTY. `--no-color` forces `enabled = false` unconditionally.
+pub struct ExplainPalette {
+    enabled: bool,
+}
+
+impl ExplainPalette {
+    pub fn new(forced_off: bool) -> Self {
+        use std::io::IsTerminal;
+        let enabled = !forced_off
+            && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
+            && std::io::stdout().is_terminal();
+        Self { enabled }
+    }
+
+    /// Construct a palette with colors explicitly on or off (used by tests).
+    pub fn fixed(enabled: bool) -> Self {
+        Self { enabled }
+    }
+
+    fn paint(&self, style: anstyle::Style, text: impl std::fmt::Display) -> String {
+        if self.enabled {
+            format!("{}{}{}", style.render(), text, anstyle::Reset.render())
+        } else {
+            text.to_string()
+        }
+    }
+}
+
+fn explain_style_red() -> anstyle::Style {
+    anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Red)))
+}
+fn explain_style_yellow() -> anstyle::Style {
+    anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Yellow)))
+}
+fn explain_style_green() -> anstyle::Style {
+    anstyle::Style::new().fg_color(Some(anstyle::Color::Ansi(anstyle::AnsiColor::Green)))
+}
+fn explain_style_dim() -> anstyle::Style {
+    anstyle::Style::new().dimmed()
+}
+fn explain_style_bold() -> anstyle::Style {
+    anstyle::Style::new().bold()
+}
+
+fn score_style(score: f64) -> anstyle::Style {
+    if score >= 0.4 {
+        explain_style_red().bold()
+    } else if score >= 0.1 {
+        explain_style_yellow()
+    } else {
+        anstyle::Style::new()
+    }
+}
+
+fn confidence_tag_style(kind: &graphify_core::types::ConfidenceKind) -> anstyle::Style {
+    use graphify_core::types::ConfidenceKind;
+    match kind {
+        ConfidenceKind::Extracted => explain_style_green(),
+        ConfidenceKind::Inferred => explain_style_yellow(),
+        ConfidenceKind::Ambiguous => explain_style_red(),
+        ConfidenceKind::ExpectedExternal => explain_style_dim(),
+    }
+}
+
+fn confidence_tag_text(kind: &graphify_core::types::ConfidenceKind, confidence: f64) -> String {
+    use graphify_core::types::ConfidenceKind;
+    let label = match kind {
+        ConfidenceKind::Extracted => "extracted",
+        ConfidenceKind::Inferred => "inferred",
+        ConfidenceKind::Ambiguous => "ambiguous",
+        ConfidenceKind::ExpectedExternal => "expected_external",
+    };
+    // Extracted edges are always 1.0 — drop the redundant number.
+    match kind {
+        ConfidenceKind::Extracted => format!("[{}]", label),
+        _ => format!("[{} {:.2}]", label, confidence),
+    }
+}
+
+/// Render `print_explain_report` to stdout.
+///
+/// Colors honor `palette.enabled`; pass an `ExplainPalette::fixed(false)` from
+/// tests or `ExplainPalette::new(no_color_flag)` from CLI call sites.
+///
+/// Dependencies and dependents are grouped by [`EdgeKind`] subsection, each
+/// capped at [`EXPLAIN_MAX_PER_SECTION`] rows with a trailing `... and N more`.
+/// Edge-kind ordering within a section follows `EdgeKind`'s discriminant order
+/// (Imports → Defines → Calls, matching the enum definition in `types.rs`).
 fn print_explain_report(
     report: &graphify_core::query::ExplainReport,
     project_name: &str,
     multi_project: bool,
+    palette: &ExplainPalette,
 ) {
-    println!();
-    println!("═══ {} ═══", report.node_id);
+    let mut stdout = std::io::stdout().lock();
+    // Writing to a locked stdout is infallible in practice; if the pipe dies
+    // we just stop — matching the prior `println!` behaviour.
+    let _ = write_explain_report(&mut stdout, report, project_name, multi_project, palette);
+}
+
+/// Pure writer — used by `print_explain_report` and by tests that capture
+/// output into a `Vec<u8>` for snapshot comparison.
+pub fn write_explain_report<W: std::io::Write>(
+    out: &mut W,
+    report: &graphify_core::query::ExplainReport,
+    project_name: &str,
+    multi_project: bool,
+    palette: &ExplainPalette,
+) -> std::io::Result<()> {
+    use graphify_core::query::ExplainEdge;
+    use graphify_core::types::EdgeKind;
+    use std::collections::BTreeMap;
+
+    let dim = explain_style_dim();
+    let bold = explain_style_bold();
+
+    writeln!(out)?;
+    writeln!(
+        out,
+        "{} {} {}",
+        palette.paint(dim, "═══"),
+        palette.paint(bold, &report.node_id),
+        palette.paint(dim, "═══"),
+    )?;
     if multi_project {
-        println!("  Project:     {}", project_name);
+        writeln!(out, "  Project:     {}", project_name)?;
     }
-    println!("  Kind:        {:?}", report.kind);
-    println!("  File:        {}", report.file_path.display());
-    println!("  Language:    {:?}", report.language);
-    println!("  Community:   {}", report.community_id);
+    writeln!(out, "  Kind:        {:?}", report.kind)?;
+    writeln!(out, "  File:        {}", report.file_path.display())?;
+    writeln!(out, "  Language:    {:?}", report.language)?;
+    writeln!(out, "  Community:   {}", report.community_id)?;
     if report.in_cycle {
-        println!(
-            "  In cycle:    yes (with: {})",
+        writeln!(
+            out,
+            "  In cycle:    {} (with: {})",
+            palette.paint(explain_style_red().bold(), "yes"),
             report.cycle_peers.join(", ")
-        );
+        )?;
     } else {
-        println!("  In cycle:    no");
+        writeln!(out, "  In cycle:    {}", palette.paint(dim, "no"))?;
     }
 
-    println!();
-    println!("  ── Metrics ──");
-    println!("  Score:         {:.3}", report.metrics.score);
-    println!("  Betweenness:   {:.3}", report.metrics.betweenness);
-    println!("  PageRank:      {:.4}", report.metrics.pagerank);
-    println!("  In-degree:     {}", report.metrics.in_degree);
-    println!("  Out-degree:    {}", report.metrics.out_degree);
+    writeln!(out)?;
+    writeln!(out, "  {}", palette.paint(dim, "── Metrics ──"))?;
+    let score = report.metrics.score;
+    writeln!(
+        out,
+        "  Score:         {}",
+        palette.paint(score_style(score), format!("{:.3}", score)),
+    )?;
+    writeln!(out, "  Betweenness:   {:.3}", report.metrics.betweenness)?;
+    writeln!(out, "  PageRank:      {:.4}", report.metrics.pagerank)?;
+    writeln!(out, "  In-degree:     {}", report.metrics.in_degree)?;
+    writeln!(out, "  Out-degree:    {}", report.metrics.out_degree)?;
 
-    println!();
-    println!(
-        "  ── Dependencies ({}) ──",
-        report.direct_dependencies.len()
-    );
-    for dep in &report.direct_dependencies {
-        println!("  → {}", dep);
+    // Group edges by EdgeKind, preserving insertion order within each group.
+    // `BTreeMap` orders sections by `EdgeKind`'s derived `Ord` — declaration
+    // order in `types.rs`: Imports → Defines → Calls.
+    fn group_by_kind(edges: &[ExplainEdge]) -> BTreeMap<EdgeKind, Vec<&ExplainEdge>> {
+        let mut groups: BTreeMap<EdgeKind, Vec<&ExplainEdge>> = BTreeMap::new();
+        for e in edges {
+            groups.entry(e.edge_kind.clone()).or_default().push(e);
+        }
+        groups
     }
 
-    println!();
-    println!("  ── Dependents ({}) ──", report.direct_dependents.len());
-    let max_show = 5;
-    for dep in report.direct_dependents.iter().take(max_show) {
-        println!("  ← {}", dep);
-    }
-    if report.direct_dependents.len() > max_show {
-        println!(
-            "  ... and {} more",
-            report.direct_dependents.len() - max_show
-        );
-    }
+    let write_row = |out: &mut W, arrow: &str, edge: &ExplainEdge| -> std::io::Result<()> {
+        let tag_style = confidence_tag_style(&edge.confidence_kind);
+        let tag_text = confidence_tag_text(&edge.confidence_kind, edge.confidence);
+        writeln!(
+            out,
+            "      {} {} {}",
+            palette.paint(dim, arrow),
+            edge.target,
+            palette.paint(tag_style, tag_text),
+        )
+    };
 
-    println!();
-    println!("  ── Impact ──");
-    println!(
+    let write_grouped =
+        |out: &mut W, title: &str, arrow: &str, edges: &[ExplainEdge]| -> std::io::Result<()> {
+            writeln!(out)?;
+            writeln!(
+                out,
+                "  {} ({})",
+                palette.paint(dim, format!("── {} ──", title)),
+                edges.len(),
+            )?;
+            let groups = group_by_kind(edges);
+            for (kind, edges) in &groups {
+                writeln!(
+                    out,
+                    "    {} ({})",
+                    palette.paint(dim, format!("── {:?} ──", kind)),
+                    edges.len(),
+                )?;
+                for edge in edges.iter().take(EXPLAIN_MAX_PER_SECTION) {
+                    write_row(out, arrow, edge)?;
+                }
+                if edges.len() > EXPLAIN_MAX_PER_SECTION {
+                    writeln!(
+                        out,
+                        "    {}",
+                        palette.paint(
+                            dim,
+                            format!("... and {} more", edges.len() - EXPLAIN_MAX_PER_SECTION),
+                        ),
+                    )?;
+                }
+            }
+            Ok(())
+        };
+
+    write_grouped(out, "Dependencies", "→", &report.direct_dependencies)?;
+    write_grouped(out, "Dependents", "←", &report.direct_dependents)?;
+
+    writeln!(out)?;
+    writeln!(out, "  {}", palette.paint(dim, "── Impact ──"))?;
+    writeln!(
+        out,
         "  Transitive dependents: {} modules",
         report.transitive_dependent_count
-    );
-    println!();
+    )?;
+    writeln!(out)?;
+    Ok(())
 }
 
 fn print_path(path: &[graphify_core::query::PathStep]) {
@@ -3610,10 +3788,11 @@ fn cmd_shell(config_path: &Path, project_filter: Option<&str>) {
                 } else {
                     let node_id = parts[1];
                     let mut found = false;
+                    let palette = ExplainPalette::new(false);
                     for (name, engine) in &engines {
                         if let Some(report) = engine.explain(node_id) {
                             found = true;
-                            print_explain_report(&report, name, engines.len() > 1);
+                            print_explain_report(&report, name, engines.len() > 1, &palette);
                             break;
                         }
                     }
@@ -4841,6 +5020,165 @@ mod language_parse_tests {
                 Language::Rust,
                 Language::Php,
             ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod explain_printer_tests {
+    use super::*;
+    use graphify_core::query::{ExplainEdge, ExplainMetrics, ExplainReport};
+    use graphify_core::types::{ConfidenceKind, EdgeKind, Language, NodeKind};
+    use std::path::PathBuf;
+
+    fn dep(target: &str, kind: EdgeKind, conf: f64, ck: ConfidenceKind) -> ExplainEdge {
+        ExplainEdge {
+            target: target.to_string(),
+            edge_kind: kind,
+            confidence: conf,
+            confidence_kind: ck,
+        }
+    }
+
+    fn sample_report() -> ExplainReport {
+        ExplainReport {
+            node_id: "src.foo".to_string(),
+            kind: NodeKind::Module,
+            file_path: PathBuf::from("src/foo.rs"),
+            language: Language::Rust,
+            metrics: ExplainMetrics {
+                score: 0.412,
+                betweenness: 12.5,
+                pagerank: 0.0321,
+                in_degree: 3,
+                out_degree: 5,
+            },
+            community_id: 2,
+            in_cycle: false,
+            cycle_peers: vec![],
+            direct_dependencies: vec![
+                dep("src.bar", EdgeKind::Imports, 1.0, ConfidenceKind::Extracted),
+                dep("src.baz", EdgeKind::Calls, 0.7, ConfidenceKind::Inferred),
+                dep(
+                    "std::io",
+                    EdgeKind::Imports,
+                    0.5,
+                    ConfidenceKind::ExpectedExternal,
+                ),
+            ],
+            direct_dependents: vec![dep(
+                "src.root",
+                EdgeKind::Imports,
+                1.0,
+                ConfidenceKind::Extracted,
+            )],
+            transitive_dependent_count: 4,
+            top_transitive_dependents: vec![],
+        }
+    }
+
+    fn render(report: &ExplainReport, multi_project: bool) -> String {
+        let mut buf: Vec<u8> = Vec::new();
+        let palette = ExplainPalette::fixed(false);
+        write_explain_report(&mut buf, report, "test-project", multi_project, &palette).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    /// Golden snapshot — FEAT-039 regression guard. If the printer shape
+    /// changes intentionally, update this string. If it changes unintentionally,
+    /// the diff will surface here.
+    #[test]
+    fn write_explain_report_colorless_snapshot_single_project() {
+        let out = render(&sample_report(), false);
+        let expected = concat!(
+            "\n",
+            "═══ src.foo ═══\n",
+            "  Kind:        Module\n",
+            "  File:        src/foo.rs\n",
+            "  Language:    Rust\n",
+            "  Community:   2\n",
+            "  In cycle:    no\n",
+            "\n",
+            "  ── Metrics ──\n",
+            "  Score:         0.412\n",
+            "  Betweenness:   12.500\n",
+            "  PageRank:      0.0321\n",
+            "  In-degree:     3\n",
+            "  Out-degree:    5\n",
+            "\n",
+            "  ── Dependencies ── (3)\n",
+            "    ── Imports ── (2)\n",
+            "      → src.bar [extracted]\n",
+            "      → std::io [expected_external 0.50]\n",
+            "    ── Calls ── (1)\n",
+            "      → src.baz [inferred 0.70]\n",
+            "\n",
+            "  ── Dependents ── (1)\n",
+            "    ── Imports ── (1)\n",
+            "      ← src.root [extracted]\n",
+            "\n",
+            "  ── Impact ──\n",
+            "  Transitive dependents: 4 modules\n",
+            "\n",
+        );
+        assert_eq!(out, expected, "explain printer snapshot mismatch");
+    }
+
+    #[test]
+    fn write_explain_report_shows_project_when_multi_project() {
+        let out = render(&sample_report(), true);
+        assert!(
+            out.contains("Project:     test-project"),
+            "multi-project mode should print project line; got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn write_explain_report_caps_dependencies_at_ten_per_section() {
+        let mut report = sample_report();
+        // 15 Imports edges — should trigger "... and 5 more" footer.
+        report.direct_dependencies = (0..15)
+            .map(|i| {
+                dep(
+                    &format!("src.t{}", i),
+                    EdgeKind::Imports,
+                    1.0,
+                    ConfidenceKind::Extracted,
+                )
+            })
+            .collect();
+        let out = render(&report, false);
+        assert!(
+            out.contains("... and 5 more"),
+            "cap footer should fire for 15 edges in a section; got:\n{}",
+            out
+        );
+        // Only 10 rows should render
+        let row_count = out.matches("      → src.t").count();
+        assert_eq!(row_count, EXPLAIN_MAX_PER_SECTION);
+    }
+
+    #[test]
+    fn write_explain_report_in_cycle_lists_peers_uncolored() {
+        let mut report = sample_report();
+        report.in_cycle = true;
+        report.cycle_peers = vec!["src.a".to_string(), "src.b".to_string()];
+        let out = render(&report, false);
+        assert!(
+            out.contains("In cycle:    yes (with: src.a, src.b)"),
+            "cycle peers should render inline; got:\n{}",
+            out
+        );
+    }
+
+    #[test]
+    fn write_explain_report_emits_no_ansi_escapes_when_palette_disabled() {
+        let out = render(&sample_report(), false);
+        assert!(
+            !out.contains('\x1b'),
+            "palette=disabled output must contain no ANSI escapes; got:\n{:?}",
+            out
         );
     }
 }
