@@ -1,69 +1,57 @@
-# Session Brief — Next Session (post-2026-04-22 evening, FEAT-038 + BUG-020 close)
+# Session Brief — Next Session (post-2026-04-23 FEAT-039, v0.12.1 released)
 
-**Last session:** 2026-04-22 evening (tn session `2026-04-22-2340`, 40m / 60m budget). Picked up the two remaining open tasks via `/tn-plan-session` from the prior session brief's recommendation: FEAT-038 (Leiden refinement + spectral bisection) and BUG-020 (external_stubs cache investigation). Both shipped — FEAT-038 with a 4-stage split cascade landing `c32f5a3`, BUG-020 closed as **not reproducible on v0.12.0** with a re-open evidence checklist added to the task body. Backlog is now empty (0 open tasks).
+**Last session:** 2026-04-23. Picked up from empty backlog via option (d) from the prior brief's candidate list — "UX polish on `graphify explain`". Scoped to one-session CLI-only polish + v0.12.1 release. Shipped FEAT-039 (colored + sectioned explain output) across 4 slices in-session.
 
 ## Current State
 
-- **Graphify**: branch `main`, **2 unpushed commits** (`b4c068b`, `c32f5a3`), 2 unstaged task-body files awaiting the session-close commit. Version **0.12.0** on PATH (from prior session's release).
-- **Task state**: `tn sprint summary` = 61 total / 0 open / 0 in-progress / 61 done. Sprint board is empty for the first time since late February.
-- **Local binaries**: `graphify 0.12.0`, `tn 0.5.9`.
-- **Architectural health (`graphify check`)**: all 5 projects PASS, 0 cycles. Max_hotspot **0.559 (`src.server` in graphify-mcp)** — unchanged from prior session. `src.pr_summary` at 0.433, `src.policy` at 0.486, `src.resolver` at 0.441, `src.install.codex_bridge` at 0.478. Top 5 hotspots identical session-over-session despite the community reshape — confirms FEAT-038's community-split work is orthogonal to betweenness/PageRank scoring.
-- **Test tally**: 478 → **487 passed** (+9 net-new tests in `graphify-core::community`). 0 failed. `cargo fmt --all -- --check` clean. `cargo clippy --workspace -- -D warnings` clean.
+- **Graphify**: branch `main`, **in sync with origin/main** (pushed at close), tag `v0.12.1` pushed. Binary **0.12.1** on PATH (freshly `cargo install`ed at release time). Release workflow triggered by the tag push is building 4 target binaries on GitHub Actions.
+- **Task state**: `tn sprint summary` = 62 total / 0 open / 0 in-progress / 62 done. Sprint is empty for the second consecutive session.
+- **Architectural health (`graphify check`)**: all 5 projects PASS, 0 cycles, 0 policy violations. Max_hotspot **0.559 (`src.server` in graphify-mcp)** — unchanged for three consecutive sessions. Top hotspots per crate: `src.policy` 0.487 (core), `src.resolver` 0.441 (extract), `src.pr_summary` 0.433 (report), `src.install` 0.468 (cli), `src.server` 0.559 (mcp).
+- **Test tally**: 787 → **793 passed** (+6 net). `cargo fmt --all -- --check` clean. `cargo clippy --workspace -- -D warnings` clean.
 
 ## What shipped this session
 
-**FEAT-038 — Leiden refinement + greedy bisection fallback (c32f5a3, 437 LOC, 9 new tests)**
+**FEAT-039 — explain CLI polish (v0.12.1, commit `6a02a63`, 8 files, +540/−63)**
 
-Extended `split_oversized()` in `crates/graphify-core/src/community.rs` with a two-stage cascade that fires when both Louvain and label-propagation sub-passes collapse to a single sub-label:
+Four slices landed in-session:
 
-1. **`leiden_refine()`** — Leiden-style constrained refinement. Three structural differences from Louvain: strictly-positive gain gate (`delta > 0.0`, not `>= 0.0` — prevents tied-gain collapse); well-connectedness gate (`k_i_in > k_i * k_c / (2m) + epsilon` — rejects moves below configuration-model expectation); singleton initialization on the induced subgraph.
-2. **`greedy_modularity_bisection()`** — deterministic final fallback. Guarantees a 2-way split of any community with ≥1 intra-edge. Seeds group A from lowest-degree node (tie-break: smallest index), grows A by highest-edge-weight frontier until A's degree sum ≥ half the community total.
+1. **Enrichment** (graphify-core) — new `ExplainEdge { target, edge_kind, confidence, confidence_kind }`; `ExplainReport.direct_dependencies`/`direct_dependents` shape changed `Vec<String>` → `Vec<ExplainEdge>`. The data was already available in `QueryEngine::dependents/dependencies` but dropped at construction. `EdgeKind` gets `Ord`/`PartialOrd`/`Hash` derives so `BTreeMap` orders subsections deterministically.
+2. **Printer** (graphify-cli) — `print_explain_report` refactored into `write_explain_report<W: Write>` + stdout wrapper. Sections by `EdgeKind` (Imports → Defines → Calls), cap=10 per subsection with `... and N more`, confidence tags, score color thresholds. `ExplainPalette` handles `--no-color` + `NO_COLOR` env + TTY auto-detect.
+3. **Tests (+6)** — `explain_carries_edge_kind_and_confidence` in `query.rs`; new `explain_printer_tests` module with golden snapshot + 4 behavioral guards (multi-project line, cap footer, cycle peer inline, no-ANSI-when-disabled).
+4. **Release** — `Cargo.toml` + `Cargo.lock` bumped to 0.12.1, committed, tagged, pushed, `cargo install --path crates/graphify-cli --force` to refresh PATH binary. Release workflow builds 4 cross-target artifacts.
 
-Cascade order: Louvain → label-prop → leiden_refine → greedy_modularity_bisection. Each step short-circuits when it produces ≥2 distinct sub-labels.
-
-**Self-dogfood results (all 3 previously-unsplittable communities split):**
-- `graphify-cli 197 → 195 + 2` (cohesion 0.010 → 0.000 + 1.000)
-- `graphify-mcp 59 → 57 + 2` (0.034 → 0.000 + 1.000)
-- `graphify-mcp 42 → 40 + 2` (0.048 → 0.000 + 1.000)
-- `graphify-report 75 → 38+...` (finer subdivision via leiden_refine — not just bimodal)
-
-**BUG-020 — investigation closed as "not reproducible on v0.12.0"**
-
-Four fixtures failed to reproduce the reported symptom, including a `/tmp/gf-bug020-verify` throwaway with the cache intentionally hot. Architectural root cause of non-reproducibility: `ExternalStubs::matches()` fires in the edge-resolution loop on *every* edge regardless of cache provenance; the cache key (`{version, local_prefix, per-file SHA256}`) never stores classification. Latent hypothesis for the consumer: shadowed pre-0.11.7 binary silently ignoring `[settings].external_stubs` (before FEAT-034's merge layer landed). Task body carries a re-open evidence checklist.
+Bonus inline: `docs/TaskNotes/Tasks/sprint.md` now has `uid: sprint` frontmatter — silences the recurring `tn` parse warning that surfaced on every `/tn-plan-session`.
 
 ## Decisions Made (don't re-debate)
 
-- **Leiden before greedy-bisection in the cascade, not after.** Leiden can produce >2-way splits when the community actually has richer sub-structure; greedy bisection is strictly 2-way by construction. The ordering matters when a 75-member community has 3 natural clusters — Leiden finds all three, bisection would collapse two of them together.
-- **Strictly-positive gain gate is load-bearing.** `>= 0.0` re-introduces the FEAT-036 "everything drifts to label 0" tied-gain collapse. Verified with the `leiden_refine_rejects_negative_expected_gain` regression test.
-- **Well-connectedness gate uses configuration-model expectation, not a raw threshold.** Matches the Leiden paper's innovation over Louvain literally. A candidate sub-community must "pull harder than chance" to accept a member.
-- **Greedy bisection's degree-sum target is half the total, not exactly half the node count.** Degree-balanced splits respect weighted edges (stronger links weighted more); node-count balance ignores structure. Also guarantees termination — the target is always reachable on any connected component.
-- **No feature flag on the cascade.** Happy path (Louvain succeeds on the first try) pays zero cost since each stage short-circuits. Adding a flag would complicate the call site for no runtime benefit.
-- **Lopsided splits (195+2, 57+2, 40+2) are not a bug.** The pre-FEAT-038 unsplittable communities were dominated by `merge_singletons` step-(b) isolated-singletons buckets — they have no intra-community edges. Cohesion 0.000 on the 195-member remainder is truthful, not pathological. Documented in the commit body so no future contributor tries to "fix" it.
-- **BUG-020 closed without a code change.** Investigation only. Consumer-side evidence was not reproducible on v0.12.0; architectural inspection confirmed the proposed root cause (classification leaking into cache) is architecturally impossible. Re-open checklist added to task body so a future report from any consumer can disambiguate in one round-trip without another open-investigation loop.
-- **v0.12.0 release stays.** No version bump for FEAT-038 — the CLAUDE.md entry notes `no version bump`. User decision when to tag v0.12.1.
+- **Enrich `ExplainReport`, not pass the engine into the printer.** Cleaner separation (printer stays pure) AND MCP surface benefits for free. Cost: additive-ish change to a public core struct; no external consumer of the old shape is known.
+- **Shipped as 0.12.1, not 0.13.0, despite the MCP JSON shape change.** The `graphify_explain` MCP tool's JSON output went from `[string]` to `[object]`. Strict semver would say 0.13.0 (minor bump for a breaking change in public surface). We chose 0.12.1 because no external MCP consumer of this specific shape is documented — re-evaluate if one surfaces.
+- **`anstyle` added as direct dep, not just transitive.** It's already in the tree via clap, so adding it to graphify-cli's Cargo.toml pulls no new code. Making the direct dep explicit documents intent and avoids surprising "we rely on clap's transitive anstyle" coupling.
+- **`BTreeMap` for subsection ordering, not `Vec` + manual sort.** Relies on the new `Ord` derive on `EdgeKind`. Declaration-order-as-ordering is deterministic and cheap. Alternative (preserve insertion order per kind) would need `IndexMap` or manual bookkeeping for no real benefit.
+- **Cap at 10 per subsection, not per section.** Previously dependencies were uncapped (47-line wall for `src.server`). Per-subsection cap means a 12-Imports / 25-Defines / 10-Calls hub shows up to 30 rows total, each clearly scoped.
+- **Golden snapshot test via `concat!(…)`, not `\`-continuation strings.** Rust's string-continuation (`"foo\n\  bar"` with `\` at EOL) silently strips leading whitespace on the next line — broke the first attempt at the snapshot with a confusing diff. Using `concat!("line1\n", "  line2\n", …)` preserves indentation literally.
 
 ## Meta Learnings This Session
 
-- **Heuristic tokens under-count observed by ~45% consistently.** Two data points this session (FEAT-038: 66k heuristic vs 111k observed, −41%; BUG-020: 35k heuristic vs 66k observed, −47%). Averaged across three paired samples now (including the one captured in `2026-04-20-1437`), the multiplicative under-count is stable at 0.55×. The dispatcher's rule #2 constants in `~/.claude/agents/tn-session-dispatcher.md` (20k baseline + 2.5k per Read + 4k per Write + 1k per Bash) would converge on observed usage if retuned to ~36k baseline + 4.5k per Read + 7k per Write + 1.8k per Bash. CHORE-011's `--note source=<usage>,heuristic=H,observed=M,delta_pct=D` grammar captured today's pair — the retune task is not ticketed yet but has clean input data whenever it lands.
-- **BUG-020's architectural analysis method generalizes.** "Is this cache-invalidation bug architecturally possible?" is answered by tracing which fields the cache key covers vs which fields the feature depends on. If the feature's inputs are NOT in the key, the cache can't be at fault — the feature's apparent non-responsiveness has to come from somewhere else (shadowed binary, wrong file inspected, feature not actually wired). Worth recording as a debugging playbook for future "feature seems to not take effect without --force" reports.
-- **The session journal is still absent** (9 consecutive sessions now). Would have been particularly useful this session — two distinct investigations running in parallel with their own findings, and the only structured record is this brief. Pattern is not self-correcting; consider starting the journal in the first dispatch turn of any future multi-task session.
-- **tn CLI's `tn done` does not auto-run after `claude-solo` dispatches.** FEAT-038's dispatcher committed code but left the task status `open` — I had to run `tn done FEAT-038` manually mid-session-close. BUG-020's dispatcher DID run `tn done BUG-020` because I explicitly authorized it in the dispatch prompt (investigation close-out). The pattern needs codifying: either the dispatcher's claude-solo path always runs `tn done` on `outcome: done`, or the orchestrator always runs it after successful logging. Current "no session mutation" guardrail forbids the dispatcher; therefore the orchestrator should. Not ticketed yet — file if it repeats.
+- **Rust string-continuation `\` strips leading whitespace on the next line.** Never use it for strings where indentation is semantically significant (formatted output, tables, CLI golden snapshots). Use `concat!(…)` or multi-line raw strings (`r"…"`) instead. Burned ~3 minutes debugging a snapshot test that had the wrong expected value for exactly this reason.
+- **Enrichment > pass-through.** When a printer needs richer data than its input struct carries, enriching the struct beats passing the engine into the printer. Cleaner function signatures, testability stays high, and downstream consumers (MCP, JSON export, trend snapshots) benefit for free. Cost: additive change to the public struct, which is semver-minor at worst.
+- **Clippy's `non_minimal_bool` surfaced `is_none_or`** (stable in recent Rust). `!x.is_some_and(|v| !v.is_empty())` simplifies to `x.is_none_or(|v| v.is_empty())`. The simpler form also reads like the requirement (`NO_COLOR` is honored when absent OR empty), not against it. Worth internalizing for future boolean guards.
+- **Solo-dev direct-to-main push "bypasses branch protection" with a note.** Visible in the `git push` output: `remote: Bypassed rule violations for refs/heads/main`. Worth knowing if ever shifting to PR-only enforcement — the account has bypass permission so direct-push lands regardless.
 
 ## Open Debts
 
-- **16 unshared skills** in `~/.claude/skills/` — unchanged from last session. 0 modified, so nothing blocking, but the `.skills-sync-ignore` pass still deferred. (Now 9 sessions carry-over.)
-- **`docs/TaskNotes/Tasks/sprint.md` has invalid frontmatter** (missing `uid` field) — `tn` silently skips it, warning on every command. Cosmetic, pre-existing, surfaces in every `/tn-plan-session` run. Worth a 2-minute fix next session.
-- **Backlog is zero.** All three open tasks entering this session (FEAT-038, BUG-020, and the prior already-closed ones) are now done. Next session starts with NO automatic work surfaced by the planner — will require either a brainstorm cycle or an explicit decision on next territory.
-- **Dispatcher heuristic retune not ticketed.** Three paired samples now exist (`--note source=<usage>,heuristic=...,observed=...,delta_pct=...`) confirming ~45% under-count. Adding a CHORE task would be cheap; leaving it until a 10-sample threshold (CHORE-011's convergence target) is also defensible.
-- **Release 0.12.1 deferred.** FEAT-038 shipped on main but binary stays v0.12.0. Version bump + tag push + `cargo install --path …` is a one-session chore; defer until there's a second change that warrants the release cycle.
-- **Stop hook still doesn't fire on Task subagent stops.** `hook_fired: false` across both dispatches this session. Known upstream limitation. The workaround (dispatcher estimates `tokens` in DISPATCH_RESULT + orchestrator reads `<usage>` and forwards to `tn session log --tokens`) is working correctly — all three meters (heuristic, observed, calibration) agree within the documented delta.
+- **17 unshared skills** (up from 16 last session, +1 likely an earlier-session skill I missed). None modified — nothing blocking, but the `.skills-sync-ignore` pass deferred for 10 consecutive sessions now. Consider deciding: (a) share them all, (b) add `.skills-sync-ignore` markers, (c) keep ignoring.
+- **Release 0.12.1 binaries building on CI** — tag push triggers `release.yml` workflow. Binaries will be downloadable from the GitHub release page once CI completes (usually ~5 min). No action needed unless CI fails.
+- **Dispatcher heuristic retune still not ticketed.** Three paired samples exist (noted in prior session brief); CHORE to retune the 20k baseline + 2.5k/Read + 4k/Write + 1k/Bash constants to ~36k + 4.5k + 7k + 1.8k would converge on observed usage. Cheap to ticket whenever you want to lock in the observation before losing memory.
+- **Session journal still absent** (10 consecutive sessions now). Not breaking anything but worth starting if a future session plans 2+ parallel investigations.
+- **Backlog is zero again** — next session starts with no automatic work. Brainstorm or pick from the unpicked candidates from the prior brief's option list: (a) new language support, (b) integration targets, (c) perf work on large monorepos, (e) cross-PR `graphify compare`.
 
 ## Suggested Next Steps
 
-1. **Brainstorm next territory.** Backlog is empty for the first time in months. Candidate directions: (a) new language support (Ruby, Java, C#); (b) integration target (GitHub Action marketplace listing, VS Code extension); (c) performance work (the self-dogfood `cargo run --release analyze` is sub-second but `--force` on a 1000-node mono-repo like `parisgroup-ai/cursos` takes ~15s; room for parallelization); (d) UX polish (`graphify explain` currently prints raw text; an interactive browsing mode could ship on rmcp's tool/prompt surface); (e) `graphify compare <PR1> <PR2>` as a cross-PR drift tool for reviewers auditing multiple PRs at once.
-2. **Release v0.12.1** if any FEAT-038 consumer surfaces a need. Otherwise hold until a second change accumulates.
-3. **Fix `sprint.md` frontmatter** — one `uid:` line added, silences the recurring warning. Smallest possible session.
-4. **File the dispatcher heuristic retune CHORE** if you want to lock in the observed under-count before losing the paired-sample memory.
+1. **Verify v0.12.1 release artifacts landed** — check GitHub releases page after ~5min to confirm the 4-target binary build succeeded. If it failed, investigate the release workflow before any consumer tries to download 0.12.1.
+2. **Pick a territory from (a)–(e)** in the prior brief's candidate list. Most tractable next: (e) `graphify compare <PR1> <PR2>` — small surface, clear user value, builds on existing diff infrastructure. Least tractable solo: (a) new language support — each language is a multi-session commitment.
+3. **Address the 17 unshared skills backlog** in a dedicated ~15-min session. Either sync them all to parisgroup-ai/ai-skills-parisgroup or mark them ignored.
+4. **File the dispatcher heuristic retune CHORE** if motivated to lock in the data before losing it.
 
 ## Quick-start commands for the next session
 
@@ -71,17 +59,16 @@ Four fixtures failed to reproduce the reported symptom, including a `/tmp/gf-bug
 # Orient
 /session-start
 
-# Option A — brainstorm new direction
-# describe the candidate territory, then /tn-plan-session
+# Verify release artifacts
+gh release view v0.12.1
 
-# Option B — quick polish session
-# fix sprint.md uid, tag v0.12.1 if motivated
+# Option A — brainstorm next territory (recommended: option e)
+# describe the candidate, then /tn-plan-session
 
-# Option C — release cycle (only if a second change warrants it)
-# edit Cargo.toml → 0.12.1, then:
-cargo build --release -p graphify-cli
-git commit -am "fix: bump version to 0.12.1"
-git tag v0.12.1
-git push origin main --tags
-cargo install --path crates/graphify-cli --force
+# Option B — skills sync housekeeping
+ls ~/.claude/skills/ | head -20
+# decide per-skill: /share-skill <name> OR touch ~/.claude/skills/<name>/.skills-sync-ignore
+
+# Option C — lock in dispatcher heuristic retune
+tn new -t CHORE "retune dispatcher heuristic constants from 3+ paired samples"
 ```

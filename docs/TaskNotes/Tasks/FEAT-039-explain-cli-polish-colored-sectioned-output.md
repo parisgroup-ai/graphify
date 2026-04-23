@@ -1,8 +1,9 @@
 ---
 uid: feat-039
-status: in-progress
+status: done
 priority: normal
 scheduled: 2026-04-23
+completed: 2026-04-23
 timeEstimate: 60
 pomodoros: 0
 projects:
