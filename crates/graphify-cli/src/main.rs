@@ -183,6 +183,21 @@ struct ProjectConfig {
     /// `Ambiguous`, so the ambiguity metric reflects real extraction noise.
     #[serde(default)]
     external_stubs: Vec<String>,
+    /// Per-project overrides for the `graphify check` gate (issue #14).
+    ///
+    /// Fields mirror the CLI flags. Precedence for the resolved limit:
+    /// CLI flag > `[project.check]` > None (no gate for that dimension).
+    /// `#[serde(deny_unknown_fields)]` on `ProjectCheck` catches typos
+    /// inside this block (e.g. `max_hoptspot_score`) so a misspelled key
+    /// never silently disables a gate.
+    check: Option<ProjectCheck>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct ProjectCheck {
+    max_cycles: Option<usize>,
+    max_hotspot_score: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -2788,6 +2803,29 @@ impl ContractsMode {
     }
 }
 
+/// Merges CLI-level `CheckLimits` with an optional `[project.check]` override
+/// from `graphify.toml` (issue #14). Precedence per field:
+/// `[project.check]` > CLI flag > None (no gate for that dimension).
+///
+/// The project-wins rule was chosen against the issue's literal "CLI usually
+/// overrides config" text because the motivating use case (workspace CI runs
+/// `graphify check --max-hotspot-score 0.70` and needs one project to pass at
+/// 0.75 via its TOML override) only works when the narrower scope wins.
+/// `[project.check]` is an intentional, code-reviewed exception — not a
+/// transient debug toggle — so it shadows the workspace default the same way
+/// `tsconfig` per-project overrides shadow a root config.
+///
+/// Kept as a free function so the precedence rule has exactly one test target
+/// and `cmd_check` can build the per-project limits map without cloning the
+/// whole project slice.
+fn effective_limits(cli: &CheckLimits, project: Option<&ProjectCheck>) -> CheckLimits {
+    let project = project.cloned().unwrap_or_default();
+    CheckLimits {
+        max_cycles: project.max_cycles.or(cli.max_cycles),
+        max_hotspot_score: project.max_hotspot_score.or(cli.max_hotspot_score),
+    }
+}
+
 fn evaluate_quality_gates(
     graph: &CodeGraph,
     metrics: &[graphify_core::metrics::NodeMetrics],
@@ -3057,14 +3095,26 @@ fn cmd_check(
         .map(|result| (result.name.clone(), result))
         .collect();
 
+    // Build per-project effective limits map. Separate from the loop so the
+    // borrow on `cfg.project` is released before `analyzed_projects` is moved.
+    let project_overrides: HashMap<String, CheckLimits> = cfg
+        .project
+        .iter()
+        .map(|p| (p.name.clone(), effective_limits(&limits, p.check.as_ref())))
+        .collect();
+
     let mut results = Vec::new();
     for project in analyzed_projects {
+        let project_limits = project_overrides
+            .get(&project.name)
+            .cloned()
+            .unwrap_or_else(|| limits.clone());
         let (summary, violations) = evaluate_quality_gates(
             &project.graph,
             &project.metrics,
             &project.communities,
             &project.cycles,
-            &limits,
+            &project_limits,
             &consolidation,
         );
         let policy_result =
@@ -3079,7 +3129,7 @@ fn cmd_check(
         results.push(build_project_check_result(
             &project.name,
             summary,
-            limits.clone(),
+            project_limits,
             policy_result,
             violations,
         ));
@@ -4960,6 +5010,128 @@ mod tests {
             violations.is_empty(),
             "allowlisted hotspot should not trip the gate"
         );
+    }
+
+    // --- issue #14: per-project [project.check] overrides -------------------
+
+    #[test]
+    fn issue_14_effective_limits_project_check_takes_precedence_over_cli() {
+        // The motivating use case: workspace CI runs with --max-hotspot-score
+        // 0.70, but pageshell-native declares an override at 0.75 and expects
+        // to pass at 0.738. The narrower scope wins.
+        let cli = CheckLimits {
+            max_cycles: Some(0),
+            max_hotspot_score: Some(0.70),
+        };
+        let project = ProjectCheck {
+            max_cycles: Some(5),
+            max_hotspot_score: Some(0.75),
+        };
+        let merged = effective_limits(&cli, Some(&project));
+        assert_eq!(merged.max_cycles, Some(5));
+        assert_eq!(merged.max_hotspot_score, Some(0.75));
+    }
+
+    #[test]
+    fn issue_14_effective_limits_cli_fills_when_project_check_absent() {
+        // Projects without a [project.check] block inherit the CLI default.
+        let cli = CheckLimits {
+            max_cycles: Some(0),
+            max_hotspot_score: Some(0.70),
+        };
+        let merged = effective_limits(&cli, None);
+        assert_eq!(merged.max_cycles, Some(0));
+        assert_eq!(merged.max_hotspot_score, Some(0.70));
+    }
+
+    #[test]
+    fn issue_14_effective_limits_none_when_both_absent() {
+        let merged = effective_limits(&CheckLimits::default(), None);
+        assert_eq!(merged.max_cycles, None);
+        assert_eq!(merged.max_hotspot_score, None);
+    }
+
+    #[test]
+    fn issue_14_effective_limits_mixed_per_field_precedence() {
+        // Project sets only max_hotspot_score; CLI sets only max_cycles.
+        // Each dimension is resolved independently: project value is used
+        // where present, CLI fills the gap otherwise.
+        let cli = CheckLimits {
+            max_cycles: Some(0),
+            max_hotspot_score: Some(0.70),
+        };
+        let project = ProjectCheck {
+            max_cycles: None,
+            max_hotspot_score: Some(0.75),
+        };
+        let merged = effective_limits(&cli, Some(&project));
+        assert_eq!(merged.max_cycles, Some(0));
+        assert_eq!(merged.max_hotspot_score, Some(0.75));
+    }
+
+    #[test]
+    fn issue_14_project_check_parses_from_toml_and_rejects_typos() {
+        // Happy path: `[project.check]` deserializes cleanly.
+        let toml_ok = r#"
+            [[project]]
+            name = "pageshell-native"
+            repo = "./src"
+            lang = ["typescript"]
+            local_prefix = "@parisgroup-ai/pageshell-native"
+
+            [project.check]
+            max_hotspot_score = 0.75
+        "#;
+        let cfg: Config = toml::from_str(toml_ok).expect("valid project.check parses");
+        let check = cfg.project[0].check.as_ref().expect("check block present");
+        assert_eq!(check.max_hotspot_score, Some(0.75));
+        assert_eq!(check.max_cycles, None);
+
+        // Typo guard: deny_unknown_fields on ProjectCheck fails the parse
+        // rather than silently disabling the intended gate.
+        let toml_typo = r#"
+            [[project]]
+            name = "p"
+            repo = "./src"
+            lang = ["typescript"]
+
+            [project.check]
+            max_hoptspot_score = 0.75
+        "#;
+        let err = toml::from_str::<Config>(toml_typo)
+            .err()
+            .expect("typo in project.check should fail to parse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("max_hoptspot_score") || msg.contains("unknown field"),
+            "typo should surface in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn issue_14_effective_limits_trips_hotspot_gate_per_project() {
+        // End-to-end shape: a project-level override at 0.75 trips on score
+        // 0.91 when CLI leaves max_hotspot_score unset.
+        let graph = sample_graph();
+        let cli = CheckLimits::default();
+        let project = ProjectCheck {
+            max_cycles: None,
+            max_hotspot_score: Some(0.75),
+        };
+        let merged = effective_limits(&cli, Some(&project));
+        let (_summary, violations) = evaluate_quality_gates(
+            &graph,
+            &[metric("a", 0.91), metric("b", 0.65)],
+            &[],
+            &[],
+            &merged,
+            &ConsolidationConfig::default(),
+        );
+        assert_eq!(violations.len(), 1);
+        assert!(matches!(
+            &violations[0],
+            CheckViolation::Limit { kind, .. } if kind == "max_hotspot_score"
+        ));
     }
 
     #[test]
