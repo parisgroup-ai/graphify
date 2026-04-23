@@ -1,9 +1,18 @@
 ---
 uid: feat-038
-status: open
+status: done
 priority: low
 scheduled: 2026-04-22
+completed: 2026-04-22
 pomodoros: 0
+timeSpent: 28
+timeEntries:
+- date: 2026-04-22
+  minutes: 28
+  note: source=<usage>,heuristic=66000,observed=111805,delta_pct=-41.0
+  type: manual
+  executor: claude-solo
+  tokens: 111805
 contexts:
 - community
 - feat-036-followup

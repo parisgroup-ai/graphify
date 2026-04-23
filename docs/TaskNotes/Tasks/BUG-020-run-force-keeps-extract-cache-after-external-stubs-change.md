@@ -1,24 +1,33 @@
 ---
 uid: bug-020
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-22
+completed: 2026-04-22
 pomodoros: 0
+timeSpent: 12
+timeEntries:
+- date: 2026-04-22
+  minutes: 12
+  note: source=<usage>,heuristic=35000,observed=66247,delta_pct=-47.2
+  type: manual
+  executor: claude-solo
+  tokens: 66247
 projects:
-  - "[[sprint.md|Current Sprint]]"
+- '[[sprint.md|Current Sprint]]'
 contexts:
-  - cli
-  - cache
-  - extract
-  - config
+- cli
+- cache
+- extract
+- config
 tags:
-  - task
-  - bug
-  - cli
-  - cache-invalidation
-  - dx
-  - external_stubs
-  - needs-consumer-evidence
+- task
+- bug
+- cli
+- cache-invalidation
+- dx
+- external_stubs
+- needs-consumer-evidence
 ai:
   parallelParts: 0
   needsReview: false
@@ -117,6 +126,21 @@ Not ruled out by current evidence — any of these would need consumer-machine d
 ## Recommendation
 
 Leave open with `needs-consumer-evidence` tag until the consumer can produce the evidence list above. Do not ship a "cache-invalidate on `--force`" change on the strength of this report alone — the cache does not store the classification being discussed, so that change would be a no-op for the reported symptom.
+
+## Re-verification 2026-04-22 (session `2026-04-22-2340`, dispatcher run)
+
+Ran a clean fourth fixture at v0.12.0 (installed PATH binary `graphify 0.12.0` at `~/.cargo/bin/graphify`) exercising the exact scenario the consumer reported, with the cache intentionally hot between runs:
+
+1. `/tmp/gf-bug020-verify/src/main.py` importing `os`, `logging`, `typing`, `fastapi`, `pydantic` (8 edges).
+2. Baseline `analyze` with no `external_stubs` → `{ambiguous: 6, expected_external: 0}`.
+3. Edit `[settings] external_stubs = ["os","logging","typing","fastapi","pydantic"]`, re-run `analyze` **without** `--force`. Stderr shows `Cache: 1 hits, 0 misses, 0 evicted` — cache served the extraction — yet `analysis.json` now reports `{ambiguous: 0, expected_external: 6}`. Flip applied on a cache hit.
+4. Remove `external_stubs`, re-run `analyze` without `--force`. Again `Cache: 1 hits, 0 misses`, classification flips back to `{ambiguous: 6, expected_external: 0}`.
+
+Confirms both the positive direction (add stubs → flip to ExpectedExternal) and the negative direction (remove stubs → flip back to Ambiguous) on a warm cache, with no `--force` and no `rm -rf`. Matches the architecture analysis above: the `external_stubs.matches()` call sits in the edge-resolution loop (`graphify-cli/src/main.rs:2570`, `graphify-mcp/src/main.rs:340`), runs on every edge regardless of cache provenance, and the cache `ExtractionResult`s carry only extractor-time confidence (`Extracted`/`Inferred`) — the two classifications under discussion are never stored in `.graphify-cache.json` at all.
+
+## Outcome
+
+Closing as **not reproduced on v0.12.0**. Keeping the full investigation trail in this task body so if a consumer hits the same symptom again, the diagnosis and the minimum-evidence checklist are already written down. Re-open only with the evidence list in §"Minimum evidence to confirm and re-open as a real bug".
 
 ## Discovered context
 
