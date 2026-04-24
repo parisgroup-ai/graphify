@@ -286,6 +286,6 @@ Source in `integrations/`; installed via `graphify install-integrations`.
 
 ## Task tracking
 
-- Sprint board: `docs/TaskNotes/Tasks/sprint.md`
+- Sprint board: `docs/TaskNotes/sprint.md`
 - Task files: `docs/TaskNotes/Tasks/BUG-*.md` (TaskNotes format with YAML frontmatter)
 - Always cross-reference task status against actual codebase — tasks may be stale
