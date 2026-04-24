@@ -1,4 +1,5 @@
 pub mod check_report;
+pub mod compare_json;
 pub mod consolidation;
 pub mod contract_json;
 pub mod contract_markdown;
@@ -21,6 +22,7 @@ pub use check_report::{
     CheckLimits, CheckReport, CheckViolation, PolicyCheckSummary, ProjectCheckResult,
     ProjectCheckSummary,
 };
+pub use compare_json::write_compare_json;
 pub use contract_json::{
     build_contract_check_result, ContractCheckResult, ContractPairResult, ContractSideInfo,
     ViolationEntry,
@@ -28,7 +30,7 @@ pub use contract_json::{
 pub use contract_markdown::write_contract_markdown_section;
 pub use csv::{write_edges_csv, write_nodes_csv};
 pub use diff_json::write_diff_json;
-pub use diff_markdown::write_diff_markdown;
+pub use diff_markdown::{write_compare_markdown, write_diff_markdown};
 pub use graphml::write_graphml;
 pub use html::write_html;
 pub use json::{write_analysis_json, write_analysis_json_with_allowlist, write_graph_json};

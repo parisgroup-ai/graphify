@@ -32,10 +32,10 @@ use graphify_report::{
         CheckLimits, CheckReport, CheckViolation, PolicyCheckSummary, ProjectCheckResult,
         ProjectCheckSummary,
     },
-    write_analysis_json, write_analysis_json_with_allowlist, write_cypher, write_diff_json,
-    write_diff_markdown, write_edges_csv, write_graph_json, write_graphml, write_html,
-    write_nodes_csv, write_obsidian_vault, write_report, write_trend_json, write_trend_markdown,
-    Cycle,
+    write_analysis_json, write_analysis_json_with_allowlist, write_compare_json,
+    write_compare_markdown, write_cypher, write_diff_json, write_diff_markdown, write_edges_csv,
+    write_graph_json, write_graphml, write_html, write_nodes_csv, write_obsidian_vault,
+    write_report, write_trend_json, write_trend_markdown, Cycle,
 };
 
 mod install;
@@ -526,6 +526,45 @@ enum Commands {
         project: Option<String>,
 
         /// Output directory for drift report files (default: current directory)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Minimum score delta to report as significant (default: 0.05)
+        #[arg(long, default_value = "0.05")]
+        threshold: f64,
+
+        /// Skip the `[consolidation].allowlist` and
+        /// `[consolidation.intentional_mirrors]` sections when a config is
+        /// supplied (debug flag — emits un-annotated hotspot entries).
+        #[arg(long, default_value_t = false)]
+        ignore_allowlist: bool,
+    },
+
+    /// Compare two existing Graphify analysis outputs head-to-head
+    ///
+    /// Inputs may be either full `analysis.json` files or directories that
+    /// contain `analysis.json`, such as `report/<project>/` folders from two
+    /// PR artifacts.
+    Compare {
+        /// Left-hand analysis.json file or directory containing analysis.json
+        left: PathBuf,
+
+        /// Right-hand analysis.json file or directory containing analysis.json
+        right: PathBuf,
+
+        /// Label for the left-hand side in stdout and Markdown output
+        #[arg(long)]
+        left_label: Option<String>,
+
+        /// Label for the right-hand side in stdout and Markdown output
+        #[arg(long)]
+        right_label: Option<String>,
+
+        /// Path to graphify.toml for consolidation annotations
+        #[arg(long)]
+        config: Option<PathBuf>,
+
+        /// Output directory for compare report files (default: current directory)
         #[arg(long)]
         output: Option<PathBuf>,
 
@@ -1114,6 +1153,28 @@ fn main() {
             );
         }
 
+        Commands::Compare {
+            left,
+            right,
+            left_label,
+            right_label,
+            config,
+            output,
+            threshold,
+            ignore_allowlist,
+        } => {
+            cmd_compare(
+                &left,
+                &right,
+                left_label.as_deref(),
+                right_label.as_deref(),
+                config.as_deref(),
+                output.as_deref(),
+                threshold,
+                ignore_allowlist,
+            );
+        }
+
         Commands::Trend {
             config,
             project,
@@ -1407,6 +1468,143 @@ fn cmd_diff(
         );
     }
     println!("Written to {}", out_dir.display());
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_compare(
+    left: &Path,
+    right: &Path,
+    left_label: Option<&str>,
+    right_label: Option<&str>,
+    config: Option<&Path>,
+    output: Option<&Path>,
+    threshold: f64,
+    ignore_allowlist: bool,
+) {
+    let cfg_opt = config.map(load_config);
+    let consolidation = cfg_opt
+        .as_ref()
+        .map(|cfg| resolve_consolidation(cfg, ignore_allowlist));
+
+    let left_path = resolve_compare_analysis_input(left, "left");
+    let right_path = resolve_compare_analysis_input(right, "right");
+    let left_label = left_label
+        .map(str::to_owned)
+        .unwrap_or_else(|| default_compare_label(left, &left_path));
+    let right_label = right_label
+        .map(str::to_owned)
+        .unwrap_or_else(|| default_compare_label(right, &right_path));
+
+    let left_snapshot = load_snapshot(&left_path);
+    let right_snapshot = load_snapshot(&right_path);
+    let report = compute_diff_with_config(
+        &left_snapshot,
+        &right_snapshot,
+        threshold,
+        consolidation.as_ref(),
+    );
+
+    let out_dir = output.unwrap_or(Path::new("."));
+    std::fs::create_dir_all(out_dir).expect("create output directory");
+    write_compare_json(
+        &report,
+        &left_label,
+        &right_label,
+        &out_dir.join("compare-report.json"),
+    );
+    write_compare_markdown(
+        &report,
+        &left_label,
+        &right_label,
+        &out_dir.join("compare-report.md"),
+    );
+
+    println!("Architecture Compare Report");
+    println!("  Left:        {} ({})", left_label, left_path.display());
+    println!("  Right:       {} ({})", right_label, right_path.display());
+    println!(
+        "  Nodes:       {} → {} ({:+})",
+        report.summary_delta.nodes.before,
+        report.summary_delta.nodes.after,
+        report.summary_delta.nodes.change
+    );
+    println!(
+        "  Edges:       {} → {} ({:+})",
+        report.summary_delta.edges.before,
+        report.summary_delta.edges.after,
+        report.summary_delta.edges.change
+    );
+    println!(
+        "  Communities: {} → {} ({:+})",
+        report.summary_delta.communities.before,
+        report.summary_delta.communities.after,
+        report.summary_delta.communities.change
+    );
+    println!(
+        "  Cycles:      {} → {} ({:+})",
+        report.summary_delta.cycles.before,
+        report.summary_delta.cycles.after,
+        report.summary_delta.cycles.change
+    );
+    if !report.edges.added_nodes.is_empty() {
+        println!("  Right-only:  {} nodes", report.edges.added_nodes.len());
+    }
+    if !report.edges.removed_nodes.is_empty() {
+        println!("  Left-only:   {} nodes", report.edges.removed_nodes.len());
+    }
+    if !report.hotspots.rising.is_empty() || !report.hotspots.falling.is_empty() {
+        println!(
+            "  Hotspots:    {} higher on right, {} lower on right",
+            report.hotspots.rising.len(),
+            report.hotspots.falling.len()
+        );
+    }
+    println!("Written to {}", out_dir.display());
+}
+
+fn resolve_compare_analysis_input(input: &Path, side: &str) -> PathBuf {
+    if input.is_dir() {
+        let analysis_path = input.join("analysis.json");
+        if analysis_path.exists() {
+            return analysis_path;
+        }
+        eprintln!(
+            "graphify compare: {side} directory '{}' is missing analysis.json (run 'graphify run' first or pass an analysis.json file)",
+            input.display()
+        );
+        std::process::exit(1);
+    }
+
+    if input.exists() {
+        return input.to_path_buf();
+    }
+
+    eprintln!(
+        "graphify compare: {side} input '{}' not found (pass an analysis.json file or a directory containing analysis.json)",
+        input.display()
+    );
+    std::process::exit(1);
+}
+
+fn default_compare_label(input: &Path, resolved: &Path) -> String {
+    let label_path = if input.is_dir() {
+        input
+    } else if resolved
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == "analysis.json")
+    {
+        resolved.parent().unwrap_or(input)
+    } else {
+        input
+    };
+
+    label_path
+        .file_stem()
+        .or_else(|| label_path.file_name())
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| input.display().to_string())
 }
 
 fn cmd_trend(

@@ -13,18 +13,52 @@ pub fn write_diff_markdown(report: &DiffReport, path: &Path) {
     std::fs::write(path, buf).expect("write diff markdown");
 }
 
+/// Writes a compare-oriented diff report as Markdown to `path`.
+///
+/// # Panics
+/// Panics if file I/O fails.
+pub fn write_compare_markdown(
+    report: &DiffReport,
+    left_label: &str,
+    right_label: &str,
+    path: &Path,
+) {
+    let buf = render_labeled_diff_markdown(
+        report,
+        "Architecture Compare Report",
+        left_label,
+        right_label,
+    );
+    std::fs::write(path, buf).expect("write compare markdown");
+}
+
 /// Renders the DiffReport as a Markdown string.
 fn render_diff_markdown(report: &DiffReport) -> String {
+    render_labeled_diff_markdown(report, "Architectural Drift Report", "Before", "After")
+}
+
+fn render_labeled_diff_markdown(
+    report: &DiffReport,
+    title: &str,
+    before_label: &str,
+    after_label: &str,
+) -> String {
     let mut buf = String::new();
 
     // Title
-    writeln!(buf, "# Architectural Drift Report").unwrap();
+    writeln!(buf, "# {title}").unwrap();
     writeln!(buf).unwrap();
 
     // Summary table
     writeln!(buf, "## Summary").unwrap();
     writeln!(buf).unwrap();
-    writeln!(buf, "| Metric | Before | After | Change |").unwrap();
+    writeln!(
+        buf,
+        "| Metric | {} | {} | Change |",
+        markdown_table_label(before_label),
+        markdown_table_label(after_label)
+    )
+    .unwrap();
     writeln!(buf, "|--------|--------|-------|--------|").unwrap();
     write_summary_row(&mut buf, "Nodes", &report.summary_delta.nodes);
     write_summary_row(&mut buf, "Edges", &report.summary_delta.edges);
@@ -142,6 +176,10 @@ fn render_diff_markdown(report: &DiffReport) -> String {
     .unwrap();
 
     buf
+}
+
+fn markdown_table_label(label: &str) -> String {
+    label.replace('|', "\\|").replace(['\n', '\r'], " ")
 }
 
 fn write_summary_row(buf: &mut String, label: &str, delta: &graphify_core::diff::Delta<usize>) {
@@ -439,5 +477,28 @@ mod tests {
     fn markdown_omits_subsection_when_no_mirrors() {
         let md = render_diff_markdown(&report_with_changes());
         assert!(!md.contains("### Intentional mirrors"));
+    }
+
+    #[test]
+    fn compare_markdown_uses_custom_title_and_labels() {
+        let md = render_labeled_diff_markdown(
+            &report_with_changes(),
+            "Architecture Compare Report",
+            "PR-1",
+            "PR-2",
+        );
+        assert!(md.contains("# Architecture Compare Report"));
+        assert!(md.contains("| Metric | PR-1 | PR-2 | Change |"));
+    }
+
+    #[test]
+    fn compare_markdown_escapes_pipe_in_labels() {
+        let md = render_labeled_diff_markdown(
+            &report_with_changes(),
+            "Architecture Compare Report",
+            "main|left",
+            "feature|right",
+        );
+        assert!(md.contains("| Metric | main\\|left | feature\\|right | Change |"));
     }
 }
