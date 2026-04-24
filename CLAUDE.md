@@ -30,6 +30,7 @@ graphify watch --config graphify.toml
 # Architectural drift detection
 graphify diff --before report/v1/analysis.json --after report/v2/analysis.json
 graphify diff --baseline report/baseline/analysis.json --config graphify.toml
+graphify compare report/main/my-app report/feature/my-app --left-label main --right-label feature
 
 # Query the graph
 graphify query "app.services.*" --config graphify.toml

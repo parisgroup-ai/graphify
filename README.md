@@ -87,6 +87,7 @@ Policy selectors support:
 | `graphify explain <node>` | Module profile card + impact analysis |
 | `graphify path <source> <target>` | Find dependency paths between modules |
 | `graphify diff` | Detect architectural drift between snapshots |
+| `graphify compare` | Compare two existing analysis outputs head-to-head |
 | `graphify trend` | Aggregate historical trends from stored snapshots |
 | `graphify check` | Validate CI quality gates and declarative policy rules |
 | `graphify pr-summary` | Render a PR-ready Markdown summary of architectural change |
@@ -104,7 +105,7 @@ Policy selectors support:
 | `--project <name>` | query, explain, path, diff, check | Filter to a specific project |
 | `--all` | path | Show all paths (not just shortest) |
 | `--max-depth <n>` | path | Limit path search depth |
-| `--threshold <f>` | diff | Minimum score delta to report (default: 0.05) |
+| `--threshold <f>` | diff, compare | Minimum score delta to report (default: 0.05) |
 
 ## Output Formats
 
@@ -123,6 +124,8 @@ Each project produces a subdirectory under the configured output path:
 | `obsidian_vault/` | Markdown | Obsidian vault with one `.md` per node and `[[wikilinks]]` |
 | `drift-report.json` | JSON | Drift detection results (via `graphify diff`) |
 | `drift-report.md` | Markdown | Drift detection report |
+| `compare-report.json` | JSON | Head-to-head comparison results (via `graphify compare`) |
+| `compare-report.md` | Markdown | Head-to-head comparison report |
 | `check-report.json` | JSON | Unified check result (rules + contract drift); written by `graphify check` |
 | `history/*.json` | JSON | Per-run historical snapshots used by `graphify trend` |
 | `trend-report.json` | JSON | Aggregated trend report across stored snapshots |
@@ -155,6 +158,25 @@ graphify diff --baseline report/baseline/analysis.json --config graphify.toml --
 ```
 
 Detects changes across 5 dimensions: node additions/removals, hotspot score shifts, cycle introduction/resolution, community membership moves, and degree changes.
+
+## Comparing Existing Outputs
+
+Use `graphify compare` when both sides already produced Graphify artifacts, such as two CI runs, two branch snapshots, or two PR artifact directories. Each input can be an `analysis.json` file or a directory containing one.
+
+```bash
+# Compare two branch snapshots
+graphify compare report/main/my-app report/feature/my-app \
+  --left-label main \
+  --right-label feature \
+  --output report/compare-main-feature
+
+# Compare two CI artifacts directly
+graphify compare artifacts/pr-123/analysis.json artifacts/pr-456/analysis.json \
+  --left-label PR-123 \
+  --right-label PR-456
+```
+
+The command writes `compare-report.json` and `compare-report.md`, and prints a concise stdout summary. It uses the same diff engine as `graphify diff`; labels only change the report framing.
 
 ## Historical Trends
 

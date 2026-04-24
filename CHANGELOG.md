@@ -4,6 +4,16 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-04-24
+
+### Added
+- feat(cli): add `graphify compare <left> <right>` for head-to-head comparison of two existing Graphify analysis outputs. Inputs may be `analysis.json` files or directories containing `analysis.json`; optional labels make PR-vs-PR or branch-vs-branch reports readable.
+- feat(report): add compare-oriented outputs, `compare-report.json` and `compare-report.md`, reusing the existing architecture diff engine while preserving `graphify diff` behavior.
+- docs(readme): add a compare recipe for branch snapshots and CI/PR artifact directories.
+
+### Changed
+- chore(tasks): move the TaskNotes sprint file outside the task list directory so sprint metadata no longer appears as a task document.
+
 ## [0.11.10] - 2026-04-21
 
 ### Added

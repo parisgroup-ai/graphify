@@ -14,7 +14,7 @@ Graphify is a Rust workspace for architecture analysis of codebases.
 - `graphify-cli`: `graphify` binary
 - `graphify-mcp`: MCP server binary for AI assistants
 
-Current workspace version: `0.8.2`
+Current workspace version: `0.13.0`
 
 ## Working Mode
 
