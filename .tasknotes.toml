@@ -2,7 +2,7 @@
 # Schema: rust/crates/tasknotes-core/src/config.rs (tn >= 0.2.0).
 
 tasks_dir   = "docs/TaskNotes/Tasks"
-sprint_file = "docs/TaskNotes/Tasks/sprint.md"
+sprint_file = "docs/TaskNotes/sprint.md"
 archive_dir = "docs/TaskNotes/Tasks/archive"
 
 [defaults]
