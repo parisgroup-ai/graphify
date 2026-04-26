@@ -4,6 +4,8 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.3] - 2026-04-26
+
 ### Changed
 - chore(deps): `ExternalStubs` moved from `graphify-extract` to `graphify-core` and `graphify-report`'s dependency on `graphify-extract` was dropped (CHORE-011). Closes the layer-crossing FEAT-043 introduced when `graphify-report::suggest` started consuming the prefix matcher. The matcher had no extractor coupling — pure `Vec<String>` prefix matching — so it was a clean move with no behavior change. Public import path: `graphify_extract::stubs::ExternalStubs` and `graphify_extract::ExternalStubs` → `graphify_core::ExternalStubs` (both old paths removed; no shim, no deprecation alias). Internal workspace API; no published SDK to preserve. 856 workspace tests still pass; `graphify check` PASS on all 5 crates with 0 cycles; `graphify suggest stubs` candidate count holds at 7 (zero regression). Architecture deltas: graphify-core +6 nodes / +9 edges, graphify-extract -7 nodes / -9 edges (the moved file's contribution).
 
