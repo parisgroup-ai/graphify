@@ -4,6 +4,15 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-04-26
+
+### Added
+- feat(session): `graphify session brief` consolidates `report/<project>/analysis.json` from every `[[project]]` in `graphify.toml` into a single `.claude/session-context-gf.json` consumed by Claude Code `/session-start` skills and `tn-session-dispatcher` subagents. Cache-aware: regenerates only when an `analysis.json` is newer than the existing brief; `--force` bypasses, `--check` exits 2 on stale (CI-friendly). Top-N hotspots are score-sorted globally across projects (default `--top 10`); cycles surface tagged with project name; baseline staleness warns above `--stale-days` (default 7). FEAT-042.
+- feat(session): `graphify session scope --files <a,b,c>` augments an existing brief with structured `graphify explain` output per file. Caps at `--max 5` to keep subagent prompt budgets bounded. The caller passes paths explicitly, so graphify carries no dependency on tasknotes-cli or any consumer task-tracker. Optional `--task <ID>` records the originating task identifier in the merged brief. FEAT-042.
+
+### Notes
+- Brief schema is `schema_version: 2`. This is the first native version of the contract — prior bash wrappers in consumers (e.g. `apps/cursos/scripts/gf-context-{brief,scope}.sh`) emitted `schema_version: 1` with two extras the native form drops on purpose: `frozen[]` (consumer-specific list mirroring each project's `CLAUDE.md` frozen-modules section) and a 40-line text blob in `scope_explains[].explain` (now a structured JSON object). Consumers wanting the legacy text or the frozen list can post-process with `jq` or call `graphify explain` directly.
+
 ## [0.13.0] - 2026-04-24
 
 ### Added
