@@ -5334,7 +5334,6 @@ fn cmd_suggest_stubs(
         graph: GraphSnapshot,
     }
     let mut loaded: Vec<Loaded> = Vec::new();
-    let mut any_skipped = false;
 
     for project in &cfg.project {
         if let Some(name) = project_filter {
@@ -5350,14 +5349,12 @@ fn cmd_suggest_stubs(
                 project.name,
                 graph_path.display()
             );
-            any_skipped = true;
             continue;
         }
         let text = match std::fs::read_to_string(&graph_path) {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("Cannot read {:?}: {e}", graph_path);
-                any_skipped = true;
                 continue;
             }
         };
@@ -5365,7 +5362,6 @@ fn cmd_suggest_stubs(
             Ok(g) => g,
             Err(e) => {
                 eprintln!("Invalid graph.json {:?}: {e}", graph_path);
-                any_skipped = true;
                 continue;
             }
         };
@@ -5374,7 +5370,6 @@ fn cmd_suggest_stubs(
                 "graphify suggest stubs: project \"{}\" has empty graph.json; skipping",
                 project.name
             );
-            any_skipped = true;
             continue;
         }
 
@@ -5432,8 +5427,6 @@ fn cmd_suggest_stubs(
         }
         _ => unreachable!(),
     }
-
-    let _ = any_skipped; // surfaced via stderr above; exit 0 if at least one project loaded.
 }
 
 #[cfg(test)]
