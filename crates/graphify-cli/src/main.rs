@@ -39,6 +39,7 @@ use graphify_report::{
 };
 
 mod install;
+mod session;
 mod watch;
 
 // ---------------------------------------------------------------------------
@@ -642,6 +643,16 @@ enum Commands {
 
     /// Install Graphify AI-assistant integrations (agents, skills, commands, MCP)
     /// into ~/.claude and ~/.agents (or project-local) directories.
+    /// Build / update the session-context brief consumed by Claude Code
+    /// `/session-start` skills and `tn-session-dispatcher` subagents
+    /// (FEAT-042). Two subcommands: `brief` consolidates `analysis.json`
+    /// from every `[[project]]` into one JSON; `scope` augments that JSON
+    /// with `graphify explain` output for an explicit list of files.
+    Session {
+        #[command(subcommand)]
+        action: SessionAction,
+    },
+
     InstallIntegrations {
         /// Install Claude Code artifacts (auto-detected if ~/.claude exists)
         #[arg(long)]
@@ -664,6 +675,68 @@ enum Commands {
         /// Remove manifest-tracked artifacts and MCP entries
         #[arg(long)]
         uninstall: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionAction {
+    /// Consolidate `analysis.json` from each `[[project]]` into a single
+    /// session-context JSON. Cache-aware: regenerates only when an
+    /// `analysis.json` is newer than the existing brief.
+    Brief {
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Override `[settings].output` (defaults to `./report`)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Brief output path (default `.claude/session-context-gf.json`)
+        #[arg(long, default_value = ".claude/session-context-gf.json")]
+        out: PathBuf,
+
+        /// Top N hotspots across all projects (default 10)
+        #[arg(long, default_value_t = 10)]
+        top: usize,
+
+        /// Days threshold for marking the baseline as stale (default 7)
+        #[arg(long = "stale-days", default_value_t = 7)]
+        stale_days: i64,
+
+        /// Always regenerate, even when the cache is fresh
+        #[arg(long)]
+        force: bool,
+
+        /// Exit 0 if the brief is fresh, 2 if stale; never write anything
+        #[arg(long)]
+        check: bool,
+    },
+
+    /// Augment an existing brief with `scope_files[]` + `scope_explains[]`
+    /// for an explicit list of files. Pass file paths as comma-separated
+    /// `--files` — graphify never reaches into a `tn` task body itself.
+    Scope {
+        /// Path to graphify.toml config (needed to load each project's graph)
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Comma-separated list of file paths under apps/, packages/, scripts/
+        #[arg(long, value_delimiter = ',')]
+        files: Vec<String>,
+
+        /// Cap at N files (default 5) — keeps subagent prompt budgets bounded
+        #[arg(long, default_value_t = 5)]
+        max: usize,
+
+        /// Existing brief to augment (default `.claude/session-context-gf.json`)
+        #[arg(long = "in", default_value = ".claude/session-context-gf.json")]
+        input: PathBuf,
+
+        /// Optional task identifier (purely informational) recorded as
+        /// `scope_task` in the merged brief
+        #[arg(long)]
+        task: Option<String>,
     },
 }
 
@@ -1224,6 +1297,70 @@ fn main() {
                 uninstall,
             );
         }
+
+        Commands::Session { action } => match action {
+            SessionAction::Brief {
+                config,
+                output,
+                out,
+                top,
+                stale_days,
+                force,
+                check,
+            } => {
+                let cfg = load_config(&config);
+                let project_names: Vec<String> =
+                    cfg.project.iter().map(|p| p.name.clone()).collect();
+                let opts = session::BriefOpts {
+                    project_names,
+                    output_root: resolve_output(&cfg, output.as_deref()),
+                    out_path: out,
+                    top,
+                    stale_days,
+                    force,
+                    check,
+                };
+                match session::run_brief(&opts) {
+                    Ok(rc) => std::process::exit(rc),
+                    Err(e) => {
+                        eprintln!("ERROR: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            SessionAction::Scope {
+                config,
+                files,
+                max,
+                input,
+                task,
+            } => {
+                let cfg = load_config(&config);
+                let projects = filter_projects(&cfg, None);
+                let opts = session::ScopeOpts {
+                    files,
+                    max,
+                    in_path: input,
+                    task,
+                };
+                let explain = |file: &str| -> Option<serde_json::Value> {
+                    for proj in &projects {
+                        let engine = build_query_engine(proj, &cfg.settings);
+                        if let Some(report) = engine.explain(file) {
+                            return serde_json::to_value(&report).ok();
+                        }
+                    }
+                    None
+                };
+                match session::run_scope(&opts, explain) {
+                    Ok(rc) => std::process::exit(rc),
+                    Err(e) => {
+                        eprintln!("ERROR: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        },
     }
 }
 
