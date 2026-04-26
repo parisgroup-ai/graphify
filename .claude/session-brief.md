@@ -1,74 +1,63 @@
-# Session Brief — 2026-04-26 (FEAT-043 ship)
+# Session Brief — 2026-04-26 (BUG-022 resolver fix)
 
 ## Last Session Summary
 
-Shipped **FEAT-043 `graphify suggest stubs`** end-to-end via subagent-driven-development workflow: 13 plan tasks, 18 commits to `main`, all CI gates green (fmt, clippy, test workspace 754 pass, graphify check 5/5 PASS). Dogfood applied 5 legitimate stubs, surfaced ~30 first-party misclassifications as a separate resolver bug (BUG-022). Filed 4 follow-up tasks (BUG-021, CHORE-010, CHORE-011, BUG-022) and pushed to `origin/main`.
+Investigated BUG-022 (graphify resolver misclassifying first-party symbols as external) end-to-end via systematic-debugging + TDD. Root-cause investigation disconfirmed the original "single bug affecting all ~30 cases" hypothesis: the candidate list traces to **at least 4 distinct bugs at different layers**. Fixed the resolver part (case 8.6) and filed the other three as follow-up tasks. Self-dogfood `graphify suggest stubs` candidate list dropped 35 → 18 (49% reduction), exactly the 17 prefixes predicted as Cat 1+2 (same-file `Type::method` + sibling-mod-from-crate-root).
 
 ## Current State
 
-- Branch: `main`, latest commit `a5007d0 chore(tasks): file FEAT-043 follow-ups (F1-F4)`
-- Working tree: clean
-- Origin sync: pushed at close (auto-push fast-forward gate; 18 commits up)
-- Latest release: `v0.13.1` — `Unreleased` CHANGELOG section now has the FEAT-043 entry, ready for `v0.13.2` whenever bumped
-- Local installed binary: `graphify 0.13.1` at `~/.cargo/bin/graphify` (NOT yet updated — `cargo install --path crates/graphify-cli --force` needed before next dogfood run uses the new feature)
-- TaskNotes: 70 total / 4 open / 0 in-progress / 66 done
+- Branch: `main`, latest commit `e1f83c7 docs(tasks): close BUG-022, file BUG-023/BUG-024/FEAT-044, CHANGELOG`
+- Working tree: clean (memory-bank updates pending in this close commit)
+- Origin sync: 0 ahead / 0 behind (pushed mid-session at `e1f83c7`)
+- Latest release: `v0.13.1` — `Unreleased` CHANGELOG section now has FEAT-043 + BUG-022 entries, ready for `v0.13.2` whenever bumped
+- Local installed binary: `graphify 0.13.1` at `~/.cargo/bin/graphify` — refreshed this session via `cargo install --path crates/graphify-cli --force` from the canonical `~/www/pg/apps/graphify` source (was previously pinned to a stale `~/ai/graphify` path)
+- TaskNotes: 73 total / 6 open / 0 in-progress / 67 done (after this session: BUG-022 closed, BUG-023/BUG-024/FEAT-044 opened)
 
 ## Commits This Session
 
-`8fa2cca..a5007d0` (18 commits). Highlights:
+`fa8bbaf..e1f83c7` (2 commits, both pushed):
 
-- `82cdfa9` docs(spec): FEAT-043 design
-- `b530db4` docs(spec): correct data source (graph.json, not analysis.json) — surfaced during plan-writing self-review
-- `22ed2ca` docs(plan): 13-task TDD implementation plan
-- `c57fea5` build: add toml_edit 0.22 dep
-- `350b8bb` feat(report): suggest module skeleton + extract_prefix
-- `0edfa84` feat(report): score_stubs with threshold + auto-classify + shadowing
-- `184fc99` / `8bb5eae` / `607c448` feat(report): markdown / toml / json renderers
-- `69ff242` feat(cli): suggest stubs read-only paths
-- `cca4bd8` fix(cli): drop dead any_skipped flag (post-review)
-- `c504cc2` feat(cli): --apply via toml_edit (atomic, idempotent)
-- `3213379` test(cli): suggest fixture (2-project graph.json)
-- `2c2fc92` test(cli): 4 e2e tests (md/json/apply/clap-conflict)
-- `b1e8a0b` chore(stubs): 5 dogfood-discovered stubs applied
-- `884cb7f` docs: README + CHANGELOG
-- `41fd4f9` chore(tasks): FEAT-043 done-record
-- `a5007d0` chore(tasks): file F1-F4 follow-ups
+- `0f46ec7` fix(resolver): scoped same-module + sibling-mod paths resolve as local (BUG-022)
+- `e1f83c7` docs(tasks): close BUG-022, file BUG-023/BUG-024/FEAT-044, CHANGELOG
 
 ## Decisions Made (don't re-debate)
 
-- **Subagent-driven-development scaled well at 13 tasks**: ~14 implementer dispatches + ~8 reviewer dispatches across the run. Combined spec+quality reviews were used for trivial mechanical tasks (renderers, fixture+tests) — the rigid "always two stages" rule from the skill was relaxed in favor of one-stage when the diff was config-only or pure data; flagged each deviation in the controller's text for the operator
-- **`graph.json` (not `analysis.json`) as data source**: discovered during plan-writing self-review that `AnalysisSnapshot` lacks `is_local` per node and `weight` per link. Spec was amended (commit `b530db4`) before any code landed. Cheap correction
-- **Markdown is the default `--format`; TOML output is commented-out by default** — safe paste; `--apply` (mutex with `--format`) is the in-place mutation path via `toml_edit`
-- **5 dogfood stubs applied (`include_str` + `graphify_core/extract/report` + `anstyle`); 30 candidate noise items NOT applied** — they reveal a graphify-resolver bug (BUG-022, high-priority follow-up) that should be fixed at the root, not papered over
-- **Auto-push fast-forward gate worked smoothly** in solo-dev mode: 2 batches (mid-session at `cca4bd8` cleanup not pushed; final 18-commit push at close went through cleanly). No race with sibling instance because none was active
+- **BUG-022 is multi-layer, not single-bug**: Phase 1 root-cause investigation showed the ~30 misclassifications come from 4 distinct layers — resolver (Cat 1+2), extractor `scoped_use_list` parsing (Cat 3), extractor closure handling (Cat 4), and missing Rust re-export collapse (Cat 5). Trying to fix all of them in one session would have been scope creep; instead followed the "minimum-impactful-fix + file the rest" pattern. Resolver fix lands ~50% reduction; the rest are tracked as BUG-023, BUG-024, FEAT-044
+- **Case 8.6 placement before case 9 is load-bearing**: same-module symbols shadow aliased imports. Rust resolution semantics back this up (compile error if both in scope). The shadow-alias test (`bug_022_scoped_local_match_shadows_alias`) is the regression guard — proves case 9 was producing wrong results before the fix
+- **Synthesis uses `::` → `.` normalization**: lets the existing BUG-019 negative-guard test (`bug_019_scoped_call_skips_bare_synthesis`) keep passing because its pathological plant has literal `::`, which doesn't match the normalized `.` synthesis — keeping the test was the cheapest way to preserve the original BUG-019 invariant under the new logic
+- **Skipped Cat 4 even though task body mentioned `pct` as canary**: `pct` is a closure (not extracted as Defines), so the resolver fix can't help it; closure handling needs scope analysis, which is BUG-024's territory. Picked a more representative canary (`PolicyError::new`, then `walker::DiscoveredFile`) to drive the fix
+- **Auto-push fast-forward gate worked smoothly again**: pushed `fa8bbaf..e1f83c7` mid-session, no race with sibling instance because none was active. Session-close push step is a no-op (already in sync)
 
 ## Architectural Health
 
 `graphify check --config graphify.toml` — all 5 projects PASS:
 
-- `graphify-core`: PASS, 0 cycles, max_hotspot 0.487 (`src.policy`)
-- `graphify-extract`: PASS, 0 cycles, max_hotspot 0.439 (`src.resolver`)
-- `graphify-report`: PASS, 0 cycles, max_hotspot 0.454 (`src.pr_summary`) — slight bump from 0.432 last session, expected after dogfood added stubs that reclassified some Ambiguous edges to ExpectedExternal (FEAT-033 deprioritization shifts relative weights)
-- `graphify-cli`: PASS, 0 cycles, max_hotspot 0.469 (`src.install`)
-- `graphify-mcp`: PASS, 0 cycles, max_hotspot 0.600 (`src.server`) — also bumped (was 0.559) for the same reason
+- `graphify-core`: PASS, 0 cycles, max_hotspot 0.487 (`src.policy`) — unchanged
+- `graphify-extract`: PASS, 0 cycles, max_hotspot 0.435 (`src.resolver`) — slight drop from 0.439 last session as case 8.6 promoted more edges to local
+- `graphify-report`: PASS, 0 cycles, max_hotspot 0.454 (`src.pr_summary`) — unchanged
+- `graphify-cli`: PASS, 0 cycles, max_hotspot 0.452 (`src.install`) — drop from 0.469 last session, same reason
+- `graphify-mcp`: PASS, 0 cycles, max_hotspot 0.600 (`src.server`) — unchanged
 - Policy violations: 0
+- All hotspots well under the 0.85 CI threshold
 
-All hotspots well under the 0.85 CI threshold.
+Workspace tests: 758+ pass, 0 fail (5 new `bug_022_*` resolver tests added).
 
-## Open Items (4 follow-up tasks filed, all pushed)
+## Open Items (3 follow-up tasks filed, all pushed)
 
-- **BUG-021** (normal): `already_covered_prefixes` records `extract_prefix(target)` which can be broader than the actually-matched stub — relatório engana usuário. Recommended fix: add `ExternalStubs::matching_prefix(&str) -> Option<&str>`
-- **CHORE-010** (low): cross-language same-prefix collision test (30 lines) for `score_stubs`
-- **CHORE-011** (normal): move `ExternalStubs` from `graphify-extract` to `graphify-core` to remove the `report → extract` layer crossing FEAT-043 introduced. **Public API change** — affects ~6 import sites
-- **BUG-022** (HIGH): graphify resolver classifies ~30 first-party symbols as `is_local=false`. Surfaced by FEAT-043 dogfood. Most actionable starting point: pick `pct` or `manifest::sha256_of_bytes` as canary, trace `rust_lang.rs` + `resolver.rs`. Likely related to FEAT-031 / BUG-019 territory
+- **BUG-023** (normal): rust extractor preserves nested `use a::{b::{c, d}}` as literal text including braces. Fixes `ExtractionCache`, `Item`, `Array`, `Value` candidates. Scope: ~30 LOC + 2 tests. Most impactful next bug
+- **BUG-024** (normal): rust extractor emits Calls edges for closures and let-bindings. Fixes `pct`, `sort_key`, `threshold`, `write_grouped`, `find_sccs`, `sha256_hex`, `matches`, `env`. Needs scope analysis — option 1 (pre-scan let-statements) vs option 2 (post-resolution filter); decide before writing tests. Higher uncertainty
+- **FEAT-044** (low): Rust re-export canonical-collapse, mirrors TS FEAT-021/025/026/028 architecture. Multi-day. Open question whether the volume justifies the effort
 
 ## Suggested Next Steps
 
-1. **Investigate BUG-022** (high priority) — root-cause the resolver misclassification. If it's one bug affecting all ~30, fix + regression test ships in v0.13.2 alongside the FEAT-043 entry already in CHANGELOG
-2. **CHORE-011** — move `ExternalStubs` to `graphify-core` while the FEAT-043 dep edge is fresh (smaller refactor than later). Public API change worth a brief ack from operator before refactoring
-3. **`cargo install --path crates/graphify-cli --force`** — local PATH binary is still `0.13.1`; running `graphify suggest stubs` from outside the repo will hit the old binary that doesn't have the subcommand
+1. **BUG-023** is the next clean win — same shape as BUG-022 (well-bounded, low-risk extractor patch, drops 4-5 visible candidates). Likely 30-45 min with TDD
+2. **`v0.13.2` release** — both FEAT-043 and BUG-022 entries are queued in `[Unreleased]`. Worth bumping after either BUG-023 lands (groups three resolver/extractor improvements into one release) OR shipping now if it's been a while
+3. **BUG-024** (closures) — higher uncertainty. Requires deciding between pre-scan vs post-resolution-filter; would benefit from a brainstorm pass before TDD
+4. (long-tail) FEAT-044 — only worth picking up if Rust re-export volume becomes user-visible; currently 8 edges total
 
 ## Reminders
 
 - `.claude/session-context-gf.json` is `skip-worktree`'d locally — `git ls-files -v` shows `S`. Reverse with `git update-index --no-skip-worktree`
-- 17 local-only skills under `~/.claude/skills/` not in upstream cache. Same as last session — silence with `.skills-sync-ignore` per skill or `/share-skill <name>` to publish
+- 17 local-only skills under `~/.claude/skills/` not in upstream cache (same as last session). Silence per-skill with `.skills-sync-ignore` or publish via `/share-skill <name>`
+- Local PATH binary now sourced from `~/www/pg/apps/graphify` (CHORE-009 migration finally took effect this session — previous binary was pinned to `~/ai/graphify`)
+- Session-journal not maintained this session. Worth establishing as habit for longer sessions; for ~1h sessions like this one, the conversation context + git log are usually enough
