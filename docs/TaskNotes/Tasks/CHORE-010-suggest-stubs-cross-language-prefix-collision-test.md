@@ -26,8 +26,8 @@ Surfaced by FEAT-043 final review. Realistically rare but currently undefined. 3
 
 ## Subtasks
 
-- [ ] Add `score_stubs_handles_mixed_language_same_prefix` unit test in `crates/graphify-report/src/suggest.rs`
-- [ ] Document the current behavior (first-hit wins) in the doc comment of `StubCandidate.language`
+- [x] Add `score_stubs_handles_mixed_language_same_prefix` unit test in `crates/graphify-report/src/suggest.rs`
+- [x] Document the current behavior (first-hit wins) in the doc comment of `StubCandidate.language`
 - [ ] (optional) decide whether to switch grouping key to `(prefix, language)` if the test surprises
 
 ## Related

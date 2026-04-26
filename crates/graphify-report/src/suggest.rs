@@ -49,6 +49,14 @@ pub struct ProjectInput<'a> {
 #[derive(Debug, Clone, Serialize)]
 pub struct StubCandidate {
     pub prefix: String,
+    /// Language of the FIRST node hit that produced this `(project, prefix)`
+    /// cell. When two nodes in the same project produce the same prefix
+    /// string but have different `language` values (e.g. Rust target
+    /// `serde::Deserialize` and Go target `serde.Foo`), the language of
+    /// whichever link was inserted first wins (via `HashMap::entry().or_insert()`
+    /// on the `(project, prefix)` aggregation key). Behavior may change if
+    /// the grouping key is widened to `(project, prefix, language)` — see
+    /// CHORE-010 for the regression-guard test pinning current behavior.
     pub language: String,
     pub edge_weight: u64,
     pub node_count: usize,
@@ -788,6 +796,83 @@ mod tests {
         assert!(report.settings_candidates.is_empty());
         assert!(report.per_project_candidates.is_empty());
         assert_eq!(report.shadowed_prefixes, vec!["src".to_string()]);
+    }
+
+    #[test]
+    fn score_stubs_handles_mixed_language_same_prefix() {
+        // CHORE-010 regression guard. When two nodes within the SAME project
+        // are external (`is_local=false`), have the same extracted prefix
+        // string ("serde"), but different `language` values, they collapse
+        // into a single `(project, prefix)` cell. The cell's language is set
+        // by `HashMap::entry().or_insert()` on first hit — and because we
+        // iterate `links` as a `Vec` in insertion order, the first link
+        // inserted wins.
+        //
+        // This test pins THAT behavior. It does NOT assert the "ideal"
+        // (e.g., split into two candidates keyed by `(prefix, language)`).
+        // If a real workload makes that split necessary, widen the grouping
+        // key as a separate decision and update this test.
+        use graphify_core::ExternalStubs;
+        let empty = ExternalStubs::default();
+
+        // Single project with two external targets that share prefix "serde"
+        // under different language extraction rules:
+        //   - Rust: `serde::Deserialize` → prefix "serde"
+        //   - Go:   `serde.Foo`           → prefix "serde"
+        // Rust link is inserted FIRST, so the cell's `language` should be
+        // "Rust".
+        let g = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_a::main", "Rust", true),
+                make_node("serde::Deserialize", "Rust", false),
+                make_node("serde.Foo", "Go", false),
+            ],
+            links: vec![
+                // Rust hit first.
+                make_link("crate_a::main", "serde::Deserialize", 3),
+                // Go hit second — collapses into the same cell.
+                make_link("crate_a::main", "serde.Foo", 5),
+            ],
+        };
+        let inputs = vec![ProjectInput {
+            name: "proj-a",
+            local_prefix: "crate_a",
+            current_stubs: &empty,
+            graph: &g,
+        }];
+
+        let report = score_stubs(&inputs, 1);
+
+        // Single project → not promoted to settings.
+        assert!(
+            report.settings_candidates.is_empty(),
+            "single-project hits should not cross to settings"
+        );
+        let proj_a = report
+            .per_project_candidates
+            .get("proj-a")
+            .expect("proj-a should have at least one candidate");
+        assert_eq!(
+            proj_a.len(),
+            1,
+            "two same-prefix hits collapse into ONE candidate (current behavior)"
+        );
+        let cand = &proj_a[0];
+        assert_eq!(cand.prefix, "serde");
+        // Edge weights from BOTH hits are summed even though languages differ.
+        assert_eq!(
+            cand.edge_weight, 8,
+            "edge weights from both language hits are summed (3 + 5)"
+        );
+        // Both nodes contribute to node_count and example_nodes.
+        assert_eq!(cand.node_count, 2);
+        // First-hit-wins: Rust link was inserted first → language is "Rust".
+        // If grouping changes to `(project, prefix, language)`, this assertion
+        // flips and the test above (`proj_a.len() == 1`) also flips.
+        assert_eq!(
+            cand.language, "Rust",
+            "language reflects first-hit-wins: Rust link came before Go link in `links`"
+        );
     }
 
     #[test]
