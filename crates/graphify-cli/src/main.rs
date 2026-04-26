@@ -618,6 +618,14 @@ enum Commands {
         format: String,
     },
 
+    /// Suggest configuration additions (e.g. external_stubs) based on
+    /// existing analysis output. Sub-kinds open the `suggest <kind>`
+    /// namespace; `stubs` is currently the only kind.
+    Suggest {
+        #[command(subcommand)]
+        kind: SuggestKind,
+    },
+
     /// Aggregate historical architecture trends from stored snapshots
     Trend {
         /// Path to graphify.toml config
@@ -737,6 +745,38 @@ enum SessionAction {
         /// `scope_task` in the merged brief
         #[arg(long)]
         task: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SuggestKind {
+    /// Suggest prefixes to add to `[settings].external_stubs` and
+    /// `[[project]].external_stubs`. Consumes `graph.json` from each
+    /// configured project's output directory; run `graphify run` first.
+    Stubs {
+        /// Path to graphify.toml config
+        #[arg(long, default_value = "graphify.toml")]
+        config: PathBuf,
+
+        /// Output format: `md` (default), `toml`, or `json`. Mutually
+        /// exclusive with `--apply`.
+        #[arg(long, default_value = "md", conflicts_with = "apply")]
+        format: String,
+
+        /// Edit graphify.toml in place, merging suggested prefixes into
+        /// existing arrays (preserves comments via `toml_edit`).
+        #[arg(long)]
+        apply: bool,
+
+        /// Minimum per-project edge weight sum for a prefix to be
+        /// suggested. Default: 2.
+        #[arg(long, default_value_t = 2)]
+        min_edges: u64,
+
+        /// Limit to a single project (suggests only for that project's
+        /// per-project block; settings_candidates always empty in this mode).
+        #[arg(long)]
+        project: Option<String>,
     },
 }
 
@@ -1277,6 +1317,18 @@ fn main() {
                 &format,
             );
         }
+
+        Commands::Suggest { kind } => match kind {
+            SuggestKind::Stubs {
+                config,
+                format,
+                apply,
+                min_edges,
+                project,
+            } => {
+                cmd_suggest_stubs(&config, &format, apply, min_edges, project.as_deref());
+            }
+        },
 
         Commands::InstallIntegrations {
             claude_code,
@@ -5222,6 +5274,166 @@ fn cmd_install_integrations(
     if dry_run {
         println!("(dry-run: nothing was written)");
     }
+}
+
+// ---------------------------------------------------------------------------
+// suggest stubs command (FEAT-043)
+// ---------------------------------------------------------------------------
+
+fn cmd_suggest_stubs(
+    config_path: &Path,
+    format: &str,
+    apply: bool,
+    min_edges: u64,
+    project_filter: Option<&str>,
+) {
+    use graphify_extract::stubs::ExternalStubs;
+    use graphify_report::suggest::{
+        render_json, render_markdown, render_toml, score_stubs, GraphSnapshot, ProjectInput,
+    };
+
+    let format = format.to_ascii_lowercase();
+    if !apply && !["md", "toml", "json"].contains(&format.as_str()) {
+        eprintln!(
+            "graphify suggest stubs: unknown --format '{}' (expected md, toml, or json)",
+            format
+        );
+        std::process::exit(1);
+    }
+
+    let cfg = load_config(config_path);
+    let out_dir = resolve_output(&cfg, None);
+
+    if cfg.project.is_empty() {
+        eprintln!(
+            "graphify suggest stubs: no projects configured in {:?}",
+            config_path
+        );
+        std::process::exit(1);
+    }
+
+    // If --project is specified, validate it exists.
+    if let Some(name) = project_filter {
+        if !cfg.project.iter().any(|p| p.name == name) {
+            eprintln!(
+                "graphify suggest stubs: project \"{}\" not found in {:?}",
+                name, config_path
+            );
+            std::process::exit(1);
+        }
+    }
+
+    // Settings-level shared stubs (FEAT-034 merge layer).
+    let settings_stubs: Vec<String> = cfg.settings.external_stubs.clone().unwrap_or_default();
+
+    // Load each project's graph.json + build per-project ExternalStubs.
+    struct Loaded {
+        name: String,
+        local_prefix: String,
+        stubs: ExternalStubs,
+        graph: GraphSnapshot,
+    }
+    let mut loaded: Vec<Loaded> = Vec::new();
+    let mut any_skipped = false;
+
+    for project in &cfg.project {
+        if let Some(name) = project_filter {
+            if project.name != name {
+                continue;
+            }
+        }
+        let proj_out = out_dir.join(&project.name);
+        let graph_path = proj_out.join("graph.json");
+        if !graph_path.exists() {
+            eprintln!(
+                "graphify suggest stubs: project \"{}\" has no graph.json at {} — run `graphify run` first; skipping",
+                project.name,
+                graph_path.display()
+            );
+            any_skipped = true;
+            continue;
+        }
+        let text = match std::fs::read_to_string(&graph_path) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Cannot read {:?}: {e}", graph_path);
+                any_skipped = true;
+                continue;
+            }
+        };
+        let graph: GraphSnapshot = match serde_json::from_str(&text) {
+            Ok(g) => g,
+            Err(e) => {
+                eprintln!("Invalid graph.json {:?}: {e}", graph_path);
+                any_skipped = true;
+                continue;
+            }
+        };
+        if graph.links.is_empty() {
+            eprintln!(
+                "graphify suggest stubs: project \"{}\" has empty graph.json; skipping",
+                project.name
+            );
+            any_skipped = true;
+            continue;
+        }
+
+        let local_prefix = project
+            .local_prefix
+            .clone()
+            .unwrap_or_else(|| "src".to_string());
+
+        let stubs = ExternalStubs::new(
+            settings_stubs
+                .iter()
+                .chain(project.external_stubs.iter())
+                .cloned(),
+        );
+
+        loaded.push(Loaded {
+            name: project.name.clone(),
+            local_prefix,
+            stubs,
+            graph,
+        });
+    }
+
+    if loaded.is_empty() {
+        eprintln!(
+            "graphify suggest stubs: no graph.json found for any project; run `graphify run` first"
+        );
+        std::process::exit(1);
+    }
+
+    let inputs: Vec<ProjectInput<'_>> = loaded
+        .iter()
+        .map(|l| ProjectInput {
+            name: l.name.as_str(),
+            local_prefix: l.local_prefix.as_str(),
+            current_stubs: &l.stubs,
+            graph: &l.graph,
+        })
+        .collect();
+
+    let report = score_stubs(&inputs, min_edges);
+
+    if apply {
+        // Implemented in Task 8.
+        eprintln!("graphify suggest stubs: --apply not yet implemented (placeholder)");
+        std::process::exit(1);
+    }
+
+    match format.as_str() {
+        "md" => print!("{}", render_markdown(&report)),
+        "toml" => print!("{}", render_toml(&report)),
+        "json" => {
+            let value = render_json(&report);
+            println!("{}", serde_json::to_string_pretty(&value).unwrap());
+        }
+        _ => unreachable!(),
+    }
+
+    let _ = any_skipped; // surfaced via stderr above; exit 0 if at least one project loaded.
 }
 
 #[cfg(test)]
