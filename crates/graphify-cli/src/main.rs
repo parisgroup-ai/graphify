@@ -5413,9 +5413,8 @@ fn cmd_suggest_stubs(
     let report = score_stubs(&inputs, min_edges);
 
     if apply {
-        // Implemented in Task 8.
-        eprintln!("graphify suggest stubs: --apply not yet implemented (placeholder)");
-        std::process::exit(1);
+        apply_suggestions(config_path, &report);
+        return;
     }
 
     match format.as_str() {
@@ -5426,6 +5425,174 @@ fn cmd_suggest_stubs(
             println!("{}", serde_json::to_string_pretty(&value).unwrap());
         }
         _ => unreachable!(),
+    }
+}
+
+fn apply_suggestions(config_path: &Path, report: &graphify_report::suggest::SuggestReport) {
+    use toml_edit::{Array, DocumentMut, Item, Table, Value};
+
+    let original = match std::fs::read_to_string(config_path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Cannot read {:?}: {e}", config_path);
+            std::process::exit(1);
+        }
+    };
+    let mut doc: DocumentMut = match original.parse() {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("graphify.toml parse error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let mut applied_settings: Vec<String> = Vec::new();
+    let mut applied_per_project: Vec<(String, Vec<String>)> = Vec::new();
+
+    // ---- Settings ----
+    if !report.settings_candidates.is_empty() {
+        let settings = doc
+            .as_table_mut()
+            .entry("settings")
+            .or_insert_with(|| Item::Table(Table::new()));
+        let settings_table = settings.as_table_mut().expect("settings should be a table");
+
+        let arr_item = settings_table
+            .entry("external_stubs")
+            .or_insert_with(|| Item::Value(Value::Array(Array::new())));
+        let arr = arr_item
+            .as_array_mut()
+            .expect("settings.external_stubs should be an array");
+
+        let existing: Vec<String> = arr
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect();
+
+        for c in &report.settings_candidates {
+            if !existing.contains(&c.prefix) {
+                arr.push(c.prefix.as_str());
+                applied_settings.push(c.prefix.clone());
+            }
+        }
+    }
+
+    // ---- Per-project ----
+    if !report.per_project_candidates.is_empty() {
+        let projects = doc
+            .as_table_mut()
+            .get_mut("project")
+            .and_then(|i| i.as_array_of_tables_mut());
+        let projects = match projects {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "graphify suggest stubs --apply: graphify.toml has no [[project]] entries"
+                );
+                std::process::exit(1);
+            }
+        };
+
+        for (proj_name, cands) in &report.per_project_candidates {
+            let mut matched = false;
+            for tbl in projects.iter_mut() {
+                let name_matches = tbl
+                    .get("name")
+                    .and_then(|i| i.as_str())
+                    .map(|n| n == proj_name)
+                    .unwrap_or(false);
+                if !name_matches {
+                    continue;
+                }
+                matched = true;
+
+                let arr_item = tbl
+                    .entry("external_stubs")
+                    .or_insert_with(|| Item::Value(Value::Array(Array::new())));
+                let arr = arr_item
+                    .as_array_mut()
+                    .expect("project.external_stubs should be an array");
+
+                let existing: Vec<String> = arr
+                    .iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect();
+
+                let mut added: Vec<String> = Vec::new();
+                for c in cands {
+                    if !existing.contains(&c.prefix) {
+                        arr.push(c.prefix.as_str());
+                        added.push(c.prefix.clone());
+                    }
+                }
+                if !added.is_empty() {
+                    applied_per_project.push((proj_name.clone(), added));
+                }
+            }
+            if !matched {
+                eprintln!(
+                    "graphify suggest stubs --apply: project \"{}\" not found in graphify.toml — config may have drifted since graph.json was generated",
+                    proj_name
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // ---- Atomic write ----
+    let serialized = doc.to_string();
+    let parent = config_path.parent().unwrap_or(Path::new("."));
+    let mut tmp = match tempfile::NamedTempFile::new_in(parent) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Cannot create tempfile next to {:?}: {e}", config_path);
+            std::process::exit(1);
+        }
+    };
+    use std::io::Write as _;
+    if let Err(e) = tmp.write_all(serialized.as_bytes()) {
+        eprintln!("Cannot write tempfile: {e}");
+        std::process::exit(1);
+    }
+    if let Err(e) = tmp.persist(config_path) {
+        eprintln!(
+            "Cannot rename tempfile over {:?}: {} (tempfile preserved at {:?})",
+            config_path,
+            e.error,
+            e.file.path()
+        );
+        std::process::exit(1);
+    }
+
+    // ---- Summary ----
+    let mut total = 0usize;
+    println!("Applied stub suggestions to {}:", config_path.display());
+    if !applied_settings.is_empty() {
+        println!(
+            "  + [settings]               {} prefix(es): {}",
+            applied_settings.len(),
+            applied_settings.join(", ")
+        );
+        total += applied_settings.len();
+    }
+    for (proj, added) in &applied_per_project {
+        println!(
+            "  + [[project]] {:<22} {} prefix(es): {}",
+            proj,
+            added.len(),
+            added.join(", ")
+        );
+        total += added.len();
+    }
+    if total == 0 {
+        println!("  (no changes — all suggestions already present)");
+    } else {
+        println!();
+        println!(
+            "  Total: {} prefix(es) added across {} block(s).",
+            total,
+            applied_settings.len().min(1) + applied_per_project.len()
+        );
     }
 }
 
