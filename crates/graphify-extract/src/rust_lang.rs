@@ -1,5 +1,6 @@
 use crate::lang::{ExtractionResult, LanguageExtractor};
 use graphify_core::types::{Edge, Language, Node, NodeKind};
+use std::collections::HashSet;
 use std::path::Path;
 use tree_sitter::Parser;
 
@@ -69,7 +70,10 @@ impl LanguageExtractor for RustExtractor {
                     extract_macro_invocation(&child, source, module_name, &mut result);
                 }
                 _ => {
-                    extract_calls_recursive(&child, source, module_name, &mut result);
+                    // Top-level fallback — no enclosing function, so no
+                    // local-binding scope to honor (BUG-024).
+                    let empty: HashSet<String> = HashSet::new();
+                    extract_calls_recursive(&child, source, module_name, &empty, &mut result);
                 }
             }
         }
@@ -355,9 +359,11 @@ fn extract_function_item(
         .edges
         .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
 
-    // Scan function body for call sites.
+    // Scan function body for call sites. Pre-scan local bindings so closure
+    // and let-bound names don't emit bogus Calls edges (BUG-024).
     if let Some(body) = node.child_by_field_name("body") {
-        extract_calls_recursive(&body, source, module_name, result);
+        let local_bindings = collect_local_bindings(&body, source);
+        extract_calls_recursive(&body, source, module_name, &local_bindings, result);
     }
 }
 
@@ -498,9 +504,11 @@ fn extract_impl_item(
                 .edges
                 .push((module_name.to_owned(), symbol_id, Edge::defines(line)));
 
-            // Scan method body for call sites.
+            // Scan method body for call sites. Pre-scan local bindings —
+            // per-method scope, fresh set per method (BUG-024).
             if let Some(fn_body) = child.child_by_field_name("body") {
-                extract_calls_recursive(&fn_body, source, module_name, result);
+                let local_bindings = collect_local_bindings(&fn_body, source);
+                extract_calls_recursive(&fn_body, source, module_name, &local_bindings, result);
             }
         }
     }
@@ -548,6 +556,7 @@ fn extract_calls_recursive(
     node: &tree_sitter::Node,
     source: &[u8],
     module_name: &str,
+    local_bindings: &HashSet<String>,
     result: &mut ExtractionResult,
 ) {
     match node.kind() {
@@ -557,7 +566,11 @@ fn extract_calls_recursive(
                     // Bare call: `foo()` — target is the identifier.
                     "identifier" => {
                         let callee = func.utf8_text(source).unwrap_or("").to_owned();
-                        if !callee.is_empty() {
+                        // BUG-024: skip if `callee` is a closure/let binding
+                        // local to the enclosing function. The pre-scan
+                        // populates `local_bindings` per-function/per-method,
+                        // so a binding in fn a() does not affect fn b().
+                        if !callee.is_empty() && !local_bindings.contains(&callee) {
                             let line = node.start_position().row + 1;
                             result.edges.push((
                                 module_name.to_owned(),
@@ -603,7 +616,67 @@ fn extract_calls_recursive(
     // Recurse into children.
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
-        extract_calls_recursive(&child, source, module_name, result);
+        extract_calls_recursive(&child, source, module_name, local_bindings, result);
+    }
+}
+
+/// Walk a function/method body once and collect names that locally shadow
+/// bare-call resolution (BUG-024). Three sources:
+///
+/// 1. `let_declaration` patterns (single identifier only — tuple/struct
+///    destructuring left for a later pass). Covers closures bound to a name
+///    (`let pct = |…| …;`) and let-bound function pointers/values.
+/// 2. Nested `function_item` names — `fn sort_key(…) { … }` inside another
+///    function body. The extractor's top-level walk only sees root-level
+///    items, so nested fns get no `Defines` edge and their callers would
+///    otherwise look external.
+///
+/// Descent skips into nested `function_item` / `impl_item` bodies so a binding
+/// inside a nested fn does not leak into the outer function's set (per-scope
+/// correctness). The nested fn's NAME is still collected before skipping.
+fn collect_local_bindings(body: &tree_sitter::Node, source: &[u8]) -> HashSet<String> {
+    let mut bindings = HashSet::new();
+    walk_for_bindings(body, source, &mut bindings);
+    bindings
+}
+
+fn walk_for_bindings(node: &tree_sitter::Node, source: &[u8], bindings: &mut HashSet<String>) {
+    match node.kind() {
+        "let_declaration" => {
+            if let Some(pattern) = node.child_by_field_name("pattern") {
+                if pattern.kind() == "identifier" {
+                    if let Ok(name) = pattern.utf8_text(source) {
+                        if !name.is_empty() {
+                            bindings.insert(name.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        "function_item" => {
+            // Collect the name, then DON'T descend — nested fn body has its
+            // own scope.
+            if let Some(name_node) = node.child_by_field_name("name") {
+                if let Ok(name) = name_node.utf8_text(source) {
+                    if !name.is_empty() {
+                        bindings.insert(name.to_owned());
+                    }
+                }
+            }
+            return;
+        }
+        "impl_item" => {
+            // impl blocks inside a function body are valid Rust but rare and
+            // their methods are called as `Type::method()`, not bare. Skip
+            // descent for scope hygiene.
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_bindings(&child, source, bindings);
     }
 }
 
@@ -967,6 +1040,124 @@ impl Config {
         assert_eq!(
             r.use_aliases.get("Edge").map(String::as_str),
             Some("crate::types::Edge")
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // BUG-024: Calls edges must not be emitted for closure bindings or
+    // let-bound locals. Per-function scope: a binding in fn A does not
+    // shadow a real call in fn B.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bug_024_closure_binding_skipped() {
+        let r =
+            extract("fn build() { let pct = |c: usize| -> f64 { c as f64 }; let _ = pct(10); }\n");
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(
+            !calls.contains(&"pct"),
+            "pct is a closure binding, not a function — must not emit a Calls edge. Got: {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn bug_024_let_binding_skipped_when_called() {
+        // Pathological-but-valid pattern surfaced by FEAT-043 dogfood:
+        // a let-bound value (function pointer, fn item, FnOnce, etc.) gets
+        // called as `name()`. Without scope analysis this looks identical
+        // to a bare external call.
+        let r = extract("fn build() { let sort_key = some_fn; sort_key(); }\n");
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(
+            !calls.contains(&"sort_key"),
+            "sort_key is a let-binding, not a function. Got: {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn bug_024_real_external_call_still_emitted() {
+        // Regression guard: a real bare external call in a function with
+        // unrelated let-bindings must still emit a Calls edge.
+        let r = extract("fn build() { let x = 1; foo(); }\n");
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(
+            calls.contains(&"foo"),
+            "foo() is a genuine bare external call, must remain. Got: {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn bug_024_closure_scope_per_function() {
+        // A binding in fn a() must not shadow a bare call in fn b().
+        let r = extract("fn a() { let pct = || 0; } fn b() { pct(); }\n");
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(
+            calls.contains(&"pct"),
+            "pct() in fn b() is bare external (no local binding in scope). Got: {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn bug_024_nested_fn_item_skipped() {
+        // Nested `fn sort_key(...)` inside another function body does NOT
+        // emit a `Defines` edge (the top-level extractor walk only sees root
+        // items), so calls to it would be classified external without scope
+        // analysis. Surfaced by FEAT-043 dogfood: `sort_key` in
+        // `crates/graphify-core/src/contract.rs::compare_violations`.
+        let r =
+            extract("fn outer() { fn sort_key(v: &u32) -> u32 { *v } let _ = sort_key(&1); }\n");
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(
+            !calls.contains(&"sort_key"),
+            "nested fn `sort_key` is local to outer(), must not emit a Calls edge. Got: {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn bug_024_method_body_local_binding_skipped() {
+        // Same scope rule applies inside impl method bodies.
+        let r =
+            extract("struct S; impl S { fn run(&self) { let threshold = 0.5; threshold(); } }\n");
+        let calls: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Calls)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(
+            !calls.contains(&"threshold"),
+            "threshold is a let-binding inside the method, must not emit a Calls edge. Got: {:?}",
+            calls
         );
     }
 
