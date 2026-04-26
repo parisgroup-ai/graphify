@@ -335,6 +335,26 @@ Hotspot rows in the `Drift in this PR` section are tail-annotated when the proje
 
 Both annotations are tail-appended so the row's primary content (symbol name, score, delta) stays leftmost and scannable.
 
+### Suggest external_stubs additions
+
+`graphify suggest stubs` analyses each project's `graph.json` and recommends prefixes to add to `[settings].external_stubs` (cross-project) or `[[project]].external_stubs` (single-project). Run after `graphify run`:
+
+```bash
+# Print suggestions as Markdown (default)
+graphify suggest stubs --config graphify.toml
+
+# JSON for tooling
+graphify suggest stubs --format json
+
+# Apply directly to graphify.toml (preserves comments via toml_edit)
+graphify suggest stubs --apply
+
+# Higher signal — only suggest prefixes with ≥10 edges in any project
+graphify suggest stubs --min-edges 10
+```
+
+Auto-classification: a prefix that survives the `--min-edges` filter in **2 or more** projects is suggested for `[settings].external_stubs`; a single-project survivor lands in that project's `[[project]] external_stubs`. Prefixes already covered by current stubs (or that collide with a project's `local_prefix`) are skipped and listed separately for visibility.
+
 ## Hotspot Classification (v0.7+)
 
 Every top-20 hotspot in `architecture_report.md`, `analysis.json`, and `pr-summary` is tagged with a classification that dictates which refactor fits best:
