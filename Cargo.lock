@@ -582,6 +582,7 @@ version = "0.13.1"
 dependencies = [
  "csv",
  "graphify-core",
+ "graphify-extract",
  "serde",
  "serde_json",
  "tempfile",
