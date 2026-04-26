@@ -4,6 +4,8 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-04-26
+
 ### Added
 - feat(cli): `graphify suggest stubs` — post-analysis subcommand that scans each project's `graph.json`, groups external references by language-aware prefix, and recommends additions to `[settings].external_stubs` (cross-project) or `[[project]].external_stubs` (single-project). Auto-classifies cross-project hits via a per-project `--min-edges` threshold (default 2) before promotion; skips prefixes already covered or shadowing a `local_prefix`. Output formats: `md` (default), `toml`, `json`. `--apply` edits `graphify.toml` in place via `toml_edit`, preserving comments and ordering. Idempotent — re-running `--apply` is a no-op. FEAT-043.
 
