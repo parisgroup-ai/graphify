@@ -7,7 +7,7 @@
 //! `[[project]].external_stubs`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 // ---------------------------------------------------------------------------
 // Input: subset of graph.json the suggester needs
@@ -143,9 +143,246 @@ pub fn extract_prefix(node_id: &str, language: &str) -> Option<String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Scoring
+// ---------------------------------------------------------------------------
+
+/// Scoring entry-point. Aggregates external prefix candidates across
+/// `projects`, applying `min_edges` per-project before cross-project
+/// auto-classification.
+pub fn score_stubs(projects: &[ProjectInput<'_>], min_edges: u64) -> SuggestReport {
+    // Build a global index of local-prefixes + local-node-top-segments for
+    // shadowing safety (rule (a) + (b) from the spec).
+    let mut shadow_set: BTreeSet<String> = BTreeSet::new();
+    for p in projects {
+        if !p.local_prefix.is_empty() {
+            shadow_set.insert(p.local_prefix.to_string());
+        }
+        for n in &p.graph.nodes {
+            if n.is_local {
+                if let Some(top) = top_segment(&n.id) {
+                    shadow_set.insert(top);
+                }
+            }
+        }
+    }
+
+    let mut already_covered: BTreeSet<String> = BTreeSet::new();
+    let mut shadowed: BTreeSet<String> = BTreeSet::new();
+
+    // Per-project per-prefix accumulator.
+    // Key: (project_name, prefix). Value: aggregated stats.
+    struct PerProject {
+        edge_weight: u64,
+        nodes: BTreeSet<String>,
+        language: String,
+    }
+    let mut per_project: HashMap<(String, String), PerProject> = HashMap::new();
+
+    for p in projects {
+        // Index nodes by id for quick is_local + language lookup.
+        let node_lang: HashMap<&str, (&str, bool)> = p
+            .graph
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), (n.language.as_str(), n.is_local)))
+            .collect();
+
+        for link in &p.graph.links {
+            let Some((lang, is_local)) = node_lang.get(link.target.as_str()).copied() else {
+                continue;
+            };
+            if is_local {
+                continue;
+            }
+            // Already covered?
+            if p.current_stubs.matches(&link.target) {
+                if let Some(prefix) = extract_prefix(&link.target, lang) {
+                    already_covered.insert(prefix);
+                }
+                continue;
+            }
+            let Some(prefix) = extract_prefix(&link.target, lang) else {
+                continue;
+            };
+            // Shadowing?
+            if shadow_set.contains(&prefix) {
+                shadowed.insert(prefix);
+                continue;
+            }
+
+            let entry = per_project
+                .entry((p.name.to_string(), prefix.clone()))
+                .or_insert(PerProject {
+                    edge_weight: 0,
+                    nodes: BTreeSet::new(),
+                    language: lang.to_string(),
+                });
+            entry.edge_weight += u64::from(link.weight);
+            entry.nodes.insert(link.target.clone());
+        }
+    }
+
+    // Apply per-project threshold.
+    per_project.retain(|_, v| v.edge_weight >= min_edges);
+
+    // Group by prefix → list of (project, stats).
+    let mut by_prefix: BTreeMap<String, Vec<(String, PerProject)>> = BTreeMap::new();
+    for ((proj, prefix), stats) in per_project {
+        by_prefix.entry(prefix).or_default().push((proj, stats));
+    }
+
+    let mut settings_candidates: Vec<StubCandidate> = Vec::new();
+    let mut per_project_candidates: BTreeMap<String, Vec<StubCandidate>> = BTreeMap::new();
+
+    for (prefix, hits) in by_prefix {
+        let mut projects_sorted: Vec<String> = hits.iter().map(|(p, _)| p.clone()).collect();
+        projects_sorted.sort();
+        let total_weight: u64 = hits.iter().map(|(_, s)| s.edge_weight).sum();
+        let mut node_set: BTreeSet<String> = BTreeSet::new();
+        for (_, s) in &hits {
+            for n in &s.nodes {
+                node_set.insert(n.clone());
+            }
+        }
+        let example_nodes: Vec<String> = node_set.iter().take(3).cloned().collect();
+        // Language: take from the first hit (all hits for the same prefix
+        // are expected to share a language; tied to the prefix-extraction
+        // rule which is language-keyed).
+        let language = hits[0].1.language.clone();
+
+        let cand = StubCandidate {
+            prefix: prefix.clone(),
+            language,
+            edge_weight: total_weight,
+            node_count: node_set.len(),
+            projects: projects_sorted.clone(),
+            example_nodes,
+        };
+
+        if projects_sorted.len() >= 2 {
+            settings_candidates.push(cand);
+        } else {
+            per_project_candidates
+                .entry(projects_sorted[0].clone())
+                .or_default()
+                .push(cand);
+        }
+    }
+
+    // Sort: edge_weight desc, prefix asc as tie-break.
+    settings_candidates.sort_by(|a, b| {
+        b.edge_weight
+            .cmp(&a.edge_weight)
+            .then_with(|| a.prefix.cmp(&b.prefix))
+    });
+    for v in per_project_candidates.values_mut() {
+        v.sort_by(|a, b| {
+            b.edge_weight
+                .cmp(&a.edge_weight)
+                .then_with(|| a.prefix.cmp(&b.prefix))
+        });
+    }
+
+    SuggestReport {
+        min_edges,
+        settings_candidates,
+        per_project_candidates,
+        already_covered_prefixes: already_covered.into_iter().collect(),
+        shadowed_prefixes: shadowed.into_iter().collect(),
+    }
+}
+
+fn top_segment(id: &str) -> Option<String> {
+    let trimmed = id.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Cheapest cross-language top-segment grab: split on the first of
+    // `::`, `/`, `.`, whichever appears first.
+    let positions = [
+        trimmed.find("::").map(|p| (p, 2)),
+        trimmed.find('/').map(|p| (p, 1)),
+        trimmed.find('.').map(|p| (p, 1)),
+    ];
+    let earliest = positions.iter().filter_map(|x| *x).min_by_key(|(p, _)| *p);
+    match earliest {
+        Some((p, _)) => Some(trimmed[..p].to_string()),
+        None => Some(trimmed.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn make_node(id: &str, lang: &str, is_local: bool) -> GraphNode {
+        GraphNode {
+            id: id.to_string(),
+            language: lang.to_string(),
+            is_local,
+        }
+    }
+
+    fn make_link(source: &str, target: &str, weight: u32) -> GraphLink {
+        GraphLink {
+            source: source.to_string(),
+            target: target.to_string(),
+            weight,
+        }
+    }
+
+    #[test]
+    fn score_stubs_promotes_cross_project_prefix_to_settings() {
+        use graphify_extract::stubs::ExternalStubs;
+        let empty_stubs = ExternalStubs::default();
+
+        let proj_a_graph = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_a::main", "Rust", true),
+                make_node("tokio::spawn", "Rust", false),
+            ],
+            links: vec![make_link("crate_a::main", "tokio::spawn", 5)],
+        };
+        let proj_b_graph = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_b::main", "Rust", true),
+                make_node("tokio::sync::mpsc::Sender", "Rust", false),
+            ],
+            links: vec![make_link("crate_b::main", "tokio::sync::mpsc::Sender", 3)],
+        };
+
+        let inputs = vec![
+            ProjectInput {
+                name: "proj-a",
+                local_prefix: "crate_a",
+                current_stubs: &empty_stubs,
+                graph: &proj_a_graph,
+            },
+            ProjectInput {
+                name: "proj-b",
+                local_prefix: "crate_b",
+                current_stubs: &empty_stubs,
+                graph: &proj_b_graph,
+            },
+        ];
+
+        let report = score_stubs(&inputs, 1);
+
+        assert_eq!(
+            report.settings_candidates.len(),
+            1,
+            "tokio should be in settings"
+        );
+        let cand = &report.settings_candidates[0];
+        assert_eq!(cand.prefix, "tokio");
+        assert_eq!(cand.edge_weight, 8); // 5 + 3
+        assert_eq!(
+            cand.projects,
+            vec!["proj-a".to_string(), "proj-b".to_string()]
+        );
+        assert!(report.per_project_candidates.is_empty());
+    }
 
     #[test]
     fn extract_prefix_rust_takes_first_double_colon_segment() {
@@ -225,5 +462,200 @@ mod tests {
             extract_prefix("foo.bar", "Klingon").as_deref(),
             Some("foo.bar")
         );
+    }
+
+    #[test]
+    fn score_stubs_keeps_single_project_prefix_per_project() {
+        use graphify_extract::stubs::ExternalStubs;
+        let empty = ExternalStubs::default();
+
+        let g = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_a::main", "Rust", true),
+                make_node("rmcp::ServerHandler", "Rust", false),
+            ],
+            links: vec![make_link("crate_a::main", "rmcp::ServerHandler", 7)],
+        };
+        let inputs = vec![ProjectInput {
+            name: "proj-a",
+            local_prefix: "crate_a",
+            current_stubs: &empty,
+            graph: &g,
+        }];
+
+        let report = score_stubs(&inputs, 1);
+        assert!(report.settings_candidates.is_empty());
+        assert_eq!(report.per_project_candidates.len(), 1);
+        let proj_a = report.per_project_candidates.get("proj-a").unwrap();
+        assert_eq!(proj_a.len(), 1);
+        assert_eq!(proj_a[0].prefix, "rmcp");
+    }
+
+    #[test]
+    fn score_stubs_threshold_drops_per_project_before_aggregation() {
+        use graphify_extract::stubs::ExternalStubs;
+        let empty = ExternalStubs::default();
+
+        // tokio appears in both projects but only weight-4 in each — below
+        // threshold of 5, so both drop and the cross-project promotion never
+        // happens.
+        let g_a = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_a::main", "Rust", true),
+                make_node("tokio::spawn", "Rust", false),
+            ],
+            links: vec![make_link("crate_a::main", "tokio::spawn", 4)],
+        };
+        let g_b = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_b::main", "Rust", true),
+                make_node("tokio::sync::mpsc::Sender", "Rust", false),
+            ],
+            links: vec![make_link("crate_b::main", "tokio::sync::mpsc::Sender", 4)],
+        };
+        let inputs = vec![
+            ProjectInput {
+                name: "proj-a",
+                local_prefix: "crate_a",
+                current_stubs: &empty,
+                graph: &g_a,
+            },
+            ProjectInput {
+                name: "proj-b",
+                local_prefix: "crate_b",
+                current_stubs: &empty,
+                graph: &g_b,
+            },
+        ];
+
+        let report = score_stubs(&inputs, 5);
+        assert!(
+            report.settings_candidates.is_empty(),
+            "below threshold per project"
+        );
+        assert!(report.per_project_candidates.is_empty());
+    }
+
+    #[test]
+    fn score_stubs_records_already_covered_and_skips_them() {
+        use graphify_extract::stubs::ExternalStubs;
+        let stubs = ExternalStubs::new(["tokio"]);
+
+        let g = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_a::main", "Rust", true),
+                make_node("tokio::spawn", "Rust", false),
+            ],
+            links: vec![make_link("crate_a::main", "tokio::spawn", 10)],
+        };
+        let inputs = vec![ProjectInput {
+            name: "proj-a",
+            local_prefix: "crate_a",
+            current_stubs: &stubs,
+            graph: &g,
+        }];
+
+        let report = score_stubs(&inputs, 1);
+        assert!(report.settings_candidates.is_empty());
+        assert!(report.per_project_candidates.is_empty());
+        assert_eq!(report.already_covered_prefixes, vec!["tokio".to_string()]);
+    }
+
+    #[test]
+    fn score_stubs_records_shadowing_against_local_prefix() {
+        use graphify_extract::stubs::ExternalStubs;
+        let empty = ExternalStubs::default();
+
+        // src is project-a's local_prefix. An external node id "src::foo" from
+        // project-b would be shadowing — never suggest.
+        let g_a = GraphSnapshot {
+            nodes: vec![make_node("src::main", "Rust", true)],
+            links: vec![],
+        };
+        let g_b = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_b::main", "Rust", true),
+                make_node("src::foo::bar", "Rust", false),
+            ],
+            links: vec![make_link("crate_b::main", "src::foo::bar", 9)],
+        };
+        let inputs = vec![
+            ProjectInput {
+                name: "proj-a",
+                local_prefix: "src",
+                current_stubs: &empty,
+                graph: &g_a,
+            },
+            ProjectInput {
+                name: "proj-b",
+                local_prefix: "crate_b",
+                current_stubs: &empty,
+                graph: &g_b,
+            },
+        ];
+
+        let report = score_stubs(&inputs, 1);
+        assert!(report.settings_candidates.is_empty());
+        assert!(report.per_project_candidates.is_empty());
+        assert_eq!(report.shadowed_prefixes, vec!["src".to_string()]);
+    }
+
+    #[test]
+    fn score_stubs_ranks_by_edge_weight_then_prefix() {
+        use graphify_extract::stubs::ExternalStubs;
+        let empty = ExternalStubs::default();
+
+        // Two prefixes both in 2 projects so they cross to settings; verify
+        // sort order: serde (weight 100) before tokio (weight 50), and an
+        // equal-weight tie sorts by prefix asc.
+        let g_a = GraphSnapshot {
+            nodes: vec![
+                make_node("a::main", "Rust", true),
+                make_node("tokio::spawn", "Rust", false),
+                make_node("serde::Deserialize", "Rust", false),
+                make_node("clap::Parser", "Rust", false),
+            ],
+            links: vec![
+                make_link("a::main", "tokio::spawn", 25),
+                make_link("a::main", "serde::Deserialize", 50),
+                make_link("a::main", "clap::Parser", 25),
+            ],
+        };
+        let g_b = GraphSnapshot {
+            nodes: vec![
+                make_node("b::main", "Rust", true),
+                make_node("tokio::sync::mpsc::Sender", "Rust", false),
+                make_node("serde::Serialize", "Rust", false),
+                make_node("clap::ValueEnum", "Rust", false),
+            ],
+            links: vec![
+                make_link("b::main", "tokio::sync::mpsc::Sender", 25),
+                make_link("b::main", "serde::Serialize", 50),
+                make_link("b::main", "clap::ValueEnum", 25),
+            ],
+        };
+        let inputs = vec![
+            ProjectInput {
+                name: "proj-a",
+                local_prefix: "a",
+                current_stubs: &empty,
+                graph: &g_a,
+            },
+            ProjectInput {
+                name: "proj-b",
+                local_prefix: "b",
+                current_stubs: &empty,
+                graph: &g_b,
+            },
+        ];
+
+        let report = score_stubs(&inputs, 1);
+        let prefixes: Vec<&str> = report
+            .settings_candidates
+            .iter()
+            .map(|c| c.prefix.as_str())
+            .collect();
+        assert_eq!(prefixes, vec!["serde", "clap", "tokio"]);
+        // serde first (weight 100); clap and tokio tied at 50 → asc by prefix → clap before tokio.
     }
 }
