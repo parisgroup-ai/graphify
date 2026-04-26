@@ -1,8 +1,9 @@
 ---
 uid: bug-024
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-26
+completed: 2026-04-26
 pomodoros: 0
 projects:
 - '[[sprint.md|Current Sprint]]'
@@ -33,11 +34,44 @@ Stretch: also fix `matches`/`env` (Cat 4 corollary). `matches` is the `matches!`
 
 ## Subtasks
 
-- [ ] Decide between option 1 (scope analysis) and option 2 (post-resolution filter)
-- [ ] Add failing extractor test: closure binding doesn't produce a Calls edge
-- [ ] Implement chosen approach
-- [ ] Verify FEAT-033 hotspot deltas stay within acceptable bounds (no new cycles, no large hotspot-score swings)
-- [ ] Re-run `graphify suggest stubs`, expect `pct`/`sort_key`/`threshold`/`write_grouped` removed
+- [x] Decide between option 1 (scope analysis) and option 2 (post-resolution filter) — **option 1**: pre-scan body for `let_declaration` + nested `function_item` names, skip Calls whose `identifier` callee matches. Option 2 was rejected because it masks future extractor bugs (drops bare-not-stub edges silently, no signal in `suggest stubs`); per the FEAT-043 self-dogfood UX rule, extractor bugs are fixed at the source, not silenced post-resolution
+- [x] Add failing extractor test: closure binding doesn't produce a Calls edge
+- [x] Implement chosen approach
+- [x] Verify FEAT-033 hotspot deltas stay within acceptable bounds (no new cycles, no large hotspot-score swings) — `graphify check` PASS on all 5 crates, max_hotspot scores identical to baseline (0.486/0.435/0.454/0.452/0.600), graphify-core node/edge counts shifted slightly (287→285 nodes, 441→438 edges, 9→10 communities — clean ripples from cleaner edge classification)
+- [x] Re-run `graphify suggest stubs`, expect `pct`/`sort_key`/`threshold`/`write_grouped` removed — all 4 gone, plus `find_sccs`, `sha256_hex`, `join` also dropped (additional canaries the original task body didn't enumerate)
+
+## Resolution
+
+Implementation: `crates/graphify-extract/src/rust_lang.rs`. Added a `local_bindings: &HashSet<String>` parameter to `extract_calls_recursive`, plumbed through all 3 call sites. Helper `collect_local_bindings(body, source)` walks the function/method body once via `walk_for_bindings` and collects names from two sources:
+
+1. `let_declaration` with single-identifier `pattern` (closures bound to a name, let-bound function pointers/values).
+2. Nested `function_item` names — `fn sort_key(...) { ... }` inside another function body. The extractor's top-level walk only emits `Defines` for root-level items, so nested fns get no canonical target and would otherwise look external.
+
+Descent is per-function: `walk_for_bindings` collects the name of nested `function_item` and `impl_item` then RETURNS without descending. A binding inside a nested fn does not leak into the outer function's set, and a binding in fn A does not shadow a real call in fn B.
+
+The `identifier` arm of `call_expression` adds a single check: skip emission if `local_bindings.contains(&callee)`. The `scoped_identifier` arm is unchanged — `Type::method()` calls don't fit the bare-name false-positive pattern.
+
+Tests added (`bug_024_*` in `crates/graphify-extract/src/rust_lang.rs::tests`):
+
+1. `bug_024_closure_binding_skipped` — minimal reproduction: `let pct = |...| ...; pct(10);` no longer emits.
+2. `bug_024_let_binding_skipped_when_called` — let-bound function pointer pattern.
+3. `bug_024_real_external_call_still_emitted` — regression guard: bare external call still works alongside an unrelated let-binding.
+4. `bug_024_closure_scope_per_function` — scope correctness: binding in fn a() does NOT shadow `pct()` in fn b().
+5. `bug_024_method_body_local_binding_skipped` — same scope rule applies inside impl method bodies.
+6. `bug_024_nested_fn_item_skipped` — nested `fn sort_key(...)` regression guard. Surfaced during the GREEN cycle when `sort_key` didn't drop as expected from `suggest stubs` — investigation found it was a nested fn (in `crates/graphify-core/src/contract.rs::compare_violations`) rather than a let-binding. Helper extended to collect nested fn names.
+
+Self-dogfood: `graphify suggest stubs` candidate count 14 → 9 (combined with the previous BUG-023 commit: 18 → 9, 50% session-cumulative drop). Removed candidates: `pct` (8 edges), `write_grouped` (2), `join` (4), `threshold` (2), `sort_key` (2), `find_sccs` (implicit), `sha256_hex` (implicit). Total ~16+ edges reclassified.
+
+Out of scope (per task body's "Stretch" section, no new follow-up filed unless user-visible):
+
+- **`matches`** (5 edges, cross-project): `matches!` macro — `extract_macro_invocation` strips the `!` per FEAT-031 grammar, so it lands as bare `matches`. Different fix shape (built-in macro recognizer or grammar-level unstrip).
+- **`env`** (2 edges): `std::env` referenced bare. Different fix shape (stdlib heuristic).
+
+Both noted in BUG-024's body as separate concerns; if they become user-visible, file as `BUG-026` (macro-name stripping) and `BUG-027` (stdlib bare reference) respectively.
+
+Architecture: `graphify check` PASS on all 5 crates, max_hotspot scores identical to baseline. graphify-core had small structural ripples (287→285 nodes, 441→438 edges, 9→10 communities) — expected from cleaner edge classification, not a regression.
+
+Workspace tests: 319 pass in graphify-extract (was 313, +6 new BUG-024 tests). All other crates unchanged.
 
 ## Related
 
