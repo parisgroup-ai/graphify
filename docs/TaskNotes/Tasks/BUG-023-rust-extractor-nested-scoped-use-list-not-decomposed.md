@@ -1,8 +1,9 @@
 ---
 uid: bug-023
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-26
+completed: 2026-04-26
 pomodoros: 0
 projects:
 - '[[sprint.md|Current Sprint]]'
@@ -35,10 +36,27 @@ Reference (post-fix `graphify suggest stubs` candidates): `ExtractionCache` 7 ed
 
 ## Subtasks
 
-- [ ] Add a failing extractor test: nested `use a::{b::{c, d}}` produces 2 edges (`a::b::c`, `a::b::d`) and 2 use_aliases entries
-- [ ] Patch `collect_use_paths` `scoped_use_list` arm to recurse with combined prefix instead of capturing text
-- [ ] Decide whether to also walk function bodies for `use_declaration` (case 2) or split into a separate task
-- [ ] Re-run `graphify suggest stubs` on this repo, expect `ExtractionCache`, `Item`, `Array`, `Value` removed
+- [x] Add a failing extractor test: nested `use a::{b::{c, d}}` produces 2 edges (`a::b::c`, `a::b::d`) and 2 use_aliases entries
+- [x] Patch `collect_use_paths` `scoped_use_list` arm to recurse with combined prefix instead of capturing text
+- [x] Decide whether to also walk function bodies for `use_declaration` (case 2) or split into a separate task — split into BUG-025 (case 2 needs broader extractor traversal: only `root.children` is walked today, and changing that touches more code paths than the recursion fix)
+- [x] Re-run `graphify suggest stubs` on this repo, expect `ExtractionCache`, `Item`, `Array`, `Value` removed — `ExtractionCache` (case 1) gone; `Item`/`Array`/`Value` (case 2, function-scoped) persist exactly as predicted by the split
+
+## Resolution
+
+Implementation: `crates/graphify-extract/src/rust_lang.rs`. Refactored the `scoped_use_list` arm of `collect_use_paths` to delegate to a new `process_scoped_use_list(list_node, source, module_name, line, prefix, result)` helper. The helper handles the four child kinds (`identifier|self`, `scoped_identifier`, `use_as_clause`, `scoped_use_list`) with a shared `join` closure that combines the carried `prefix` with each leaf. The `scoped_use_list` arm fetches the child's inner `path` field, builds `combined_prefix = prefix::inner_path`, and recurses with the inner `list` field — instead of grabbing `child.utf8_text()` (which preserves `bar::{c, d}` braces).
+
+Tests added (`bug_023_*` in `crates/graphify-extract/src/rust_lang.rs::tests`):
+
+1. `bug_023_nested_scoped_use_list_decomposes` — minimal reproduction `use a::{b::{c, d}}` → 2 edges + 2 aliases.
+2. `bug_023_nested_scoped_use_list_mixed_siblings` — dogfood shape `use foo::{bar::{baz, qux}, other}` → 3 edges + 3 aliases (verifies nested + flat siblings coexist).
+
+Self-dogfood: `graphify suggest stubs` candidate count 18 → 14. `ExtractionCache` (was 7 edges) fully gone. `Item`/`Array`/`Value` reduced from 7 combined → 7 combined (all from `apply_suggestions`'s function-scoped `use toml_edit::{...}`, which the extractor never visits — case 2, now BUG-025).
+
+Architecture: `graphify check` PASS on all 5 crates, max_hotspot scores identical to baseline (0.486/0.435/0.454/0.452/0.600), 0 cycles, 0 policy violations.
+
+Workspace tests: 313 pass in graphify-extract (was 311, +2 new BUG-023 tests). All other crates unchanged.
+
+Out of scope (filed as BUG-025): walking function bodies for `use_declaration` so function-scoped `use toml_edit::{Array, DocumentMut, Item, Table, Value}` inside `apply_suggestions` registers aliases too. The current `extract_file` only walks `tree.root_node().children(...)`; supporting function-scoped use-statements means either threading the extractor walk into `function_item` bodies or post-walking the AST for `use_declaration` nodes anywhere. Risk profile is different from the recursion fix and warrants its own TDD pass.
 
 ## Related
 

@@ -12,7 +12,7 @@ tags:
 ai:
   parallelParts: 0
   needsReview: false
-  uncertainty: medium
+  uncertainty: med
   hintsInferred: true
 ---
 
