@@ -34,6 +34,12 @@ external_stubs = [
   "assert", "assert_eq", "assert_ne",
   "debug_assert", "debug_assert_eq", "debug_assert_ne",
   "panic", "todo", "unimplemented", "unreachable", "dbg",
+  "include_str",
+  # Workspace siblings — referenced cross-crate; declaring them here
+  # tells graphify "these are intentional architectural dependencies, not
+  # ambiguous resolution failures" and stops them inflating hotspot
+  # scores. Surfaced by `graphify suggest stubs` (FEAT-043 dogfood).
+  "graphify_core", "graphify_extract", "graphify_report",
 ]
 
 [[project]]
@@ -67,6 +73,7 @@ external_stubs = [
   "clap", "toml", "serde", "serde_json", "serde_yaml",
   "rayon", "notify", "notify_debouncer_mini",
   "sha2", "include_dir", "thiserror", "chrono", "anyhow",
+  "anstyle",
 ]
 
 [[project]]
