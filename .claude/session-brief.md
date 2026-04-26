@@ -1,69 +1,63 @@
-# Session Brief — 2026-04-26 (BUG-023 + BUG-024 + v0.13.2 release)
+# Session Brief — 2026-04-26 (BUG-025 + CHORE-011 + BUG-021 wave)
 
 ## Last Session Summary
 
-Two extractor fixes (BUG-023 nested grouped imports + BUG-024 closure/let/nested-fn local scope) landed via TDD, both with self-dogfood verification. Combined with the previous session's BUG-022 + FEAT-043, four improvements grouped into `v0.13.2` release. `graphify suggest stubs` candidate count dropped 35 → 9 across the four fixes (74% all-time; 18 → 9 this session, 50%). One follow-up filed (BUG-025: function-body `use_declaration` walking). One housekeeping: BUG-024 frontmatter `medium` → `med` made it visible to `tn list` again.
+Three fixes shipped in sequence — all in the F-cluster (FEAT-043 follow-ups). BUG-025 closed the function-body `use_declaration` blind spot in the Rust extractor; CHORE-011 paid down the `graphify-report → graphify-extract` layer-crossing FEAT-043 introduced by moving `ExternalStubs` to `graphify-core`; BUG-021 made `suggest stubs`'s `already_covered_prefixes` report the actual matched stub instead of a normalized top segment. Each commit benefited from the previous: CHORE-011's cli reference inside `apply_suggestions` only became visible to the extractor because of BUG-025; BUG-021 was mechanically trivial because CHORE-011 had just consolidated the matcher API in core. Sprint dropped from 5 → 2 open tasks; both remaining (CHORE-010 cross-language test gap, FEAT-044 Rust re-export collapse) are LOW priority.
 
 ## Current State
 
-- Branch: `main`, latest commit `8808f39 chore(release): bump version to 0.13.2`
-- Working tree: clean (all session changes committed + pushed)
-- Origin sync: 0 ahead / 0 behind
-- Latest release: **`v0.13.2`** — tag pinned to `8808f39`, pushed mid-session, CI release workflow ran successfully (4 binaries built)
-- Local installed binary: `graphify 0.13.2` at `~/.cargo/bin/graphify` — refreshed via `cargo install --path crates/graphify-cli --force` after the bump
-- TaskNotes: 75 total / 5 open / 0 in-progress / 70 done (after this session: BUG-023/BUG-024 closed, BUG-025 opened)
+- Branch: `main`, fully synced with origin (0 ahead / 0 behind)
+- Working tree: clean (after this close commit)
+- Latest release: `v0.13.2` (unchanged — no version bump this session, all fixes are unreleased on `main` at `[Unreleased]` in CHANGELOG)
+- TaskNotes: 74 total / 2 open / 0 in-progress / 72 done
+- `graphify suggest stubs` candidate count: 7 (down from 9 at session start; cumulative wave from session start of 35 → 7 = -80%)
 
 ## Commits This Session
 
-`be9a63c..8808f39` (6 commits, all pushed):
+`dcf7866..d53353f` (3 commits, all pushed):
 
-- `aa4c5e5` fix(extract): decompose nested scoped_use_list into per-leaf imports (BUG-023)
-- `b67f79f` docs(tasks): close BUG-023, file BUG-025, fix BUG-024 frontmatter, CHANGELOG
-- `fba1e20` fix(extract): pre-scan local bindings to suppress closure/let-binding Calls (BUG-024)
-- `086bd12` docs(tasks): close BUG-024 with resolution notes, CHANGELOG entry
-- `8808f39` chore(release): bump version to 0.13.2
-- (tag) `v0.13.2` → `8808f39`
+- `c805b48` fix(extract): walk function/method bodies for use_declaration (BUG-025)
+- `edda9e6` chore(deps): move ExternalStubs to graphify-core, drop report→extract dep (CHORE-011)
+- `d53353f` fix(report): suggest stubs records actual matched stub, not top segment (BUG-021)
+
+(plus the close commit landing now)
 
 ## Decisions Made (don't re-debate)
 
-- **BUG-023 was split into case 1 (top-level) + case 2 (function-scoped)** intentionally — case 1's recursion fix is self-contained (~10 LOC + helper extraction), case 2 needs broader extractor traversal (`extract_file` only walks `tree.root_node().children(...)`) and was filed as BUG-025. Fixing both in one session would have been scope creep
-- **BUG-024 went option 1 (pre-scan local bindings) over option 2 (post-resolution filter)**: option 2 would mask future extractor bugs by silently dropping bare-not-stub edges (no signal in `suggest stubs`), violating the FEAT-043 self-dogfood UX rule that says "extractor bugs are fixed at the source, not silenced post-resolution". Trade-off documented in BUG-024 task body
-- **Nested fn collection extends BUG-024 helper from let-only to let+fn**: discovered during GREEN when `sort_key` (in `graphify-core/src/contract.rs::compare_violations`) didn't drop as expected. Was a nested `fn`, not a let-binding. The helper now collects names from BOTH `let_declaration` (single-identifier patterns) AND `function_item` (name only, no descent). Per-function scope correctness preserved by returning before entering nested-fn bodies
-- **`v0.13.2` cuts on top of 4 grouped improvements** (FEAT-043 + BUG-022 + BUG-023 + BUG-024) — clean release narrative ("extractor/resolver hygiene wave"). Tag pinned to the bump commit explicitly via `git tag v0.13.2 8808f39` per CLAUDE.md guidance (not HEAD)
-- **`matches!` macro and `env` bare references stayed out of scope** even on the option-1 path. Different fix shapes (macro recognizer / stdlib heuristic), not closure/scope bugs. File as `BUG-026`/`BUG-027` only when they become user-visible
+- **BUG-025 went option 1 (recurse function_item bodies for use_declaration) over option 2 (post-walk entire AST)**. Option 2 would have bypassed the lexical-scope hygiene BUG-024 specifically established. The new `walk_for_uses` helper deliberately mirrors `walk_for_bindings` (BUG-024) skip-discipline — `function_item` and `impl_item` return without descending. Approximation accepted: aliases land in the file-wide `use_aliases` map (truly per-scope is v2 with no current consumer); harmless because last-write-wins is correct when both fns import the same path
+- **CHORE-011 went all-in (no shim) when removing `ExternalStubs` from extract**. Internal workspace API, no published SDK contract to preserve. Old paths `graphify_extract::stubs::ExternalStubs` and `graphify_extract::ExternalStubs` deleted entirely; consumers now import directly from `graphify_core`. New convenience re-export `pub use stubs::ExternalStubs;` at the bottom of `graphify-core/src/lib.rs` keeps the import shape parity
+- **BUG-021 went option (a) — add `matching_prefix()` and use it in `score_stubs`**. Option (b) (rename `already_covered_prefixes` to `already_covered_via_prefixes` and document the asymmetry) would have been documenting the bug rather than fixing it. With the fix, the field name is exactly accurate
+- **Heuristic gotcha worth knowing**: `graphify-summary.json`'s cross-project edge count is name-based module overlap, NOT Cargo-dep direction. After CHORE-011, `graphify-report → graphify-extract` still showed 81 edges even though there are zero references in code or Cargo.toml. The architectural win is real; the heuristic is imprecise. Verify via `grep -rn "graphify_extract" crates/graphify-report/` (should be zero) or `cargo build -p graphify-report` succeeding without the dep
+- **Each commit prepared the ground for the next**: BUG-025 made function-scoped `use_declaration` visible → CHORE-011's `use graphify_extract::stubs::ExternalStubs;` inside `apply_suggestions` (line 5290) became extractor-visible and got rewritten cleanly → BUG-021 had a single consolidated `ExternalStubs` API in core to extend with `matching_prefix()`
 
 ## Architectural Health
 
 `graphify check --config graphify.toml` — all 5 projects PASS:
 
-- `graphify-core`: PASS, 0 cycles, max_hotspot 0.486 (`src.policy`) — slight node/edge count drop (287→285 nodes, 441→438 edges, 9→10 communities) from cleaner edge classification post-BUG-024. Hotspot score identical
-- `graphify-extract`: PASS, 0 cycles, max_hotspot 0.435 (`src.resolver`) — unchanged
-- `graphify-report`: PASS, 0 cycles, max_hotspot 0.454 (`src.pr_summary`) — unchanged
-- `graphify-cli`: PASS, 0 cycles, max_hotspot 0.452 (`src.install`) — unchanged
-- `graphify-mcp`: PASS, 0 cycles, max_hotspot 0.600 (`src.server`) — unchanged
-- Policy violations: 0 across the board
+- `graphify-core`: PASS, 0 cycles, 292 nodes, 449 edges, 10 communities, max_hotspot 0.478 (`src.policy`) — net +7 nodes / +10 edges across the 3 commits (BUG-025: ~0/0, CHORE-011: +6/+9 from the moved stubs.rs, BUG-021: +1/+1 from the new matching_prefix method)
+- `graphify-extract`: PASS, 0 cycles, 288 nodes, 592 edges, max_hotspot 0.435 (`src.resolver`) — net -7 nodes / -9 edges from CHORE-011 (stubs.rs left); BUG-025 added back a few edges from the new walk_for_uses helper contributing imports it couldn't before
+- `graphify-report`: PASS, 0 cycles, 195/388/6/0.454 (`src.pr_summary`) — unchanged
+- `graphify-cli`: PASS, 0 cycles, 375/588/7/0.452 (`src.install`) — -1 node / -1 edge from one fewer cross-crate import (CHORE-011)
+- `graphify-mcp`: PASS, 0 cycles, 102/118/4/0.600 (`src.server`) — unchanged
 
-Workspace tests: 319 pass in graphify-extract (was 311 at session start, +8 new — 2 BUG-023 + 6 BUG-024). All other crates green.
+Workspace tests: **860 pass, 0 fail** (was 851 at session start — +5 BUG-025 + +4 BUG-021; CHORE-011 was a move so net 0). All hotspots well under the 0.85 CI threshold.
 
-## Open Items (5 follow-up tasks in F-series cluster, all pushed)
+## Open Items (2 follow-ups, both low priority)
 
-- **BUG-021** (normal): F1 — `suggest stubs` `already_covered_prefixes` records too-broad prefix
-- **BUG-025** (normal): F8 — rust extractor doesn't walk function bodies for `use_declaration` (filed this session, drops `Item`/`Array`/`Value` from suggest list once landed; canary is `apply_suggestions` in graphify-cli main). Two-option proposal in body (recurse into `function_item` bodies vs post-walk entire AST); option 1 is the safer first step
-- **CHORE-010** (low): F2 — suggest stubs cross-language same-prefix collision test gap
-- **CHORE-011** (normal): F3 — move `ExternalStubs` from `graphify-extract` to `graphify-core` (closes layer-crossing debt FEAT-043 introduced)
-- **FEAT-044** (low): F7 — Rust re-export collapse, mirrors TS FEAT-021/025/026/028 (multi-day, only worth picking up if Rust re-export volume becomes user-visible)
+- **CHORE-010** (low): F2 — `suggest stubs` cross-language same-prefix collision test gap. Pure addition of test coverage. Subtasks: 0/3
+- **FEAT-044** (low): F7 — Rust re-export collapse, mirrors TS FEAT-021/025/026/028 (multi-day; only worth picking up if Rust re-export volume becomes user-visible). Subtasks: 0/7
 
 ## Suggested Next Steps
 
-1. **BUG-025** is the next clean win — same shape as BUG-023 (well-bounded extractor patch, drops `Item`/`Array`/`Value` ~7 edges combined). Likely 30-45 min with TDD. Decision needed before writing tests: option 1 (recurse into `function_item` bodies in `extract_file`) vs option 2 (post-walk entire AST for `use_declaration`). Option 1 is safer per the body
-2. **Self-dogfood baseline reset** — with v0.13.2 shipped and 9 candidates remaining, worth running `graphify suggest stubs --apply` on legitimate externals (likely `Selector`/`src.Community`/`src.Cycle` are real cases needing classification) to reset the noise floor before tackling BUG-025
-3. **CHORE-011** (move ExternalStubs to graphify-core) — mechanical move, ~15 min, no new tests beyond compiler check; closes the FEAT-043 layer-crossing debt
-4. (long-tail) BUG-021/CHORE-010 (suggest-stubs polish), FEAT-044 (Rust re-export) — pick up only if a real consumer asks
+1. **Cut a `v0.13.3` release** — three meaningful fixes since `v0.13.2` (BUG-025, BUG-021, CHORE-011), all under `[Unreleased]` in CHANGELOG. Per CLAUDE.md release workflow: bump `[workspace.package].version` in root `Cargo.toml`, `cargo build --release -p graphify-cli`, commit, tag explicitly to that commit (`git tag v0.13.3 <SHA>`), `git push origin main --tags`, then `cargo install --path crates/graphify-cli --force` to refresh local PATH binary. CI release workflow on `v*` tag push will build the 4 binary targets
 
-## Reminders
+2. **CHORE-010 (low priority)** — small test gap, ~15-30 min with the same test infrastructure that BUG-021's integration test used. Cross-language collision: e.g. a Rust prefix `serde` colliding with a TS prefix `serde` from a sibling project — need to verify the suggester treats them as separate candidates (current behavior may already be correct; the task is to add a regression guard test, not a fix)
 
-- Skills sync: 17 local-only skills under `~/.claude/skills/` not in upstream cache (same count as last session). Silence per-skill with `.skills-sync-ignore` or publish via `/share-skill <name>`
-- `tn` enum trap surfaced this session: BUG-024 frontmatter had `ai.uncertainty: medium` (not in `low|med|high` enum), making the entire file invisible to `tn list`. Documented in CLAUDE.md conventions; future task creations should validate enum values before save
-- `.claude/session-context-gf.json` is `skip-worktree`'d locally — `git ls-files -v` shows `S`. Reverse with `git update-index --no-skip-worktree`
-- Local PATH binary now `0.13.2` — `graphify --version` is the cheap drift check; CI release.yml only builds downloadable artifacts, not the local PATH binary
-- Session-journal not maintained this session. The 4-commit + release flow stayed close to a 1h budget so the conversation context + git log were enough; consider opening a journal for any session that goes >1.5h
+3. **FEAT-044 (multi-day, low priority)** — only worth scoping if Rust re-export volume actually becomes user-visible in the dogfood candidates. Currently the remaining 7 candidates split as: 1 cross-project (`matches` macro shim), 3 graphify-cli per-project (`toml_edit` legitimate external + `env` macro/stdlib + `src.install.copy_plan.INTEGRATIONS` likely a constant ref pattern), 1 graphify-core (`Selector` likely a Rust re-export), 2 graphify-report (`src.Community` + `src.Cycle` — definitely Rust re-exports from graphify-core through `pub use`). FEAT-044 would absorb the latter 3 if it lands
+
+## Frozen Modules / Hot Spots
+
+- `src.server` (graphify-mcp, 0.60) — duplicated CLI logic per CLAUDE.md known-debt note
+- `src.resolver` (graphify-extract, 0.435) — case 1-9 ladder is intentionally long; refactor would risk losing dispatch ordering
+
+Don't touch either without a specific user-approved task.
