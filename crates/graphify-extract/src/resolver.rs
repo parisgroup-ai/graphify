@@ -464,6 +464,43 @@ impl ModuleResolver {
             }
         }
 
+        // 8.6. Rust scoped same-module / sibling-mod lookup (BUG-022). When
+        //      `raw` is a Rust-shaped scoped path (`Foo::bar`, `Foo::Bar::baz`,
+        //      …) and `{from_module}.{raw with :: → .}` is a registered local
+        //      module, promote to that qualified id. Covers two patterns the
+        //      use-alias fallback (case 9) doesn't reach — both surfaced by
+        //      the FEAT-043 dogfood:
+        //
+        //        1. Same-file `Type::method` — `PolicyError::new(...)` from
+        //           inside `policy.rs`. No `use` clause for a same-file type,
+        //           so `use_aliases` has no entry; case 9 misses.
+        //        2. Sibling-mod from crate root — `pub use walker::{...};` in
+        //           `lib.rs` emits scoped imports without a `crate::` prefix.
+        //           `from_module` is the bare `local_prefix` here, so the
+        //           synthesis matches the canonical `{local_prefix}.{mod}.{sym}`.
+        //
+        //      Ordered before case 9 to match Rust shadowing semantics: a
+        //      same-module symbol shadows any aliased `use` of the same short
+        //      name. Local-first is also the safer default for hotspot
+        //      scoring — a genuine intra-module call shouldn't be tagged
+        //      Ambiguous just because an unrelated alias shares the short
+        //      name. Non-recursive (one HashMap lookup); language-agnostic
+        //      shape filter (`::` separator is Rust-specific by design).
+        if !raw.is_empty()
+            && !from_module.is_empty()
+            && raw.contains("::")
+            && !raw.contains('.')
+            && !raw.contains('\\')
+            && !raw.contains('/')
+            && !raw.starts_with('.')
+        {
+            let normalized = raw.replace("::", ".");
+            let synthesized = format!("{}.{}", from_module, normalized);
+            if self.known_modules.contains_key(&synthesized) {
+                return (synthesized, true, 1.0);
+            }
+        }
+
         // 9. Rust `use`-alias fallback (FEAT-031). When a scoped or bare call
         //    target isn't a registered local module directly, consult the
         //    per-source-module alias map captured by the Rust extractor and
@@ -2419,5 +2456,146 @@ mod tests {
             "PHP same-namespace bare call must resolve as local"
         );
         assert_eq!(conf, 1.0, "direct known-modules hit → confidence 1.0");
+    }
+
+    // -----------------------------------------------------------------------
+    // BUG-022: Rust scoped same-module / sibling-mod resolution
+    // -----------------------------------------------------------------------
+    //
+    // Two concrete patterns the FEAT-031 use-alias fallback (case 9) doesn't
+    // cover, both surfaced by the FEAT-043 `suggest stubs` dogfood:
+    //
+    //   1. Same-file `Type::method` — `PolicyError::new(...)` from inside
+    //      `policy.rs` where `PolicyError` is defined in that very file.
+    //      No `use` clause, so no entry in `use_aliases`; case 9 misses.
+    //
+    //   2. Sibling-mod from crate root — `pub use walker::{detect_local_prefix,
+    //      DiscoveredFile, ...};` in `lib.rs`. The Rust extractor emits scoped
+    //      Imports edges with target `walker::detect_local_prefix`. The crate
+    //      root file's `from_module` is the bare `local_prefix` (e.g. `src`),
+    //      so synthesizing `{local_prefix}.{normalized}` matches the canonical
+    //      `src.walker.detect_local_prefix` registered by the walker.
+    //
+    // Both reduce to the same scoped-input shape: `Foo::bar` (and longer
+    // chains like `Foo::Bar::baz`) where the synthesized
+    // `{from_module}.{raw with :: → .}` is a registered local id. Case 8.6
+    // is the resolver's response.
+
+    #[test]
+    fn bug_022_scoped_same_file_type_method_resolves_local() {
+        // Cat 1: `PolicyError::new(...)` from `src.policy` where the type
+        // and its method are both defined in `policy.rs`. `use_aliases` for
+        // `src.policy` doesn't have `PolicyError` (no `use` clause —
+        // it's a same-file reference), so case 9 can't fire. Case 8.6 must
+        // synthesize `src.policy.PolicyError.new` and find it in
+        // known_modules.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.policy");
+        resolver.register_module("src.policy.PolicyError");
+        resolver.register_module("src.policy.PolicyError.new");
+
+        let (resolved, is_local, conf) = resolver.resolve("PolicyError::new", "src.policy", false);
+        assert_eq!(resolved, "src.policy.PolicyError.new");
+        assert!(
+            is_local,
+            "same-file Type::method must resolve to local qualified id"
+        );
+        assert_eq!(conf, 1.0, "direct known-modules hit → confidence 1.0");
+    }
+
+    #[test]
+    fn bug_022_scoped_sibling_mod_from_crate_root_resolves_local() {
+        // Cat 2: `pub use walker::DiscoveredFile;` in `lib.rs`. The Rust
+        // extractor emits an Imports edge from `from_module=src` (the
+        // crate root) to target `walker::DiscoveredFile` — no `crate::`
+        // prefix because the source path itself doesn't have one. Case 6
+        // doesn't match (no `crate::`/`super::`/`self::` prefix); case 9
+        // misses too because no alias is registered for `walker` (the
+        // `pub use walker::{...}` only registers the leaves `DiscoveredFile`,
+        // `detect_local_prefix`, etc., not `walker` itself). Case 8.6 must
+        // synthesize `src.walker.DiscoveredFile` and find it in known_modules.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src");
+        resolver.register_module("src.walker");
+        resolver.register_module("src.walker.DiscoveredFile");
+
+        let (resolved, is_local, conf) = resolver.resolve("walker::DiscoveredFile", "src", false);
+        assert_eq!(resolved, "src.walker.DiscoveredFile");
+        assert!(
+            is_local,
+            "sibling-mod scoped reference from crate root must resolve to local qualified id"
+        );
+        assert_eq!(conf, 1.0, "direct known-modules hit → confidence 1.0");
+    }
+
+    #[test]
+    fn bug_022_scoped_three_segment_chain_resolves_local() {
+        // Longer scoped chains (`Foo::Bar::baz`) must also normalize and
+        // resolve. Common shape: enum-variant constructor call inside the
+        // module that defines the enum, e.g. `Selector::Group::new` from
+        // inside `policy.rs`.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.policy");
+        resolver.register_module("src.policy.Selector");
+        resolver.register_module("src.policy.Selector.Group");
+
+        let (resolved, is_local, _conf) = resolver.resolve("Selector::Group", "src.policy", false);
+        assert_eq!(resolved, "src.policy.Selector.Group");
+        assert!(is_local);
+    }
+
+    #[test]
+    fn bug_022_scoped_unknown_synthesized_id_falls_through() {
+        // Negative guard: `ExtractionCache::load` from `src.main` where
+        // `ExtractionCache` is a cross-crate type imported via `use
+        // graphify_extract::cache::ExtractionCache;`. Case 8.6 synthesizes
+        // `src.main.ExtractionCache.load` — not registered → must skip and
+        // fall through so case 9's alias rewrite has a chance to fire.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.main");
+
+        // No alias registered → case 9 also misses, falls through to no-match.
+        let (resolved, is_local, _conf) =
+            resolver.resolve("ExtractionCache::load", "src.main", false);
+        assert_eq!(
+            resolved, "ExtractionCache::load",
+            "no synthesized match → raw input preserved for downstream stub matching"
+        );
+        assert!(!is_local);
+    }
+
+    #[test]
+    fn bug_022_scoped_local_match_shadows_alias() {
+        // Rust shadowing: a same-file `Foo` shadows an `use other::Foo;`
+        // alias. Case 8.6 must run BEFORE case 9 so the local synthesis
+        // wins. (In real Rust source this would be a compile error if both
+        // were in scope; we mirror the local-first rule because the
+        // extractor doesn't distinguish — and local-first is the safer
+        // default for hotspot scoring: a real intra-module call shouldn't
+        // be tagged Ambiguous just because an unrelated alias happens to
+        // share the short name.)
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.policy");
+        resolver.register_module("src.policy.PolicyError");
+        resolver.register_module("src.policy.PolicyError.new");
+
+        let mut aliases = HashMap::new();
+        aliases.insert(
+            "PolicyError".to_owned(),
+            "crate::other::PolicyError".to_owned(),
+        );
+        resolver.register_use_aliases("src.policy", &aliases);
+
+        let (resolved, is_local, _) = resolver.resolve("PolicyError::new", "src.policy", false);
+        assert_eq!(
+            resolved, "src.policy.PolicyError.new",
+            "same-module symbol must shadow aliased import"
+        );
+        assert!(is_local);
     }
 }
