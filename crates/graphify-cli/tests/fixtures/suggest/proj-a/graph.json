@@ -1,0 +1,17 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "nodes": [
+    {"id": "crate_a::main", "kind": "Module", "file_path": "crate_a/src/main.rs", "language": "Rust", "line": 1, "is_local": true},
+    {"id": "tokio::spawn", "kind": "Module", "file_path": "", "language": "Rust", "line": 0, "is_local": false},
+    {"id": "serde::Deserialize", "kind": "Module", "file_path": "", "language": "Rust", "line": 0, "is_local": false},
+    {"id": "rmcp::ServerHandler", "kind": "Module", "file_path": "", "language": "Rust", "line": 0, "is_local": false},
+    {"id": "std::collections::HashMap", "kind": "Module", "file_path": "", "language": "Rust", "line": 0, "is_local": false}
+  ],
+  "links": [
+    {"source": "crate_a::main", "target": "tokio::spawn", "kind": "Calls", "weight": 5, "line": 10, "confidence": 0.9, "confidence_kind": "Extracted"},
+    {"source": "crate_a::main", "target": "serde::Deserialize", "kind": "Imports", "weight": 3, "line": 5, "confidence": 1.0, "confidence_kind": "Extracted"},
+    {"source": "crate_a::main", "target": "rmcp::ServerHandler", "kind": "Calls", "weight": 7, "line": 20, "confidence": 0.8, "confidence_kind": "Inferred"},
+    {"source": "crate_a::main", "target": "std::collections::HashMap", "kind": "Imports", "weight": 4, "line": 7, "confidence": 1.0, "confidence_kind": "ExpectedExternal"}
+  ]
+}

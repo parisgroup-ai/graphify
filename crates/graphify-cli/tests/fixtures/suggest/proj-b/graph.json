@@ -1,0 +1,15 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "nodes": [
+    {"id": "crate_b::main", "kind": "Module", "file_path": "crate_b/src/main.rs", "language": "Rust", "line": 1, "is_local": true},
+    {"id": "tokio::sync::mpsc::Sender", "kind": "Module", "file_path": "", "language": "Rust", "line": 0, "is_local": false},
+    {"id": "serde::Serialize", "kind": "Module", "file_path": "", "language": "Rust", "line": 0, "is_local": false},
+    {"id": "clap::Parser", "kind": "Module", "file_path": "", "language": "Rust", "line": 0, "is_local": false}
+  ],
+  "links": [
+    {"source": "crate_b::main", "target": "tokio::sync::mpsc::Sender", "kind": "Calls", "weight": 4, "line": 12, "confidence": 0.9, "confidence_kind": "Extracted"},
+    {"source": "crate_b::main", "target": "serde::Serialize", "kind": "Imports", "weight": 2, "line": 5, "confidence": 1.0, "confidence_kind": "Extracted"},
+    {"source": "crate_b::main", "target": "clap::Parser", "kind": "Imports", "weight": 6, "line": 6, "confidence": 1.0, "confidence_kind": "Extracted"}
+  ]
+}

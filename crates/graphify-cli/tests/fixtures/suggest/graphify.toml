@@ -1,0 +1,15 @@
+[settings]
+output = "."
+external_stubs = ["std"]
+
+[[project]]
+name = "proj-a"
+repo = "."
+lang = ["rust"]
+local_prefix = "crate_a"
+
+[[project]]
+name = "proj-b"
+repo = "."
+lang = ["rust"]
+local_prefix = "crate_b"
