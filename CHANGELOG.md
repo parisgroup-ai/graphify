@@ -4,6 +4,9 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- fix(extract): function-scoped and impl-method-scoped `use` declarations now register their aliases and emit `Imports` edges (BUG-025). Previously the Rust extractor's `extract_file` only walked `tree.root_node().children(...)`, so a `use foo::Bar;` inside a function body left `use_aliases` unpopulated and downstream bare-name calls like `Bar::new()` were misclassified as external. New helper `walk_for_uses(node, source, module_name, result)` in `crates/graphify-extract/src/rust_lang.rs` recurses through function/method bodies dispatching `use_declaration` nodes to the existing `extract_use_declaration`, with the same per-scope skip discipline as BUG-024's `walk_for_bindings` (returns at nested `function_item` / `impl_item` so a `use` inside a nested fn does not leak into the outer scope's file-wide alias map). Wired into `extract_function_item` and `extract_impl_item`. Self-dogfood: `graphify suggest stubs` candidate count 9 → 7 — `Item`, `Array`, `Value` no longer appear as bare external prefixes; they collapsed under `toml_edit` (13 edges, now showing canonical `toml_edit::Array` etc.) which is correctly suggested as a per-project external for graphify-cli. Out of scope (separate task only if user-visible): full nested `function_item` extraction (no `Defines` for nested fns, no Calls captured inside them).
+
 ## [0.13.2] - 2026-04-26
 
 ### Added

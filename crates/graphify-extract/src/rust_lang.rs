@@ -363,6 +363,10 @@ fn extract_function_item(
     // and let-bound names don't emit bogus Calls edges (BUG-024).
     if let Some(body) = node.child_by_field_name("body") {
         let local_bindings = collect_local_bindings(&body, source);
+        // BUG-025: function-body `use` declarations must register their
+        // aliases too, otherwise bare callees like `Bar::new()` after a
+        // `use foo::Bar;` inside the function look external.
+        walk_for_uses(&body, source, module_name, result);
         extract_calls_recursive(&body, source, module_name, &local_bindings, result);
     }
 }
@@ -508,6 +512,9 @@ fn extract_impl_item(
             // per-method scope, fresh set per method (BUG-024).
             if let Some(fn_body) = child.child_by_field_name("body") {
                 let local_bindings = collect_local_bindings(&fn_body, source);
+                // BUG-025: same `use_declaration` walking applies inside
+                // impl method bodies.
+                walk_for_uses(&fn_body, source, module_name, result);
                 extract_calls_recursive(&fn_body, source, module_name, &local_bindings, result);
             }
         }
@@ -638,6 +645,45 @@ fn collect_local_bindings(body: &tree_sitter::Node, source: &[u8]) -> HashSet<St
     let mut bindings = HashSet::new();
     walk_for_bindings(body, source, &mut bindings);
     bindings
+}
+
+/// BUG-025: walk a function body for `use_declaration` nodes and register
+/// their aliases + Imports edges into `result`. Mirrors `walk_for_bindings`
+/// in scope discipline — does not descend into nested `function_item` /
+/// `impl_item`, so a `use` inside a nested fn never leaks into the outer
+/// scope's alias map.
+///
+/// Approximation: aliases land in the file-wide `result.use_aliases` map, so
+/// in principle a function-scoped `use foo::Bar;` becomes visible to other
+/// functions in the same file. In practice the file-wide map already collapses
+/// duplicates (last write wins), and same-file shadowing of an aliased name
+/// is rare enough that the overcorrection is harmless. A truly per-scope
+/// alias map is a future refinement, not a v1 requirement.
+fn walk_for_uses(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    module_name: &str,
+    result: &mut ExtractionResult,
+) {
+    match node.kind() {
+        "use_declaration" => {
+            extract_use_declaration(node, source, module_name, result);
+            return;
+        }
+        "function_item" | "impl_item" => {
+            // Nested fn / impl have their own lexical scope. Don't descend —
+            // their uses (if any) would either be picked up by their own
+            // extraction pass (impl) or stay invisible by design (nested fn,
+            // tracked separately).
+            return;
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_uses(&child, source, module_name, result);
+    }
 }
 
 fn walk_for_bindings(node: &tree_sitter::Node, source: &[u8], bindings: &mut HashSet<String>) {
@@ -1282,6 +1328,104 @@ impl G {
             scoped_calls.len(),
             1,
             "scoped calls inside impl method bodies must be captured"
+        );
+    }
+
+    // ----------------------------------------------------------------------
+    // BUG-025: function-body use_declaration walking
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn bug_025_function_scoped_use_emits_imports_edge() {
+        // `use` declarations inside a function body should still produce
+        // Imports edges, just like top-level uses.
+        let r = extract("fn build() {\n    use foo::Bar;\n}\n");
+        let imports: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Imports)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(
+            imports.contains(&"foo::Bar"),
+            "function-scoped `use foo::Bar;` must emit an Imports edge. Got: {:?}",
+            imports
+        );
+    }
+
+    #[test]
+    fn bug_025_function_scoped_use_registers_alias() {
+        // The use_aliases map must be populated so the post-extraction
+        // resolver can rewrite `Bar::new()` calls inside the same file.
+        let r = extract("fn build() {\n    use foo::Bar;\n}\n");
+        assert_eq!(
+            r.use_aliases.get("Bar").map(String::as_str),
+            Some("foo::Bar"),
+            "function-scoped use must populate use_aliases; aliases were: {:?}",
+            r.use_aliases
+        );
+    }
+
+    #[test]
+    fn bug_025_function_scoped_grouped_use_decomposes() {
+        // Mirrors the BUG-022 dogfood canary: graphify-cli's
+        // `apply_suggestions` opens with a grouped function-scoped use.
+        let r = extract(
+            "fn apply() {\n    use toml_edit::{Array, DocumentMut, Item, Table, Value};\n}\n",
+        );
+        let imports: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Imports)
+            .map(|e| e.1.as_str())
+            .collect();
+        for sym in [
+            "toml_edit::Array",
+            "toml_edit::DocumentMut",
+            "toml_edit::Item",
+            "toml_edit::Table",
+            "toml_edit::Value",
+        ] {
+            assert!(
+                imports.contains(&sym),
+                "function-scoped grouped use missed `{}`. Got: {:?}",
+                sym,
+                imports
+            );
+        }
+        for short in ["Array", "DocumentMut", "Item", "Table", "Value"] {
+            assert!(
+                r.use_aliases.contains_key(short),
+                "use_aliases missing `{}`; got: {:?}",
+                short,
+                r.use_aliases
+            );
+        }
+    }
+
+    #[test]
+    fn bug_025_method_scoped_use_registers_alias() {
+        // Same fix must reach impl-method bodies.
+        let r =
+            extract("struct G;\nimpl G {\n    fn run(&self) {\n        use foo::Bar;\n    }\n}\n");
+        assert_eq!(
+            r.use_aliases.get("Bar").map(String::as_str),
+            Some("foo::Bar"),
+            "impl-method-scoped use must populate use_aliases; aliases were: {:?}",
+            r.use_aliases
+        );
+    }
+
+    #[test]
+    fn bug_025_nested_fn_use_does_not_leak_to_outer() {
+        // Lexical scope hygiene: a `use` inside a nested fn must NOT register
+        // an alias visible to the outer function. Per-scope correctness mirrors
+        // BUG-024's nested-fn binding handling.
+        let r = extract("fn outer() {\n    fn inner() {\n        use foo::OnlyInner;\n    }\n}\n");
+        assert!(
+            !r.use_aliases.contains_key("OnlyInner"),
+            "nested-fn use must not leak into outer scope; aliases were: {:?}",
+            r.use_aliases
         );
     }
 }
