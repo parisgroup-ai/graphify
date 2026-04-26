@@ -1,0 +1,108 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-04-26T18:37:10Z",
+  "graphify_version": "0.13.1",
+  "stale": false,
+  "projects": [
+    "graphify-core",
+    "graphify-extract",
+    "graphify-report",
+    "graphify-cli",
+    "graphify-mcp"
+  ],
+  "hotspots": [
+    {
+      "hotspot_type": "mixed",
+      "id": "src.server",
+      "in_cycle": false,
+      "in_degree": 1,
+      "out_degree": 30,
+      "project": "graphify-mcp",
+      "score": 0.558997050195317
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.policy",
+      "in_cycle": false,
+      "in_degree": 1,
+      "out_degree": 51,
+      "project": "graphify-core",
+      "score": 0.48667261837000586
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.install",
+      "in_cycle": false,
+      "in_degree": 1,
+      "out_degree": 40,
+      "project": "graphify-cli",
+      "score": 0.4682490977778953
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.contract",
+      "in_cycle": false,
+      "in_degree": 1,
+      "out_degree": 45,
+      "project": "graphify-core",
+      "score": 0.4515684211290313
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.resolver",
+      "in_cycle": false,
+      "in_degree": 1,
+      "out_degree": 57,
+      "project": "graphify-extract",
+      "score": 0.4406075346465737
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.pr_summary",
+      "in_cycle": false,
+      "in_degree": 1,
+      "out_degree": 46,
+      "project": "graphify-report",
+      "score": 0.43244198120020294
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.graph.CodeGraph",
+      "in_cycle": false,
+      "in_degree": 7,
+      "out_degree": 0,
+      "project": "graphify-core",
+      "score": 0.4
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "graphify_core::graph::CodeGraph",
+      "in_cycle": false,
+      "in_degree": 7,
+      "out_degree": 0,
+      "project": "graphify-report",
+      "score": 0.4
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.install.manifest.sha256_of_bytes",
+      "in_cycle": false,
+      "in_degree": 3,
+      "out_degree": 0,
+      "project": "graphify-cli",
+      "score": 0.4
+    },
+    {
+      "hotspot_type": "mixed",
+      "id": "src.server.error_result",
+      "in_cycle": false,
+      "in_degree": 2,
+      "out_degree": 0,
+      "project": "graphify-mcp",
+      "score": 0.4
+    }
+  ],
+  "cycles": [],
+  "scope_files": [],
+  "scope_explains": []
+}
