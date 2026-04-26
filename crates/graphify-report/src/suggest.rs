@@ -312,6 +312,118 @@ fn top_segment(id: &str) -> Option<String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Markdown renderer
+// ---------------------------------------------------------------------------
+
+use std::fmt::Write as _;
+
+pub fn render_markdown(report: &SuggestReport) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "# Stub Suggestions");
+    let _ = writeln!(out);
+
+    let total_candidates = report.settings_candidates.len()
+        + report
+            .per_project_candidates
+            .values()
+            .map(|v| v.len())
+            .sum::<usize>();
+
+    if total_candidates == 0 {
+        let _ = writeln!(
+            out,
+            "No stub suggestions above threshold (--min-edges={}).",
+            report.min_edges
+        );
+        return finalize_md(out, report);
+    }
+
+    let _ = writeln!(
+        out,
+        "{} candidates above threshold (--min-edges={})",
+        total_candidates, report.min_edges
+    );
+    let _ = writeln!(out);
+
+    if !report.settings_candidates.is_empty() {
+        let _ = writeln!(
+            out,
+            "## Promote to [settings].external_stubs (cross-project)"
+        );
+        let _ = writeln!(out);
+        let _ = writeln!(out, "| Prefix | Edges | Projects | Example |");
+        let _ = writeln!(out, "|--------|-------|----------|---------|");
+        for c in &report.settings_candidates {
+            let projects_disp = format!("{} ({})", c.projects.len(), c.projects.join(", "));
+            let example = c.example_nodes.first().map(String::as_str).unwrap_or("");
+            let _ = writeln!(
+                out,
+                "| `{}` | {} | {} | {} |",
+                c.prefix, c.edge_weight, projects_disp, example
+            );
+        }
+        let _ = writeln!(out);
+    }
+
+    if !report.per_project_candidates.is_empty() {
+        let _ = writeln!(out, "## Per-project candidates");
+        let _ = writeln!(out);
+        for (proj, cands) in &report.per_project_candidates {
+            let _ = writeln!(out, "### {}", proj);
+            let _ = writeln!(out, "| Prefix | Edges | Example |");
+            let _ = writeln!(out, "|--------|-------|---------|");
+            for c in cands {
+                let example = c.example_nodes.first().map(String::as_str).unwrap_or("");
+                let _ = writeln!(out, "| `{}` | {} | {} |", c.prefix, c.edge_weight, example);
+            }
+            let _ = writeln!(out);
+        }
+    }
+
+    finalize_md(out, report)
+}
+
+fn finalize_md(mut out: String, report: &SuggestReport) -> String {
+    if !report.already_covered_prefixes.is_empty() {
+        let _ = writeln!(out, "## Already covered (skipped)");
+        let _ = writeln!(out);
+        let list = report
+            .already_covered_prefixes
+            .iter()
+            .map(|p| format!("`{}`", p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "{} prefix(es) already in current external_stubs: {}",
+            report.already_covered_prefixes.len(),
+            list
+        );
+        let _ = writeln!(out);
+    }
+
+    if !report.shadowed_prefixes.is_empty() {
+        let _ = writeln!(out, "## Skipped — shadowing local modules");
+        let _ = writeln!(out);
+        let list = report
+            .shadowed_prefixes
+            .iter()
+            .map(|p| format!("`{}`", p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "{} prefix(es) matching local_prefix or known module: {}",
+            report.shadowed_prefixes.len(),
+            list
+        );
+        let _ = writeln!(out);
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,5 +769,86 @@ mod tests {
             .collect();
         assert_eq!(prefixes, vec!["serde", "clap", "tokio"]);
         // serde first (weight 100); clap and tokio tied at 50 → asc by prefix → clap before tokio.
+    }
+
+    #[test]
+    fn render_markdown_includes_all_sections() {
+        use graphify_extract::stubs::ExternalStubs;
+        let stubs = ExternalStubs::new(["std"]);
+
+        let g_a = GraphSnapshot {
+            nodes: vec![
+                make_node("a::main", "Rust", true),
+                make_node("tokio::spawn", "Rust", false),
+                make_node("rmcp::ServerHandler", "Rust", false),
+                make_node("std::collections::HashMap", "Rust", false),
+            ],
+            links: vec![
+                make_link("a::main", "tokio::spawn", 5),
+                make_link("a::main", "rmcp::ServerHandler", 3),
+                make_link("a::main", "std::collections::HashMap", 7),
+            ],
+        };
+        let g_b = GraphSnapshot {
+            nodes: vec![
+                make_node("b::main", "Rust", true),
+                make_node("tokio::sync::mpsc::Sender", "Rust", false),
+            ],
+            links: vec![make_link("b::main", "tokio::sync::mpsc::Sender", 4)],
+        };
+        let inputs = vec![
+            ProjectInput {
+                name: "proj-a",
+                local_prefix: "a",
+                current_stubs: &stubs,
+                graph: &g_a,
+            },
+            ProjectInput {
+                name: "proj-b",
+                local_prefix: "b",
+                current_stubs: &stubs,
+                graph: &g_b,
+            },
+        ];
+
+        let report = score_stubs(&inputs, 1);
+        let md = render_markdown(&report);
+
+        assert!(md.contains("# Stub Suggestions"), "missing header");
+        assert!(
+            md.contains("## Promote to [settings].external_stubs"),
+            "missing settings section"
+        );
+        assert!(md.contains("`tokio`"), "missing tokio entry");
+        assert!(
+            md.contains("## Per-project candidates"),
+            "missing per-project section"
+        );
+        assert!(md.contains("### proj-a"), "missing proj-a subheader");
+        assert!(md.contains("`rmcp`"), "missing rmcp entry");
+        assert!(
+            md.contains("## Already covered"),
+            "missing already-covered section"
+        );
+        assert!(
+            md.contains("`std`"),
+            "std should be listed as already covered"
+        );
+    }
+
+    #[test]
+    fn render_markdown_empty_report_emits_no_suggestions_note() {
+        let report = SuggestReport {
+            min_edges: 2,
+            settings_candidates: vec![],
+            per_project_candidates: BTreeMap::new(),
+            already_covered_prefixes: vec![],
+            shadowed_prefixes: vec![],
+        };
+        let md = render_markdown(&report);
+        assert!(
+            md.contains("No stub suggestions"),
+            "missing empty-state message"
+        );
     }
 }
