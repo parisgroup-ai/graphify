@@ -143,86 +143,7 @@ fn collect_use_paths(
                 .unwrap_or("");
 
             if let Some(list_node) = node.child_by_field_name("list") {
-                let mut cursor = list_node.walk();
-                for child in list_node.children(&mut cursor) {
-                    if !child.is_named() {
-                        continue;
-                    }
-                    match child.kind() {
-                        "identifier" | "self" => {
-                            let name = child.utf8_text(source).unwrap_or("");
-                            if !name.is_empty() {
-                                let full_path = if prefix.is_empty() {
-                                    name.to_owned()
-                                } else {
-                                    format!("{}::{}", prefix, name)
-                                };
-                                register_use_alias(&full_path, None, result);
-                                result.edges.push((
-                                    module_name.to_owned(),
-                                    full_path,
-                                    Edge::imports(line),
-                                ));
-                            }
-                        }
-                        "scoped_identifier" => {
-                            let child_text = child.utf8_text(source).unwrap_or("");
-                            if !child_text.is_empty() {
-                                let full_path = if prefix.is_empty() {
-                                    child_text.to_owned()
-                                } else {
-                                    format!("{}::{}", prefix, child_text)
-                                };
-                                register_use_alias(&full_path, None, result);
-                                result.edges.push((
-                                    module_name.to_owned(),
-                                    full_path,
-                                    Edge::imports(line),
-                                ));
-                            }
-                        }
-                        "use_as_clause" => {
-                            // Nested aliased item inside a grouped import,
-                            // e.g. `use std::{io::Result as IoResult};`.
-                            if let Some(path_node) = child.child_by_field_name("path") {
-                                let path_str = path_node.utf8_text(source).unwrap_or("");
-                                if !path_str.is_empty() {
-                                    let full_path = if prefix.is_empty() {
-                                        path_str.to_owned()
-                                    } else {
-                                        format!("{}::{}", prefix, path_str)
-                                    };
-                                    let alias = child
-                                        .child_by_field_name("alias")
-                                        .and_then(|n| n.utf8_text(source).ok())
-                                        .filter(|s| !s.is_empty());
-                                    register_use_alias(&full_path, alias, result);
-                                    result.edges.push((
-                                        module_name.to_owned(),
-                                        full_path,
-                                        Edge::imports(line),
-                                    ));
-                                }
-                            }
-                        }
-                        "scoped_use_list" => {
-                            let child_text = child.utf8_text(source).unwrap_or("");
-                            if !child_text.is_empty() {
-                                let full_path = if prefix.is_empty() {
-                                    child_text.to_owned()
-                                } else {
-                                    format!("{}::{}", prefix, child_text)
-                                };
-                                result.edges.push((
-                                    module_name.to_owned(),
-                                    full_path,
-                                    Edge::imports(line),
-                                ));
-                            }
-                        }
-                        _ => {}
-                    }
-                }
+                process_scoped_use_list(&list_node, source, module_name, line, prefix, result);
             }
         }
         "use_list" => {
@@ -247,6 +168,93 @@ fn collect_use_paths(
             }
         }
         _ => {}
+    }
+}
+
+/// Process the items inside a `scoped_use_list`'s `list` field with a given
+/// prefix. Recurses into nested `scoped_use_list` children with the combined
+/// prefix (BUG-023: previously captured nested groups as literal text including
+/// braces, so `use a::{b::{c, d}}` produced a single `a::b::{c, d}` edge with
+/// no aliases registered for `c`/`d`).
+fn process_scoped_use_list(
+    list_node: &tree_sitter::Node,
+    source: &[u8],
+    module_name: &str,
+    line: usize,
+    prefix: &str,
+    result: &mut ExtractionResult,
+) {
+    let join = |suffix: &str| -> String {
+        if prefix.is_empty() {
+            suffix.to_owned()
+        } else {
+            format!("{}::{}", prefix, suffix)
+        }
+    };
+
+    let mut cursor = list_node.walk();
+    for child in list_node.children(&mut cursor) {
+        if !child.is_named() {
+            continue;
+        }
+        match child.kind() {
+            "identifier" | "self" => {
+                let name = child.utf8_text(source).unwrap_or("");
+                if !name.is_empty() {
+                    let full_path = join(name);
+                    register_use_alias(&full_path, None, result);
+                    result
+                        .edges
+                        .push((module_name.to_owned(), full_path, Edge::imports(line)));
+                }
+            }
+            "scoped_identifier" => {
+                let child_text = child.utf8_text(source).unwrap_or("");
+                if !child_text.is_empty() {
+                    let full_path = join(child_text);
+                    register_use_alias(&full_path, None, result);
+                    result
+                        .edges
+                        .push((module_name.to_owned(), full_path, Edge::imports(line)));
+                }
+            }
+            "use_as_clause" => {
+                // Nested aliased item inside a grouped import,
+                // e.g. `use std::{io::Result as IoResult};`.
+                if let Some(path_node) = child.child_by_field_name("path") {
+                    let path_str = path_node.utf8_text(source).unwrap_or("");
+                    if !path_str.is_empty() {
+                        let full_path = join(path_str);
+                        let alias = child
+                            .child_by_field_name("alias")
+                            .and_then(|n| n.utf8_text(source).ok())
+                            .filter(|s| !s.is_empty());
+                        register_use_alias(&full_path, alias, result);
+                        result
+                            .edges
+                            .push((module_name.to_owned(), full_path, Edge::imports(line)));
+                    }
+                }
+            }
+            "scoped_use_list" => {
+                let inner_path = child
+                    .child_by_field_name("path")
+                    .and_then(|n| n.utf8_text(source).ok())
+                    .unwrap_or("");
+                let combined_prefix = join(inner_path);
+                if let Some(inner_list) = child.child_by_field_name("list") {
+                    process_scoped_use_list(
+                        &inner_list,
+                        source,
+                        module_name,
+                        line,
+                        &combined_prefix,
+                        result,
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -959,6 +967,56 @@ impl Config {
         assert_eq!(
             r.use_aliases.get("Edge").map(String::as_str),
             Some("crate::types::Edge")
+        );
+    }
+
+    #[test]
+    fn bug_023_nested_scoped_use_list_decomposes() {
+        // `use a::{b::{c, d}}` must produce 2 imports edges (`a::b::c`,
+        // `a::b::d`) and 2 use_aliases entries — not a single edge with
+        // literal braces in the target.
+        let r = extract("use a::{b::{c, d}};\n");
+        let imports: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Imports)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert_eq!(
+            imports,
+            vec!["a::b::c", "a::b::d"],
+            "nested scoped_use_list must decompose into per-leaf edges"
+        );
+        assert_eq!(r.use_aliases.get("c").map(String::as_str), Some("a::b::c"));
+        assert_eq!(r.use_aliases.get("d").map(String::as_str), Some("a::b::d"));
+    }
+
+    #[test]
+    fn bug_023_nested_scoped_use_list_mixed_siblings() {
+        // BUG-022 dogfood shape: `use foo::{bar::{baz, qux}, other}` —
+        // nested group sibling-by-sibling with a flat sibling.
+        let r = extract("use foo::{bar::{baz, qux}, other};\n");
+        let imports: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Imports)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert_eq!(
+            imports,
+            vec!["foo::bar::baz", "foo::bar::qux", "foo::other"]
+        );
+        assert_eq!(
+            r.use_aliases.get("baz").map(String::as_str),
+            Some("foo::bar::baz")
+        );
+        assert_eq!(
+            r.use_aliases.get("qux").map(String::as_str),
+            Some("foo::bar::qux")
+        );
+        assert_eq!(
+            r.use_aliases.get("other").map(String::as_str),
+            Some("foo::other")
         );
     }
 
