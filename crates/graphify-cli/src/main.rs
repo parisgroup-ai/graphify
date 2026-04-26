@@ -20,12 +20,13 @@ use graphify_core::{
     policy::{CompiledPolicy, PolicyConfig, ProjectGraph, ProjectPolicyResult},
     query::{QueryEngine, SearchFilters, SortField},
     types::Language,
+    ExternalStubs,
 };
 use graphify_extract::{
     cache::{sha256_hex, CacheStats, ExtractionCache},
     walker::detect_local_prefix,
-    ExternalStubs, ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor, PythonExtractor,
-    RustExtractor, TypeScriptExtractor,
+    ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor, PythonExtractor, RustExtractor,
+    TypeScriptExtractor,
 };
 use graphify_report::{
     check_report::{
@@ -5287,7 +5288,7 @@ fn cmd_suggest_stubs(
     min_edges: u64,
     project_filter: Option<&str>,
 ) {
-    use graphify_extract::stubs::ExternalStubs;
+    use graphify_core::ExternalStubs;
     use graphify_report::suggest::{
         render_json, render_markdown, render_toml, score_stubs, GraphSnapshot, ProjectInput,
     };

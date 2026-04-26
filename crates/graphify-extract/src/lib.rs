@@ -7,7 +7,6 @@ pub mod python;
 pub mod reexport_graph;
 pub mod resolver;
 pub mod rust_lang;
-pub mod stubs;
 pub mod ts_contract;
 pub mod typescript;
 pub mod walker;
@@ -24,7 +23,6 @@ pub use reexport_graph::{
     CanonicalResolution, NamedReExport, ReExportGraph, ResolveFn, StarReExport,
 };
 pub use rust_lang::RustExtractor;
-pub use stubs::ExternalStubs;
 pub use ts_contract::{
     extract_ts_contract, extract_ts_contract_at, parse_all_ts_contracts, parse_all_ts_contracts_at,
     TsContractParseError,

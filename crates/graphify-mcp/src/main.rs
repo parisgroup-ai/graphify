@@ -14,10 +14,11 @@ use graphify_core::{
     metrics::{compute_metrics, NodeMetrics, ScoringWeights},
     query::QueryEngine,
     types::Language,
+    ExternalStubs,
 };
 use graphify_extract::{
-    walker::discover_files, ExternalStubs, ExtractionResult, GoExtractor, LanguageExtractor,
-    PhpExtractor, PythonExtractor, RustExtractor, TypeScriptExtractor,
+    walker::discover_files, ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor,
+    PythonExtractor, RustExtractor, TypeScriptExtractor,
 };
 
 use crate::server::GraphifyServer;

@@ -38,7 +38,7 @@ pub struct GraphLink {
 pub struct ProjectInput<'a> {
     pub name: &'a str,
     pub local_prefix: &'a str,
-    pub current_stubs: &'a graphify_extract::stubs::ExternalStubs,
+    pub current_stubs: &'a graphify_core::ExternalStubs,
     pub graph: &'a GraphSnapshot,
 }
 
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn score_stubs_promotes_cross_project_prefix_to_settings() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let empty_stubs = ExternalStubs::default();
 
         let proj_a_graph = GraphSnapshot {
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn score_stubs_keeps_single_project_prefix_per_project() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let empty = ExternalStubs::default();
 
         let g = GraphSnapshot {
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn score_stubs_threshold_drops_per_project_before_aggregation() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let empty = ExternalStubs::default();
 
         // tokio appears in both projects but only weight-4 in each — below
@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     fn score_stubs_records_already_covered_and_skips_them() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let stubs = ExternalStubs::new(["tokio"]);
 
         let g = GraphSnapshot {
@@ -718,7 +718,7 @@ mod tests {
 
     #[test]
     fn score_stubs_records_shadowing_against_local_prefix() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let empty = ExternalStubs::default();
 
         // src is project-a's local_prefix. An external node id "src::foo" from
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn score_stubs_ranks_by_edge_weight_then_prefix() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let empty = ExternalStubs::default();
 
         // Two prefixes both in 2 projects so they cross to settings; verify
@@ -816,7 +816,7 @@ mod tests {
 
     #[test]
     fn render_markdown_includes_all_sections() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let stubs = ExternalStubs::new(["std"]);
 
         let g_a = GraphSnapshot {
@@ -897,7 +897,7 @@ mod tests {
 
     #[test]
     fn render_toml_emits_commented_snippet_with_settings_and_per_project() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let empty = ExternalStubs::default();
 
         let g_a = GraphSnapshot {
@@ -950,7 +950,7 @@ mod tests {
 
     #[test]
     fn render_json_round_trips() {
-        use graphify_extract::stubs::ExternalStubs;
+        use graphify_core::ExternalStubs;
         let empty = ExternalStubs::default();
 
         let g = GraphSnapshot {

@@ -8,4 +8,7 @@ pub mod history;
 pub mod metrics;
 pub mod policy;
 pub mod query;
+pub mod stubs;
 pub mod types;
+
+pub use stubs::ExternalStubs;
