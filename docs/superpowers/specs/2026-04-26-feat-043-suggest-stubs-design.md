@@ -3,7 +3,7 @@
 **Status:** Draft
 **Date:** 2026-04-26
 **Author:** brainstorming session (Cleiton + Claude)
-**Depends on:** FEAT-034 (`[settings].external_stubs` merge layer), FEAT-015 (analysis.json edges array)
+**Depends on:** FEAT-034 (`[settings].external_stubs` merge layer)
 
 ## Motivation
 
@@ -17,7 +17,7 @@ Polish the ergonomics of `[settings].external_stubs` / `[[project]].external_stu
 ## Non-goals
 
 - **Not** a real-time hot loop — runs on demand, not in `watch` mode.
-- **Not** a graph re-extractor — consumes existing `analysis.json` (Approach A from brainstorming). If analysis is stale, the user re-runs `graphify run` first.
+- **Not** a graph re-extractor — consumes existing `graph.json` artifacts (Approach A from brainstorming). If the graph is stale, the user re-runs `graphify run` first.
 - **Not** a stub *remover* — only suggests additions. Stub removal is out of scope.
 - **Not** a generic suggester framework — the `suggest <kind>` namespace is opened deliberately, but only `stubs` ships in this FEAT. Future kinds (`cycles`, `hotspots`) get separate FEATs.
 
@@ -57,13 +57,36 @@ pub struct ProjectInput<'a> {
     pub name: &'a str,
     pub local_prefix: &'a str,
     pub current_stubs: &'a ExternalStubs,   // already-merged settings + project
-    pub analysis: &'a AnalysisSnapshot,
+    pub graph: &'a GraphSnapshot,           // deserialised graph.json
+}
+
+/// Subset of graph.json the suggester needs. Defined locally in suggest.rs
+/// (not reusing diff.rs::AnalysisSnapshot since that file is a different
+/// shape and lacks is_local / per-edge weight).
+#[derive(Debug, Clone, Deserialize)]
+pub struct GraphSnapshot {
+    pub nodes: Vec<GraphNode>,
+    pub links: Vec<GraphLink>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GraphNode {
+    pub id: String,
+    pub language: String,    // "Rust", "Python", etc. — Debug-formatted Language enum
+    pub is_local: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GraphLink {
+    pub source: String,
+    pub target: String,
+    pub weight: u32,
 }
 
 pub struct StubCandidate {
     pub prefix: String,
-    pub language: Language,
-    pub edge_weight: u64,                   // sum of edge.weight pointing into prefix
+    pub language: String,                   // verbatim from GraphNode.language
+    pub edge_weight: u64,                   // sum of link.weight pointing into prefix
     pub node_count: usize,                  // distinct external nodes under prefix
     pub projects: Vec<String>,              // sorted; len() >= 1
     pub example_nodes: Vec<String>,         // first 3 distinct node ids, sorted
@@ -92,7 +115,7 @@ graphify.toml
 N projects with output_dir
      ↓
 For each project:
-  - Read <output_dir>/<project>/analysis.json into AnalysisSnapshot
+  - Read <output_dir>/<project>/graph.json into GraphSnapshot
   - Build current ExternalStubs (settings.external_stubs ++ project.external_stubs,
     sorted by descending prefix length)
      ↓
@@ -127,7 +150,7 @@ Render md / toml / json, OR mutate graphify.toml (--apply)
 
 **Threshold semantics:** `--min-edges` applies **per-project** before aggregation. A prefix with weight 1 in five projects (total 5) does **not** promote to `settings_candidates` — it has weight 1 < threshold in each project individually and is dropped. This prevents long-tail noise from being promoted.
 
-**Edge weight, not node count, is the ranking signal.** A single external node referenced 100× is more relevant than 50 nodes referenced once each. Implementation: iterate `analysis.edges`, accumulate `edge.weight` per `(project, prefix-of-target)` pair, where target's `is_local = false` and target's prefix passes filters.
+**Edge weight, not node count, is the ranking signal.** A single external node referenced 100× is more relevant than 50 nodes referenced once each. Implementation: iterate `graph.links`, accumulate `link.weight` per `(project, prefix-of-target)` pair, where target node's `is_local = false` and target's prefix passes filters.
 
 ## Prefix extraction (language-aware)
 
@@ -143,7 +166,7 @@ Render md / toml / json, OR mutate graphify.toml (--apply)
 
 Implementation: pure function `extract_prefix(node_id: &str, lang: Language) -> Option<String>`. Returns `None` only if `node_id` is empty after trim — otherwise always emits at least the input itself (cases like `Some` in Rust just return `Some` as prefix).
 
-The language hint comes from the `language` field on each `Node` in `AnalysisSnapshot` — no heuristic guessing.
+The language hint comes from the `language` field on each `GraphNode` (Debug-formatted `Language` enum, e.g. `"Rust"`, `"Python"`, `"TypeScript"`, `"Php"`, `"Go"`) — no heuristic guessing. `extract_prefix` matches on this string verbatim.
 
 ## Output formats
 
@@ -272,9 +295,9 @@ Running `--apply` twice is a no-op on the second run: dedup-on-append ensures no
 
 | Case | Behavior |
 |---|---|
-| `analysis.json` missing for a project | Warn on stderr (`Project X has no analysis.json — run `graphify run` first`), skip project, continue |
-| All projects missing `analysis.json` | exit 1, message: `no analysis.json found for any project; run `graphify run` first` |
-| `analysis.json` exists but has empty `edges` array (e.g., from `diff --live` mode) | Warn on stderr, skip project (no edges to score) |
+| `graph.json` missing for a project | Warn on stderr (`Project X has no graph.json — run `graphify run` first`), skip project, continue |
+| All projects missing `graph.json` | exit 1, message: `no graph.json found for any project; run `graphify run` first` |
+| `graph.json` exists but has empty `links` array | Warn on stderr, skip project (no links to score) |
 | Single-project config | `settings_candidates` is always empty (auto-classify needs ≥2 projects); all suggestions land in `per_project_candidates` |
 | All candidates filtered out by threshold + shadowing | Render still emits a valid report with empty buckets and a one-line "no suggestions" note |
 | `--project <NAME>` with name not in config | exit 1, message: `project "<name>" not found in graphify.toml` |
@@ -306,7 +329,7 @@ Running `--apply` twice is a no-op on the second run: dedup-on-append ensures no
 
 Reuses pattern from existing `pr-summary` integration test:
 
-- Fixture: `crates/graphify-cli/tests/fixtures/suggest/` with a tiny `graphify.toml` referencing 2 mock project directories, each containing a hand-authored `analysis.json` with known external prefixes
+- Fixture: `crates/graphify-cli/tests/fixtures/suggest/` with a tiny `graphify.toml` referencing 2 mock project directories, each containing a hand-authored `graph.json` with known external prefixes
 - Assert: `graphify suggest stubs --config <fixture>/graphify.toml` exits 0, stdout contains expected prefix names, exits 0 even when `--min-edges 100` (just emits empty report)
 - Assert: `graphify suggest stubs --apply --config <fixture-copy>/graphify.toml` mutates the toml file, golden-compare result
 - Assert: second `--apply` invocation is a no-op (idempotent)
@@ -324,7 +347,7 @@ Expected on this repo: `already_covered_prefixes` includes the Rust prelude entr
 
 ### Non-tests (intentional)
 
-- No "fresh extract" path (Approach A consumes existing analysis.json — that path simply doesn't exist).
+- No "fresh extract" path (Approach A consumes existing graph.json — that path simply doesn't exist).
 - No regression test on absolute scoring numerics — counts are deterministic by construction (edge weights summed, no sampling).
 - No multi-language fixture in unit tests — language behavior is covered by `extract_prefix_per_language` table; integration test uses a single-language fixture for simplicity.
 
