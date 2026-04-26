@@ -1,43 +1,34 @@
-# Session Brief — 2026-04-24 close
+# Session Brief — 2026-04-26 close
 
 ## Last Session Summary
 
-Started from an empty GitHub and TaskNotes backlog after `v0.12.2`. Cleaned up TaskNotes sprint placement, implemented the new `graphify compare` CLI command, dogfooded it against real local Graphify outputs, documented it, and released `v0.13.0`.
+Confirmed the `~/ai/graphify` → `~/www/pg/apps/graphify` move is fully detached on the runtime + tooling side: working tree, installed binary (`v0.13.1`), shell rc files, cron, launchd, Claude/Codex configs, and `.code-workspace` files all reference the new path only. Cleaned residual `~/.claude/security_warnings_state_*.json` cache referencing the old path. Snapshotted `.claude/session-context-gf.json` as the post-migration baseline and applied `git update-index --skip-worktree` so the timestamped brief stops churning `git status`.
 
 ## Current State
 
-- Branch: `main`, in sync with `origin/main`
-- Latest release: `v0.13.0` published by GitHub Releases with 4 binary tarballs
-- Local installed binaries: `graphify 0.13.0`, `graphify-mcp 0.13.0`
-- TaskNotes: 64 total / 0 open / 0 in-progress / 64 done
-- GitHub: 0 open issues, 0 open PRs at close
+- Branch: `main`, in sync with `origin/main` (push completed at close: `3c94a2f..33f672e`)
+- Latest release: `v0.13.0` (binaries published) — `Cargo.toml` workspace at `0.13.1` (release commit `3c94a2f` exists; tag `v0.13.1` may or may not be pushed yet — confirm before next release)
+- Local installed binary: `graphify 0.13.1` at `~/.cargo/bin/graphify`
+- TaskNotes: 0 open / 0 in-progress per `tn list`
+- GitHub: backlog at last close was empty; not re-checked this session
 
 ## Commits This Session
 
-- `697adab` chore(tasks): keep sprint file outside task list
-- `c0996b6` feat(cli): compare graphify analysis outputs
-- `97df857` chore(release): v0.13.0
+- `33f672e` chore(session): snapshot v0.13.1 post-migration baseline
 
-## What Shipped
+## What Shipped (operational, not source)
 
-- `graphify compare <left> <right>` accepts either `analysis.json` files or directories containing `analysis.json`.
-- Compare reports write `compare-report.json` and `compare-report.md`, preserving `graphify diff` behavior and reusing `compute_diff_with_config`.
-- README now includes compare usage and branch/CI artifact recipes.
-- `CHANGELOG.md`, `Cargo.toml`, `Cargo.lock`, `AGENTS.md`, and `CLAUDE.md` are aligned to `0.13.0`.
-- TaskNotes sprint file moved from `docs/TaskNotes/Tasks/sprint.md` to `docs/TaskNotes/sprint.md`; `.tasknotes.toml` updated accordingly.
+- `.claude/session-context-gf.json` committed once as v0.13.1 baseline; `git update-index --skip-worktree` applied locally so subsequent regenerations don't surface in `git status`. **Reverse with:** `git update-index --no-skip-worktree .claude/session-context-gf.json`. Per-clone flag (not replicated).
+- 4× `~/.claude/security_warnings_state_*.json` files (referencing `/Users/cleitonparis/ai/graphify/...` for ci.yml, release.yml, and 2 docs) deleted. Re-prompt expected on first reopen of those files at the new path.
 
-## Verification
+## Decisions Made
 
-- `cargo fmt --all -- --check`
-- `cargo clippy --workspace -- -D warnings`
-- `cargo test --workspace`
-- `cargo build --release -p graphify-cli -p graphify-mcp`
-- Dogfood: `graphify compare report/graphify-core report/graphify-cli --left-label graphify-core --right-label graphify-cli --output /tmp/graphify-compare-dogfood`
-- Release verification: `gh release view v0.13.0`
+- **Chose Option 2** (commit + skip-worktree) over gitignore-only or commit+churn for `session-context-gf.json`. Rationale: preserves the v0.13.1 snapshot as auditable baseline in the index while suppressing per-session churn locally. Trade-off accepted: confusion risk if the operator forgets the flag (mitigated by reverse-command documented above and in this brief).
+- Did NOT clean `~/.claude/history.jsonl` — autocomplete cache only, will rotate naturally; touching it would break shell-history continuity.
 
 ## Architectural Health
 
-`graphify run` and `graphify check --config graphify.toml` passed at close.
+`graphify check --config graphify.toml` — all 5 projects PASS (no change vs. v0.13.0 close).
 
 - `graphify-core`: PASS, 0 cycles, max_hotspot 0.487 (`src.policy`)
 - `graphify-extract`: PASS, 0 cycles, max_hotspot 0.441 (`src.resolver`)
@@ -46,19 +37,12 @@ Started from an empty GitHub and TaskNotes backlog after `v0.12.2`. Cleaned up T
 - `graphify-mcp`: PASS, 0 cycles, max_hotspot 0.559 (`src.server`)
 - Policy violations: 0 across all projects
 
-## Decisions Made
-
-- Released as `0.13.0` because `graphify compare` is a new public CLI command.
-- Kept compare as a framing layer over the existing diff engine rather than adding a second comparison model.
-- Compare JSON wraps labels plus the existing diff report under `diff`, while Markdown uses label-aware table headers.
-- Moved sprint metadata out of the task list directory so TaskNotes no longer treats it as a task-like document.
-
 ## Open Items
 
-None. No TaskNotes tasks, GitHub issues, or PRs are open at close.
+- **CHORE (unfiled)** — User was authoring `tn new --type chore "Conclude migration to ~/www/pg/apps/graphify"` on iOS at session-close time. TL;DR body for the task (CHORE-002 trap-compliant, with checklist marking 9/10 items `[x]` and the sibling-coordination item left for human confirmation) is in the conversation transcript. Decide whether to create the task and immediately close it as a record, or skip because the audit already covers it.
 
 ## Suggested Next Steps
 
-1. Start the next session with `/session-start`; backlog is empty, so choose a new product territory.
-2. If continuing compare work, the most natural follow-up is PR artifact workflow polish around `graphify compare`.
-3. Deferred debt still worth considering: create the dispatcher heuristic retune CHORE from prior session notes if it matters before the observation gets stale.
+1. **Verify `v0.13.1` tag/release status** — `git tag --list 'v0.13.*'` and `gh release list --limit 5`. If `v0.13.1` is committed but never tagged/released, decide whether to tag + push or roll the next change into `v0.13.2`.
+2. **Optional:** file the migration CHORE in `tn` as done-record (or close the loop on iOS). Body draft is in the transcript.
+3. **Note for future me:** if `.claude/session-context-gf.json` mysteriously "doesn't change" after `graphify session brief`, suspect the `skip-worktree` flag set in this session — `git ls-files -v .claude/session-context-gf.json` shows `S` if active.
