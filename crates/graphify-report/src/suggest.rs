@@ -463,6 +463,10 @@ pub fn render_toml(report: &SuggestReport) -> String {
     out
 }
 
+pub fn render_json(report: &SuggestReport) -> serde_json::Value {
+    serde_json::to_value(report).expect("SuggestReport must serialize")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -942,5 +946,38 @@ mod tests {
         assert!(toml_out.contains("# [[project]]"));
         assert!(toml_out.contains("# name = \"proj-a\""));
         assert!(toml_out.contains("# external_stubs = [\"rmcp\"]"));
+    }
+
+    #[test]
+    fn render_json_round_trips() {
+        use graphify_extract::stubs::ExternalStubs;
+        let empty = ExternalStubs::default();
+
+        let g = GraphSnapshot {
+            nodes: vec![
+                make_node("a::main", "Rust", true),
+                make_node("tokio::spawn", "Rust", false),
+            ],
+            links: vec![make_link("a::main", "tokio::spawn", 4)],
+        };
+        let inputs = vec![ProjectInput {
+            name: "proj-a",
+            local_prefix: "a",
+            current_stubs: &empty,
+            graph: &g,
+        }];
+
+        let report = score_stubs(&inputs, 1);
+        let value = render_json(&report);
+        let s = serde_json::to_string(&value).unwrap();
+
+        // Top-level keys present
+        let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(parsed["min_edges"], 1);
+        assert!(parsed["per_project_candidates"]["proj-a"].is_array());
+        assert_eq!(
+            parsed["per_project_candidates"]["proj-a"][0]["prefix"],
+            "tokio"
+        );
     }
 }
