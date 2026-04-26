@@ -46,6 +46,18 @@ impl ExternalStubs {
     pub fn matches(&self, target: &str) -> bool {
         self.prefixes.iter().any(|p| prefix_matches(p, target))
     }
+
+    /// Returns the FIRST stub that matches `target`, or `None`. Because
+    /// `prefixes` is sorted longest-first by `new`, the first hit is also the
+    /// longest match — `tokio::runtime` wins over `tokio` for a target like
+    /// `tokio::runtime::Builder`. Used by callers that need to report WHICH
+    /// stub covered a target (BUG-021), not just whether one did.
+    pub fn matching_prefix(&self, target: &str) -> Option<&str> {
+        self.prefixes
+            .iter()
+            .find(|p| prefix_matches(p, target))
+            .map(String::as_str)
+    }
 }
 
 fn prefix_matches(prefix: &str, target: &str) -> bool {
@@ -216,5 +228,52 @@ mod tests {
         assert!(stubs.matches("drizzle-orm/pg-core"));
         assert!(stubs.matches("drizzle-orm.eq"));
         assert!(stubs.matches("std::path::Path"));
+    }
+
+    // -----------------------------------------------------------------------
+    // BUG-021: matching_prefix returns the actual stub that matched, not the
+    // top-level segment of the target.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bug_021_matching_prefix_returns_longest_match() {
+        // With both `tokio` and `tokio::runtime` registered, the longest match
+        // wins (matches `new`'s longest-first sort guarantee).
+        let stubs = ExternalStubs::new(["tokio", "tokio::runtime"]);
+        assert_eq!(
+            stubs.matching_prefix("tokio::runtime::Builder"),
+            Some("tokio::runtime"),
+            "longest matching prefix should win"
+        );
+        assert_eq!(
+            stubs.matching_prefix("tokio::spawn"),
+            Some("tokio"),
+            "shorter prefix is the only match for siblings outside the longer prefix"
+        );
+    }
+
+    #[test]
+    fn bug_021_matching_prefix_returns_only_what_actually_matched() {
+        // Regression guard for the BUG-021 misreporting: when ONLY
+        // `tokio::runtime` is registered, the stub does NOT cover all of
+        // `tokio` — only `tokio::runtime::*`. matching_prefix must reflect
+        // that asymmetry rather than returning a normalized top-segment.
+        let stubs = ExternalStubs::new(["tokio::runtime"]);
+        assert_eq!(
+            stubs.matching_prefix("tokio::runtime::Builder"),
+            Some("tokio::runtime")
+        );
+        assert_eq!(
+            stubs.matching_prefix("tokio::spawn"),
+            None,
+            "tokio::runtime stub must NOT claim to cover tokio::spawn"
+        );
+    }
+
+    #[test]
+    fn bug_021_matching_prefix_none_when_no_match() {
+        let stubs = ExternalStubs::new(["std"]);
+        assert_eq!(stubs.matching_prefix("tokio::spawn"), None);
+        assert_eq!(stubs.matching_prefix("standard"), None);
     }
 }

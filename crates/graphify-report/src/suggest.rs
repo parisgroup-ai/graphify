@@ -195,11 +195,12 @@ pub fn score_stubs(projects: &[ProjectInput<'_>], min_edges: u64) -> SuggestRepo
             if is_local {
                 continue;
             }
-            // Already covered?
-            if p.current_stubs.matches(&link.target) {
-                if let Some(prefix) = extract_prefix(&link.target, lang) {
-                    already_covered.insert(prefix);
-                }
+            // Already covered? Record the actual stub that matched (BUG-021),
+            // not `extract_prefix(target, lang)` — the latter would report
+            // `tokio` as covered when only `tokio::runtime` is registered,
+            // misrepresenting which slice of the namespace the stub guards.
+            if let Some(matched) = p.current_stubs.matching_prefix(&link.target) {
+                already_covered.insert(matched.to_string());
                 continue;
             }
             let Some(prefix) = extract_prefix(&link.target, lang) else {
@@ -714,6 +715,40 @@ mod tests {
         assert!(report.settings_candidates.is_empty());
         assert!(report.per_project_candidates.is_empty());
         assert_eq!(report.already_covered_prefixes, vec!["tokio".to_string()]);
+    }
+
+    #[test]
+    fn bug_021_already_covered_records_actual_stub_not_top_segment() {
+        // Regression guard: when a stub is `tokio::runtime` (a sub-namespace),
+        // it covers ONLY targets like `tokio::runtime::Builder`. The
+        // `already_covered_prefixes` list must reflect the actual stub
+        // ("tokio::runtime") rather than the top segment ("tokio") which
+        // would falsely imply the entire `tokio` namespace is guarded.
+        use graphify_core::ExternalStubs;
+        let stubs = ExternalStubs::new(["tokio::runtime"]);
+
+        let g = GraphSnapshot {
+            nodes: vec![
+                make_node("crate_a::main", "Rust", true),
+                make_node("tokio::runtime::Builder", "Rust", false),
+            ],
+            links: vec![make_link("crate_a::main", "tokio::runtime::Builder", 5)],
+        };
+        let inputs = vec![ProjectInput {
+            name: "proj-a",
+            local_prefix: "crate_a",
+            current_stubs: &stubs,
+            graph: &g,
+        }];
+
+        let report = score_stubs(&inputs, 1);
+        assert!(report.settings_candidates.is_empty());
+        assert!(report.per_project_candidates.is_empty());
+        assert_eq!(
+            report.already_covered_prefixes,
+            vec!["tokio::runtime".to_string()],
+            "covered list must report the matching stub itself, not the top namespace segment"
+        );
     }
 
     #[test]
