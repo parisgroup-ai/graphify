@@ -4,6 +4,14 @@ status: open
 priority: low
 scheduled: 2026-04-26
 pomodoros: 0
+timeSpent: 28
+timeEntries:
+- date: 2026-04-26
+  minutes: 28
+  note: source=<usage>,heuristic=150000,observed=105125,delta_pct=42.7
+  type: manual
+  executor: claude-solo
+  tokens: 105125
 projects:
 - '[[sprint.md|Current Sprint]]'
 tags:
