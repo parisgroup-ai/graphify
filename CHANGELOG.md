@@ -4,6 +4,8 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-04-27
+
 ### Deferred
 - FEAT-048 (cross-crate `pub use` workspace fan-out, gated) deferred — gate did not pass. Post-FEAT-046 dogfood evidence: `graphify suggest stubs` surfaces exactly 1 cross-crate `pub use` candidate (`src.Community` from graphify-report's `pub use graphify_core::community::Community;`, 4 edges). Task body's gate threshold is ≥5 across the workspace; observed count is below threshold. The other 6 residual candidates trace to distinct non-FEAT-048 fix shapes (`matches!` macro stripping, `std::env` bare reference, function-body `use_declaration` follow-up, intra-crate scoped enum constructors). Decision recorded in [`docs/adr/0002-cargo-workspace-reexport-graph-gate.md`](docs/adr/0002-cargo-workspace-reexport-graph-gate.md), including re-open criteria. No code change.
 
