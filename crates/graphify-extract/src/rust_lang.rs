@@ -66,6 +66,9 @@ impl LanguageExtractor for RustExtractor {
                 "type_item" => {
                     extract_type_item(&child, source, path, module_name, &mut result);
                 }
+                "static_item" | "const_item" => {
+                    extract_value_item(&child, source, path, module_name, &mut result);
+                }
                 "impl_item" => {
                     extract_impl_item(&child, source, path, module_name, &mut result);
                 }
@@ -679,6 +682,47 @@ fn extract_enum_item(
     result: &mut ExtractionResult,
 ) {
     extract_named_type(node, source, path, module_name, NodeKind::Enum, result);
+
+    // BUG-027: also emit Defines for each variant so bare `Selector::Group(...)`
+    // callsites that resolver case 8.6 (BUG-022) synthesizes as
+    // `{module}.{Enum}.{Variant}` find a hit in `known_modules`.
+    let enum_name = node
+        .child_by_field_name("name")
+        .and_then(|n| n.utf8_text(source).ok())
+        .unwrap_or("");
+    if enum_name.is_empty() {
+        return;
+    }
+    let body = match node.child_by_field_name("body") {
+        Some(b) => b,
+        None => return,
+    };
+    let mut cursor = body.walk();
+    for variant in body.children(&mut cursor) {
+        if variant.kind() != "enum_variant" {
+            continue;
+        }
+        let variant_name = variant
+            .child_by_field_name("name")
+            .and_then(|n| n.utf8_text(source).ok())
+            .unwrap_or("");
+        if variant_name.is_empty() {
+            continue;
+        }
+        let line = variant.start_position().row + 1;
+        let variant_id = format!("{}.{}.{}", module_name, enum_name, variant_name);
+        result.nodes.push(Node::symbol(
+            &variant_id,
+            NodeKind::Class,
+            path,
+            Language::Rust,
+            line,
+            true,
+        ));
+        result
+            .edges
+            .push((module_name.to_owned(), variant_id, Edge::defines(line)));
+    }
 }
 
 fn extract_trait_item(
@@ -707,6 +751,24 @@ fn extract_trait_item(
 // `TypeAlias` variant; adding one would cascade through every report writer
 // and match arm in the workspace.
 fn extract_type_item(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &Path,
+    module_name: &str,
+    result: &mut ExtractionResult,
+) {
+    extract_named_type(node, source, path, module_name, NodeKind::Class, result);
+}
+
+// BUG-027: `static FOO: T = …;` and `const FOO: T = …;` had no extractor handler,
+// so the canonical id never landed in `known_modules` via BUG-018's seeding pass.
+// Consumer references (e.g. `use crate::install::copy_plan::INTEGRATIONS;`) then
+// resolved to a non-local placeholder, surfacing in `graphify suggest stubs`.
+// Both grammar nodes carry a `name` field of `identifier` type, so the same
+// `extract_named_type` helper handles them — the body / RHS shape is irrelevant
+// for local-symbol registration. NodeKind::Class is reused for parity with
+// FEAT-049's `type_item` handler (same trade-off documented there).
+fn extract_value_item(
     node: &tree_sitter::Node,
     source: &[u8],
     path: &Path,
@@ -1327,8 +1389,9 @@ impl Config {
 "#,
         );
 
-        // 1 module + 1 struct + 1 enum + 1 trait + 1 function + 1 method = 6 nodes
-        assert_eq!(r.nodes.len(), 6);
+        // 1 module + 1 struct + 1 enum + 2 enum variants (BUG-027) + 1 trait
+        //   + 1 function + 1 method = 8 nodes
+        assert_eq!(r.nodes.len(), 8);
 
         let imports: Vec<_> = r
             .edges
@@ -1345,7 +1408,9 @@ impl Config {
             .iter()
             .filter(|e| e.2.kind == EdgeKind::Defines)
             .collect();
-        assert_eq!(defines.len(), 5); // Config, AppError, Handler, process, Config.new
+        // Config, AppError, AppError.NotFound, AppError.Internal, Handler,
+        // process, Config.new — BUG-027 added the 2 enum-variant Defines.
+        assert_eq!(defines.len(), 7);
 
         // `validate` is a bare call inside process()
         let calls: Vec<_> = r
@@ -1938,5 +2003,110 @@ impl G {
             .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "src.handler.Foo")
             .collect();
         assert_eq!(defines.len(), 1, "edges: {:?}", r.edges);
+    }
+
+    // ----- BUG-027: Defines emission for static_item, const_item, enum variants
+
+    #[test]
+    fn bug_027_pub_static_item_emits_defines_edge() {
+        // `pub static INTEGRATIONS: Dir<'_> = include_dir!(...);` is the
+        // dogfood case from graphify-cli. Without the extractor handler, the
+        // canonical id never lands in `known_modules` and consumer
+        // `use crate::install::copy_plan::INTEGRATIONS;` references resolve
+        // to a non-local placeholder, surfacing in `suggest stubs`.
+        let r = extract("pub static INTEGRATIONS: u32 = 1;\n");
+        let defines: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "src.handler.INTEGRATIONS")
+            .collect();
+        assert_eq!(
+            defines.len(),
+            1,
+            "expected one Defines edge to src.handler.INTEGRATIONS; edges: {:?}",
+            r.edges
+        );
+        let symbol = r
+            .nodes
+            .iter()
+            .find(|n| n.id == "src.handler.INTEGRATIONS")
+            .expect("static symbol node missing");
+        assert!(symbol.is_local);
+    }
+
+    #[test]
+    fn bug_027_private_static_item_also_emits_defines_edge() {
+        // Non-pub `static X = …;` must still register the local symbol —
+        // visibility never gates Defines emission for any other item kind.
+        let r = extract("static LOCAL_CACHE: u32 = 0;\n");
+        let symbol = r.nodes.iter().find(|n| n.id == "src.handler.LOCAL_CACHE");
+        assert!(
+            symbol.is_some(),
+            "private static must still register a Defines edge; nodes: {:?}",
+            r.nodes.iter().map(|n| &n.id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn bug_027_const_item_emits_defines_edge() {
+        // `const_item` shares the same fix shape as `static_item` — both have
+        // a `name` field of `identifier` type. Folded in for atomicity so the
+        // gap doesn't reappear later via a `pub const FOO …` callsite.
+        let r = extract("pub const MAX_RETRIES: u32 = 3;\n");
+        let defines: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "src.handler.MAX_RETRIES")
+            .collect();
+        assert_eq!(
+            defines.len(),
+            1,
+            "expected one Defines edge to src.handler.MAX_RETRIES; edges: {:?}",
+            r.edges
+        );
+    }
+
+    #[test]
+    fn bug_027_enum_variants_emit_defines_edges() {
+        // `enum Selector { Project(String), Group(String) }` is the dogfood
+        // case from graphify-core/policy.rs. The extractor today emits Defines
+        // only for the enum itself; bare `Selector::Group(...)` callsites
+        // synthesize `src.handler.Selector.Group` (resolver case 8.6) and miss
+        // `known_modules` because no Defines edge ever registered the variant.
+        let r = extract("enum Selector {\n    Project(String),\n    Group(String),\n}\n");
+        let variant_targets: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Defines)
+            .map(|(_, t, _)| t.as_str())
+            .filter(|t| t.starts_with("src.handler.Selector."))
+            .collect();
+        assert!(
+            variant_targets.contains(&"src.handler.Selector.Project"),
+            "missing Defines for Selector::Project; targets seen: {:?}",
+            variant_targets
+        );
+        assert!(
+            variant_targets.contains(&"src.handler.Selector.Group"),
+            "missing Defines for Selector::Group; targets seen: {:?}",
+            variant_targets
+        );
+    }
+
+    #[test]
+    fn bug_027_unit_enum_variants_also_emit_defines_edges() {
+        // Unit variants (no payload) follow the same shape — the variant
+        // `name` field is present regardless of whether the variant has tuple
+        // or struct fields.
+        let r = extract("pub enum Status {\n    Open,\n    Closed,\n}\n");
+        let variant_targets: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|(_, _, e)| e.kind == EdgeKind::Defines)
+            .map(|(_, t, _)| t.as_str())
+            .filter(|t| t.starts_with("src.handler.Status."))
+            .collect();
+        assert!(variant_targets.contains(&"src.handler.Status.Open"));
+        assert!(variant_targets.contains(&"src.handler.Status.Closed"));
     }
 }

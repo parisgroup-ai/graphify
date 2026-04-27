@@ -4,6 +4,9 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- fix(extract): Rust `static_item`, `const_item`, and enum variants now register as local symbols via `Defines` edges (BUG-027). Pre-fix, the top-level match in `extract_file` had no arms for `static_item` / `const_item`, and `extract_enum_item` only emitted `Defines` for the enum itself — never for its variants. Two concrete dogfood misclassifications: `pub static INTEGRATIONS` (graphify-cli/src/install/copy_plan.rs:8) consumed via `use crate::install::copy_plan::INTEGRATIONS;` resolved to a non-local placeholder because case 9 (`use_aliases`) qualified the bare callsite to `src.install.copy_plan.INTEGRATIONS` but the canonical id was missing from `known_modules`; and `Selector::Group(...)` / `Selector::Project(...)` callsites inside graphify-core/src/policy.rs synthesized `src.policy.Selector.Group` via case 8.6 (BUG-022) but missed `known_modules` because no `Defines` registered the variants. New top-level arms `static_item` / `const_item` delegate to a new `extract_value_item` helper (mirrors FEAT-049's `extract_type_item` shape — same `extract_named_type` reuse, same `NodeKind::Class` reuse to avoid cascading a new variant through every report writer). `extract_enum_item` extended to walk the `body` field's `enum_variant` children and emit one `Defines` edge per variant at `{module}.{Enum}.{Variant}`, covering both unit variants (`enum Status { Open, Closed }`) and tuple/struct variants (`enum Selector { Project(String), Group(String) }`). Self-dogfood: `graphify suggest stubs` candidate count 4 → 2 — `src.install.copy_plan.INTEGRATIONS`, `Selector::Project`, `Selector::Group` collapsed onto canonical local symbols, leaving only `env` (BUG-026, separate fix shape) and `src.Community` (FEAT-048 deferred gate signal). 5 new unit tests cover pub/private static, const, tuple-variant enum, unit-variant enum.
+
 ## [0.13.5] - 2026-04-27
 
 ### Fixed

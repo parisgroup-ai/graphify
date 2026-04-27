@@ -1,8 +1,9 @@
 ---
 uid: bug-027
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-27
+completed: 2026-04-27
 pomodoros: 0
 tags:
 - task
