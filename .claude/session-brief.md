@@ -1,66 +1,71 @@
-# Session Brief — 2026-04-27 (release wave: v0.13.4 + v0.13.5 / FEAT-049)
+# Session Brief — 2026-04-27 (suggest-stubs terminal-clean wave: BUG-026 + BUG-027 + v0.13.6)
 
 ## Last Session Summary
 
-Two back-to-back point releases plus one new feature. The session started where the previous /session-close left off — the FEAT-044 wave was committed but the `[Unreleased]` CHANGELOG block hadn't been promoted into a tag. Cut **`v0.13.4`** (FEAT-045/046/047 + FEAT-048 deferral ADR), then implemented and shipped **FEAT-049** (Rust `pub type` alias collapse via `Defines` edge), then cut **`v0.13.5`**. Key design pivot mid-task: FEAT-049's task body proposed a `ReExportEntry`-shape implementation; investigation surfaced that the dogfood case (`pub type Cycle = Vec<String>;`) has a generic RHS that doesn't fit canonical-collapse. Pivoted to a 10-LOC structural fix (Defines edge mirroring struct/enum/trait), which closed the AC cleanly. Net: 3 commits + 2 tags pushed, 2 tasks closed (FEAT-047 + FEAT-049), 1 still open (FEAT-048 deferred), `graphify suggest stubs` candidate count 7 → 6.
+Sessão de triagem `graphify suggest stubs` que terminou em estado terminal-clean. Começou com 6 candidatos no `suggest stubs` pós-FEAT-049, separou em 3 caixas (legitimate stubs, BUGs reais, gate-FEAT-048-deferred), implementou BUG-027 via TDD seguindo o precedente FEAT-049, descobriu que BUG-026 era na verdade outra forma do que o task body indicava (config-only, não extractor), e cortou release `v0.13.6` consolidando os dois fixes. Net: 4 commits + 1 tag pushed, 2 tasks fechadas (BUG-026 + BUG-027), backlog reduzido a 1 task (FEAT-048-deferred). `graphify suggest stubs` candidate count 6 → 1 — esse 1 restante é literalmente o sinal de gate do FEAT-048 (`src.Community`, threshold 1/5).
 
 ## Current State
 
-- Branch: `main`, in sync with `origin/main` (push happened mid-session for both releases)
-- Working tree: clean (after this session-close commit)
-- Latest release: **`v0.13.5`** — tag `d033cb0`, on `~/.cargo/bin/graphify` PATH binary
-- TaskNotes: 78 total, **1 open** (FEAT-048, deferred via ADR 0002), 77 done
-- `graphify suggest stubs` candidate count: **6** (was 7 at session start, FEAT-049 closed `src.Cycle`)
-- `graphify check`: PASS on all 5 projects, 0 cycles, max hotspot 0.478 (`src.policy` in graphify-core, well under threshold)
+- Branch: `main`, em sync com `origin/main` (push automático após cada commit + tag push do release)
+- Working tree: clean
+- Latest release: **`v0.13.6`** — tag `f830b07`, on `~/.cargo/bin/graphify` PATH binary (`graphify --version` → 0.13.6)
+- TaskNotes: **80 total**, **1 open** (FEAT-048, deferred via ADR-0002), 79 done
+- `graphify suggest stubs` candidate count: **1** (terminal-clean — só `src.Community`/FEAT-048 gate)
+- `graphify check`: PASS on all 5 projects, 0 cycles, max hotspot `src.server` @ 0.6 (graphify-mcp, well under 0.85 threshold)
+- 881 workspace tests pass (+5 from BUG-027)
 
 ## Commits This Session
 
-`838e806..d033cb0` (3 commits, all pushed):
+`3fcc371..f830b07` (4 commits, all pushed):
 
-- `94370be` chore(release): bump version to 0.13.4 — promotes the FEAT-044-wave `[Unreleased]` block to `[0.13.4] - 2026-04-27`. Tag `v0.13.4` pinned at this SHA.
-- `784c6d9` feat(extract): rust pub type alias collapse via Defines edge (FEAT-049) — `crates/graphify-extract/src/rust_lang.rs` gains a `type_item` arm + `extract_type_item` helper reusing `extract_named_type`. 3 new unit tests; 876 workspace tests pass (+3).
-- `d033cb0` chore(release): bump version to 0.13.5 — promotes the FEAT-049 `[Unreleased]` block to `[0.13.5] - 2026-04-27`. Tag `v0.13.5` pinned at this SHA.
-
-(Plus the close commit landing now with FEAT-047 status flip + CLAUDE.md FEAT-049 learning + this brief.)
+- `afdd468` chore(stubs): add `matches`/`toml_edit` + open BUG-026/027 from suggest-stubs triage — config + 2 new task files. `[settings].external_stubs` += `matches` (Rust stdlib macro, 5 edges), `[[project]] graphify-cli` += `toml_edit` (Cargo dep introduced by FEAT-043, 13 edges). Triaged 6 → 4 leaving 4 candidates that became BUG-026, BUG-027 (3 of them) + `src.Community` gate.
+- `8549367` fix(extract): emit Defines for Rust `static_item`, `const_item`, enum variants (BUG-027) — top-level arms `static_item | const_item` delegate to new `extract_value_item` helper. `extract_enum_item` extended to walk `enum_variant` children and emit one Defines per variant at `{module}.{Enum}.{Variant}`. 5 new unit tests; existing `full_rust_file` fixture bumped 6→8 nodes / 5→7 Defines.
+- `b573876` chore(stubs): add `env` to external_stubs (BUG-026, hypothesis revised) — investigation revealed the original task body's hypothesis was wrong. The 3 `std::env::*` callsites were ALREADY correctly classified as `ExpectedExternal` via the existing `std` stub. The actual 2 ambiguous edges traced to `env!("CARGO_PKG_VERSION")` macro callsites at `main.rs:5333` and `session.rs:224`. `env!` is a Rust stdlib macro that FEAT-031's `!`-strip converts to bare `env`, same shape as `format!`/`println!`/`matches!` already in stubs. Config-only fix.
+- `f830b07` chore(release): bump version to 0.13.6 — promotes the BUG-026 + BUG-027 `[Unreleased]` block to `[0.13.6] - 2026-04-27`. Tag `v0.13.6` pinned at this SHA.
 
 ## Decisions Made (don't re-debate)
 
-- **FEAT-049 went Option B (Defines edge), NOT Option 1 (ReExportEntry) as the task body proposed.** Investigation showed the dogfood case (`pub type Cycle = Vec<String>;`) has a `generic_type` RHS that doesn't fit canonical-collapse. The structural fix mirrors how struct/enum/trait already register themselves as local symbols — ~10 LOC + 70 LOC of tests vs an Option 1 implementation that would need RHS path-extraction across `generic_type`, `scoped_type_identifier`, `reference_type`, `tuple_type`. RHS canonical-collapse remains a future option if a path-only `pub type X = mod::Bar;` case becomes user-visible (FEAT-046's plumbing is reusable). CLAUDE.md updated at the FEAT-049 bullet (formerly a forward-looking note recommending Option 1).
-- **NodeKind::Class reused for type aliases** instead of adding a `TypeAlias` variant. Adding a new variant would cascade through every report writer, match arm, and test fixture in the workspace — out of scope for FEAT-049. Documented inline in `extract_type_item`.
-- **Two separate releases (`v0.13.4` and `v0.13.5`) instead of bundling FEAT-049 into v0.13.4.** v0.13.4 was already buildable and tagged at session start; rolling FEAT-049 into it would have meant retroactively retagging. Cleaner history with one feat per minor patch.
-- **FEAT-047 closed via `tn done` despite `outcome: partial` from the dispatcher.** Code (commit `0c8a1c4`) has been complete since the previous session; the `partial` came from AC#4 of the FEAT-044 design doc misattributing a cross-crate dogfood drop that's genuinely FEAT-048 territory. Recorded in this brief and the previous session's brief; no code change.
-- **Skills sync of `session-close`** — the `/session-close` skill itself has unsynced local edits per the cache check. Surfaced to the user; not auto-shared (publishing requires explicit `/share-skill session-close`).
+- **BUG-027 bundled `static_item` + `const_item` + enum variants** instead of filing them separately. The task body explicitly said "if `const_item` exposes the same gap, fold in — same fix shape." All three trace to the same root: extractor emits `Defines` for fn/struct/enum/trait/type items but not for value items or enum sub-symbols. Atomic fix prevents "someone adds a const and re-opens the symptom" regression. Documented inline at `extract_value_item`.
+- **NodeKind::Class reused for static, const, enum variants** instead of adding a `TypeAlias`/`Variant` variant. Same precedent as FEAT-049 — adding new variants would cascade through every report writer + match arm. Inline comment at `extract_value_item` references FEAT-049 for the trade-off.
+- **BUG-026 hypothesis was wrong — config-only fix, not extractor change.** The task body claimed `std::env::*` callsites were losing their `std::` prefix. `jq` on `report/graphify-cli/graph.json` proved otherwise: those 3 callsites were correctly `ExpectedExternal`. The actual ambiguous edges were `env!("CARGO_PKG_VERSION")` macros — `env!` is a stdlib macro like `matches!`, `format!`, `println!` already in stubs. Lesson preserved in BUG-026 task body + CLAUDE.md ("`jq` the graph before patching the extractor"). Adding `env` to `[settings].external_stubs` follows the legitimate-Rust-macro template, not the "silence the symptom" anti-pattern.
+- **Two consecutive sessions (FEAT-044 wave + this one) both triaged `graphify suggest stubs` candidates and shipped releases.** This isn't a coincidence — `suggest stubs` is now an active feedback loop driving extractor improvements. Pattern: dogfood reveals candidates → triage into legit-stub vs real-bug vs gate-signal → fix root causes (not stubs) for the bugs → re-run dogfood → terminal-clean state when only gate signals remain. The "1 candidate" terminal state means the next dogfood drift will be a genuine new pattern (or FEAT-048 hitting threshold), not noise.
+- **Skills Sync `session-close` modification persists from a prior session** — not new this session. Operator deferred `/share-skill session-close` previously; check still surfaces it.
 
-## Architectural Health
+## Architectural Health (Graphify)
 
 `graphify check --config graphify.toml` — all 5 projects PASS:
 
-- 0 cycles introduced (any project), no hotspot >0.85
-- Max hotspot: `src.policy` @ 0.478 in graphify-core (unchanged baseline)
-- `src.resolver` (graphify-extract) at 0.435 — slight delta from FEAT-049's new `extract_type_item` helper but well under threshold
-- Workspace tests: **876 pass, 0 fail** (was 873 → +3 from FEAT-049's 3 new unit tests)
-- `graphify suggest stubs` candidate count: **6** (was 7 → -1 from `src.Cycle` collapsing into canonical local symbol)
+- 0 cycles introduced (any project), 0 policy violations
+- Max hotspot: `src.server` @ 0.600 in graphify-mcp (mixed type, MCP server is naturally fan-out heavy)
+- `src.install` (graphify-cli) jumped to max 0.453 (up from `src.policy` @ 0.478 last session) — explained by BUG-027 correctly localizing the `INTEGRATIONS` static and increasing in-degree to install module. This is desirable: more accurate graph topology now.
+- All hotspots well under 0.85 CI threshold.
 
-## Open Items (1 follow-up)
+## Skills Sync
 
-- **FEAT-048** (low, status=open): cross-crate `pub use` workspace fan-out, deferred via ADR 0002. Gate threshold: ≥5 cross-crate misclassifications in `graphify suggest stubs`. Workspace currently at 1 (`src.Community` from graphify-report's `pub use graphify_core::community::Community;`). **Re-open trigger**: workspace count crosses threshold OR a single high-edge cross-crate hit (~50+ edges) becomes user-visible. Subtasks 1+2 ticked, 3-7 deliberately open.
+- **Modified (unsynced): 1** — `session-close` (carried over from prior session, not edited this session). Operator can `/share-skill session-close` when ready.
+- **Local-only: 17** — project-specific or work-in-progress skills that don't need upstream publication. Drop `.skills-sync-ignore` per skill if the unshared count is noisy.
+
+## Open Items
+
+Only **FEAT-048** (deferred via ADR-0002) — gate at 1/5 threshold. **Re-open trigger**: any consumer project hitting ≥5 cross-crate `pub use` candidates, OR a single high-edge cross-crate hit (~50+ edges). Today the workspace shows exactly 1 hit (`src.Community` from `pub use graphify_core::community::Community;` in graphify-report). Watch this number drift over time.
+
+Backlog at terminal state — there's no obvious "next BUG to fix" candidate. The next productive session likely starts from one of:
+
+1. New user-visible bug surfaces in graphify usage (e.g., consumer project finds a misclassification)
+2. `graphify suggest stubs` count drifts up (new pattern, possibly indicating FEAT-048 worth re-opening)
+3. New feature work — none scheduled, would start from a brainstorm
 
 ## Suggested Next Steps
 
-1. **Verify the `v0.13.4` and `v0.13.5` GitHub Actions release builds completed cleanly.** Both tags pushed in this session; release.yml builds 4 targets (macOS Intel/ARM, Linux x86/ARM) and uploads artifacts. `gh run list --workflow=release.yml --limit 5` to check status. If a build failed, retag would mean a v0.13.6 chore-only bump.
-2. **Consider whether `/share-skill session-close` is appropriate** before next session. Local edits to `~/.claude/skills/session-close/` are unsynced per the audit — the changes likely came from another project's session and may or may not be ready for publication. User decision.
-3. **Watch for cross-crate `pub use` accumulation** — FEAT-048 stays gated until the workspace shows ≥5 misclassifications. If the workspace grows new crates or new shared types lift through `pub use`, the count may cross the gate naturally and FEAT-048 becomes ready to ship.
+1. **Verify CI release workflow built v0.13.6 binaries successfully** — `gh run list --workflow=release.yml --limit 1` or check Releases page. Tag was pushed at `f830b07`. Quick safety check after both v0.13.5 and v0.13.6 went out same day.
+2. **Brainstorm next-cycle work** if/when there's appetite — the explicit "no obvious next" state is unusual for this repo and worth using deliberately rather than reactively.
+3. **Optional `/share-skill session-close`** — closes the carried-over Skills Sync flag if the user wants a clean signal next session.
 
-## Frozen Modules / Hot Spots
+## Self-dogfood metric trail
 
-- `src.server` (graphify-mcp, 0.60) — duplicated CLI logic, known debt per CLAUDE.md
-- `src.policy` (graphify-core, 0.478) — unchanged this session, top hotspot of the dogfood
-- `src.resolver` (graphify-extract, 0.435) — slight delta from FEAT-049 (now hosts the cross-paths between `extract_type_item` and the existing handlers)
-- `src.pr_summary` (graphify-report, 0.444) — unchanged
-
-## Notes for Future Reader
-
-- **Two patches in one calendar day** is unusual for this project — both happened because v0.13.4 had been queued for ~24h waiting on a session to cut the tag, and v0.13.5 was a tight follow-up that fit the same close window. CHANGELOG entries are intentionally separate (one block per release) so the dual-release pattern doesn't bleed into a single commit message.
-- **The `tn done` flow does not accept `--note`** in tasknotes-cli 0.5.x — the rationale for closing FEAT-047 lives in the previous session's brief + the `timeEntry.note` field on the FEAT-047 frontmatter. If a tn-side fix lands that adds `--note`, the workflow could record close-time rationale inline.
-- **The Skills Sync audit caught `session-close` itself** as locally modified. Same pattern as CHORE-1284/1297 in cursos — the audit exists precisely to prevent "edited the close skill, never published" silent skips. Decision pending on whether to share.
-- Cumulative subagent tokens this session: 0 (no subagent dispatches — all main-thread work). Session was structurally simple: read code, edit ~10 LOC, write tests, run gates, tag, push, repeat for the second release.
+| Session marker | `suggest stubs` count | Notes |
+|---|---|---|
+| End of FEAT-044 wave (prev session) | 7 | FEAT-049 closed `src.Cycle` (1 candidate) |
+| Start of this session | 6 | matches+toml_edit added |
+| After BUG-027 | 2 | INTEGRATIONS, Selector::Project, Selector::Group collapsed |
+| After BUG-026 | **1** | `env` macro stub added; only `src.Community`/FEAT-048-gate remains |
