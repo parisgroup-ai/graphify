@@ -36,8 +36,8 @@ In the graphify workspace, intra-crate `pub use` outnumbers cross-crate ~25:1. T
 
 ## Subtasks
 
-- [ ] Decision checkpoint: run `graphify suggest stubs` post-FEAT-046 and count remaining cross-crate misclassifications. Schedule this task only if the count is meaningful (say, ≥5 across the workspace).
-- [ ] Write ADR documenting the gate (`[settings] cargo_workspace_reexport_graph = true`) — template: `docs/adr/0001-workspace-reexport-graph-gate.md`
+- [x] Decision checkpoint: run `graphify suggest stubs` post-FEAT-046 and count remaining cross-crate misclassifications. Schedule this task only if the count is meaningful (say, ≥5 across the workspace).
+- [x] Write ADR documenting the gate (`[settings] cargo_workspace_reexport_graph = true`) — template: `docs/adr/0001-workspace-reexport-graph-gate.md`
 - [ ] Build `CargoWorkspaceReExportGraph` data structure in graphify-extract
 - [ ] Build Cargo-dependency-aware alias resolver
 - [ ] Pipeline integration in graphify-cli (mirror FEAT-028's two-phase split: `build_project_reexport_context` + `run_extract_with_workspace`)
