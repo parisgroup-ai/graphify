@@ -2953,6 +2953,42 @@ fn run_extract_with_workspace(
         }
     }
 
+    // FEAT-047: Rust consumer-side `use_aliases` canonicalization.
+    //
+    // FEAT-046 above produced `barrel_to_canonical` and rewrote raw-edge
+    // src/target strings whose values matched a barrel id. The post-resolve
+    // edge rewrite at line ~2992 below also catches resolved targets that
+    // land on a barrel (exact and prefix shapes). Together these cover every
+    // edge whose resolution path is exercised in the FEAT-046 fixture.
+    //
+    // What's still wrong without this step: when a consumer file does
+    // `use crate::Bar;` (FEAT-031 registers `("Bar", "crate::Bar")` under the
+    // file's module key), the alias VALUE still references the barrel-shaped
+    // path. Case 9 of `resolve_with_depth` (the bare/scoped fallback used by
+    // call sites like `Bar::new()`) consults that map and recurses with the
+    // raw value. Today that recursion still resolves correctly — case 6
+    // strips `crate::`, lands at `src.Bar`, and the post-resolve rewrite
+    // below repoints to `src.foo.Bar` — but we shorten the path AND remove
+    // the dependency on the post-resolve rewrite by canonicalizing the alias
+    // value here. Defensive against any future resolver path that consumes
+    // `use_aliases` without flowing through the post-resolve rewrite.
+    //
+    // Must run AFTER `barrel_to_canonical` is built (we just did) AND AFTER
+    // BUG-018's Defines registration (just above) so the resolver can fully
+    // canonicalize the alias's current value before deciding whether it
+    // matches a barrel id. Must run BEFORE the main edge-resolution loop
+    // below so case 9 reads the rewritten alias map.
+    //
+    // See `ModuleResolver::rewrite_use_alias_targets` for the per-file scope
+    // limitation (BUG-025 trade-off).
+    if !barrel_to_canonical.is_empty() {
+        let package_modules_owned: HashSet<String> =
+            package_modules.iter().map(|s| (*s).to_owned()).collect();
+        resolver.rewrite_use_alias_targets(&barrel_to_canonical, |from_module| {
+            package_modules_owned.contains(from_module)
+        });
+    }
+
     // Build graph: add all nodes first.
     let mut graph = CodeGraph::new();
 

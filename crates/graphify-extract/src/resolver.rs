@@ -55,6 +55,30 @@ fn full_starts_with_root(full: &str, root: &str) -> bool {
     }
 }
 
+/// FEAT-047 helper: convert a canonical dot-notation module id back into the
+/// `crate::…` Rust path shape, suitable for substitution into a `use_aliases`
+/// value. The local prefix (e.g. `src`) is stripped before re-rooting under
+/// `crate::`. Empty / no-prefix inputs return `crate::{canonical_id}`
+/// unchanged. Used by [`ModuleResolver::rewrite_use_alias_targets`] to keep
+/// the alias value in raw Rust syntax so case 9's scoped-form recursion still
+/// works (substituting the bare dot id would produce hybrid `src.foo.Bar::new`
+/// targets that no resolver branch handles).
+fn canonical_to_crate_path(canonical_id: &str, local_prefix: &str) -> String {
+    let stripped = if local_prefix.is_empty() {
+        canonical_id
+    } else if canonical_id == local_prefix {
+        ""
+    } else {
+        canonical_id
+            .strip_prefix(&format!("{}.", local_prefix))
+            .unwrap_or(canonical_id)
+    };
+    if stripped.is_empty() {
+        return "crate".to_owned();
+    }
+    format!("crate::{}", stripped.replace('.', "::"))
+}
+
 #[derive(Clone, Debug)]
 struct TsAliasContext {
     alias_pattern: String,
@@ -176,6 +200,82 @@ impl ModuleResolver {
             .or_default();
         for (short, full) in aliases {
             slot.entry(short.clone()).or_insert_with(|| full.clone());
+        }
+    }
+
+    /// FEAT-047: rewrite `use_aliases_by_module` values that resolve to a
+    /// barrel id so case 9 (the bare/scoped fallback in `resolve_with_depth`)
+    /// recurses with a shape that lands directly on the canonical declaration
+    /// instead of routing through the barrel and relying on a downstream
+    /// post-resolve rewrite to fix the target.
+    ///
+    /// `barrel_to_canonical` is the same map FEAT-046 builds in
+    /// `run_extract_with_workspace` (dot-notation barrel id → canonical id).
+    /// `is_package` is the per-module package flag the call site already
+    /// computes for `package_modules`.
+    ///
+    /// For each alias entry `(short, full_raw)`, the current `full_raw` is
+    /// resolved via `self.resolve(...)`. If the result is an exact match in
+    /// `barrel_to_canonical`, the alias value is rewritten to a Rust path
+    /// shape (`crate::foo::Bar`) reconstructed from the canonical dot-notation
+    /// id, so case 9's recursion flows through case 6 (`crate::` strip) and
+    /// hits a real registered module at confidence 1.0. Substituting the raw
+    /// dot-notation id directly would break case 9's scoped-form recursion —
+    /// `Bar::new` plus alias `Bar → src.foo.Bar` would yield the hybrid
+    /// `src.foo.Bar::new`, which no resolver branch knows how to handle.
+    ///
+    /// **Per-file scope limitation (BUG-025 trade-off, documented in CLAUDE.md
+    /// and FEAT-044 design):** `use_aliases_by_module` is keyed by
+    /// `from_module`, not by per-function scope. A file with both
+    /// `use crate::Bar;` (re-export consumer, this rewrite hits it) and
+    /// `use other::Bar;` (shadowing import, untouched) would land both under
+    /// the same short name — the first registration wins, the second is
+    /// silently lost. This is the same trade-off FEAT-031 already made;
+    /// FEAT-047 inherits it. A genuine per-scope alias map is a v2 refactor
+    /// gated on dogfood evidence.
+    pub fn rewrite_use_alias_targets<F>(
+        &mut self,
+        barrel_to_canonical: &HashMap<String, String>,
+        is_package: F,
+    ) where
+        F: Fn(&str) -> bool,
+    {
+        if barrel_to_canonical.is_empty() || self.use_aliases_by_module.is_empty() {
+            return;
+        }
+
+        let prefix = self.local_prefix.clone();
+        let from_modules: Vec<String> = self.use_aliases_by_module.keys().cloned().collect();
+
+        for from_module in from_modules {
+            let pkg = is_package(&from_module);
+            let entries: Vec<(String, String)> = match self.use_aliases_by_module.get(&from_module)
+            {
+                Some(slot) => slot.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+                None => continue,
+            };
+
+            for (short, full_raw) in entries {
+                let (resolved, _is_local, _conf) = self.resolve(&full_raw, &from_module, pkg);
+                let canonical = match barrel_to_canonical.get(&resolved) {
+                    Some(c) => c.clone(),
+                    None => continue,
+                };
+                if canonical == resolved {
+                    continue;
+                }
+
+                let new_value = canonical_to_crate_path(&canonical, &prefix);
+                if new_value == full_raw {
+                    continue;
+                }
+
+                if let Some(slot) = self.use_aliases_by_module.get_mut(&from_module) {
+                    if let Some(v) = slot.get_mut(&short) {
+                        *v = new_value;
+                    }
+                }
+            }
         }
     }
 
@@ -2566,6 +2666,111 @@ mod tests {
             "no synthesized match → raw input preserved for downstream stub matching"
         );
         assert!(!is_local);
+    }
+
+    // FEAT-047: rewrite_use_alias_targets canonicalizes alias values that
+    // resolve to a barrel id, so case 9's recursion lands directly on the
+    // canonical declaration through case 6 (`crate::` strip) rather than
+    // routing through a barrel that the post-resolve rewrite has to fix.
+
+    #[test]
+    fn feat_047_alias_value_rewritten_when_resolves_to_barrel() {
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        // Registered modules: canonical declaration site only; the barrel id
+        // is intentionally NOT a known module — that's what makes it a
+        // "barrel" vs a real local symbol.
+        resolver.register_module("src.foo");
+        resolver.register_module("src.foo.Bar");
+        resolver.register_module("src.foo.Bar.new");
+        resolver.register_module("src.consumer");
+
+        let mut aliases = HashMap::new();
+        aliases.insert("Bar".to_owned(), "crate::Bar".to_owned());
+        resolver.register_use_aliases("src.consumer", &aliases);
+
+        // Build a barrel_to_canonical map mirroring FEAT-046's output.
+        let mut barrel_to_canonical = HashMap::new();
+        barrel_to_canonical.insert("src.Bar".to_owned(), "src.foo.Bar".to_owned());
+
+        // Pre-rewrite: case 9 on `Bar::new` rewrites root through alias to
+        // `crate::Bar::new`, recurses, case 6 strips → `src.Bar.new`. That id
+        // isn't a known module (the barrel form has no Defines), so the
+        // resolver returns it as non-local — without the post-resolve rewrite
+        // (FEAT-046's edge-loop step), the call would land at the barrel.
+        let (pre, pre_local, _) = resolver.resolve("Bar::new", "src.consumer", false);
+        assert_eq!(
+            pre, "src.Bar.new",
+            "pre-rewrite should still resolve through case 6 to the barrel id"
+        );
+        assert!(!pre_local, "barrel id is not registered as known");
+
+        // Apply FEAT-047 rewrite.
+        resolver.rewrite_use_alias_targets(&barrel_to_canonical, |_| false);
+
+        // Post-rewrite: alias value is now `crate::foo::Bar`. Case 9 rewrites
+        // root → `crate::foo::Bar::new`, recurses, case 6 strips and applies
+        // the local prefix → `src.foo.Bar.new`, which IS a known module.
+        let (post, post_local, _) = resolver.resolve("Bar::new", "src.consumer", false);
+        assert_eq!(
+            post, "src.foo.Bar.new",
+            "post-rewrite alias should resolve directly to the canonical symbol"
+        );
+        assert!(
+            post_local,
+            "post-rewrite target is a registered local module"
+        );
+    }
+
+    #[test]
+    fn feat_047_alias_value_left_alone_when_not_a_barrel() {
+        // Aliases whose resolved target isn't in `barrel_to_canonical` must
+        // be untouched — the rewrite is opt-in based on FEAT-046's map.
+        let mut resolver = ModuleResolver::new(Path::new("/repo"));
+        resolver.set_local_prefix("src");
+        resolver.register_module("src.types");
+        resolver.register_module("src.types.Node");
+
+        let mut aliases = HashMap::new();
+        aliases.insert("Node".to_owned(), "crate::types::Node".to_owned());
+        resolver.register_use_aliases("src.graph", &aliases);
+
+        // barrel_to_canonical is empty for this case — no Rust re-exports.
+        let mut barrel_to_canonical = HashMap::new();
+        // Add an UNRELATED entry so the early-return on empty map isn't what
+        // saves us — this exercises the per-alias resolve+lookup path.
+        barrel_to_canonical.insert("src.OtherBarrel".to_owned(), "src.real".to_owned());
+
+        resolver.rewrite_use_alias_targets(&barrel_to_canonical, |_| false);
+
+        // Case 9 still walks `crate::types::Node::field` → `src.types.Node.field`.
+        let (resolved, _, _) = resolver.resolve("Node::field", "src.graph", false);
+        assert_eq!(
+            resolved, "src.types.Node.field",
+            "non-barrel aliases must be left intact"
+        );
+    }
+
+    #[test]
+    fn feat_047_canonical_to_crate_path_shapes() {
+        // Standard prefix strip + dot→:: rewrite.
+        assert_eq!(
+            super::canonical_to_crate_path("src.foo.Bar", "src"),
+            "crate::foo::Bar"
+        );
+        // Empty local prefix: keep the id as-is under `crate::`.
+        assert_eq!(
+            super::canonical_to_crate_path("foo.Bar", ""),
+            "crate::foo::Bar"
+        );
+        // Canonical id equals the prefix exactly: collapse to bare `crate`.
+        assert_eq!(super::canonical_to_crate_path("src", "src"), "crate");
+        // Prefix not present (defensive — shouldn't happen from FEAT-046's
+        // map, but the helper is total).
+        assert_eq!(
+            super::canonical_to_crate_path("other.Bar", "src"),
+            "crate::other::Bar"
+        );
     }
 
     #[test]

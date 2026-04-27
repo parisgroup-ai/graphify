@@ -32,10 +32,10 @@ This means a consumer file with `use crate::Bar;` followed by `Bar::new()` will:
 
 ## Subtasks
 
-- [ ] After FEAT-046's `barrel_to_canonical` is built, iterate `use_aliases_by_module` and rewrite each entry whose target matches a `barrel_to_canonical` key
-- [ ] Verify the rewrite happens BEFORE the resolver pass that consumes `use_aliases` (case 9 fallback in `resolve_with_depth`)
-- [ ] Integration test: extends FEAT-046's fixture; asserts the Imports edge from `consumer.rs` (the `use crate::Bar;` itself, not the call) targets `src.foo.Bar`
-- [ ] Verify `graphify suggest stubs` no longer surfaces `src.Community` for graphify-report (the dogfood acceptance criterion from the design doc, conditional on FEAT-045+046+047 all landing)
+- [x] After FEAT-046's `barrel_to_canonical` is built, iterate `use_aliases_by_module` and rewrite each entry whose target matches a `barrel_to_canonical` key
+- [x] Verify the rewrite happens BEFORE the resolver pass that consumes `use_aliases` (case 9 fallback in `resolve_with_depth`)
+- [x] Integration test: extends FEAT-046's fixture; asserts the Imports edge from `consumer.rs` (the `use crate::Bar;` itself, not the call) targets `src.foo.Bar`
+- [x] Verify `graphify suggest stubs` no longer surfaces `src.Community` for graphify-report (the dogfood acceptance criterion from the design doc, conditional on FEAT-045+046+047 all landing)
 
 ## Open risks
 
