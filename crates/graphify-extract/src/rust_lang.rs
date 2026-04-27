@@ -1,4 +1,4 @@
-use crate::lang::{ExtractionResult, LanguageExtractor};
+use crate::lang::{ExtractionResult, LanguageExtractor, ReExportEntry, ReExportSpec};
 use graphify_core::types::{Edge, Language, Node, NodeKind};
 use std::collections::HashSet;
 use std::path::Path;
@@ -97,7 +97,37 @@ fn extract_use_declaration(
     if let Some(arg) = node.child_by_field_name("argument") {
         let line = node.start_position().row + 1;
         collect_use_paths(&arg, source, module_name, line, result);
+
+        // FEAT-045: when the use_declaration is `pub use …` (or a restricted
+        // pub variant like `pub(crate) use …`), additionally emit one or more
+        // `ReExportEntry` records so the project-wide re-export graph can
+        // walk the canonical declaration. The existing `collect_use_paths`
+        // call above is left in place: it still produces the Imports edge
+        // and `use_aliases` entry that the rest of the pipeline depends on,
+        // exactly as for non-pub `use`. Re-exports are an additive signal,
+        // not a replacement.
+        if has_pub_visibility(node, source) {
+            collect_pub_use_reexports(&arg, source, module_name, line, result);
+        }
     }
+}
+
+/// Returns `true` when the `use_declaration` node carries a visibility
+/// modifier whose leading token is `pub` — i.e. the use re-exports its
+/// items. Covers `pub use`, `pub(crate) use`, `pub(super) use`, etc.
+///
+/// The `visibility_modifier` is the FIRST named child of `use_declaration`
+/// when present (sibling to the `use` keyword token, not wrapping the
+/// declaration itself). Verified against tree-sitter-rust grammar.
+fn has_pub_visibility(node: &tree_sitter::Node, source: &[u8]) -> bool {
+    let mut c = node.walk();
+    for child in node.children(&mut c) {
+        if child.kind() == "visibility_modifier" {
+            let text = child.utf8_text(source).unwrap_or("");
+            return text.starts_with("pub");
+        }
+    }
+    false
 }
 
 /// Recursively collect import paths from use declaration arguments.
@@ -260,6 +290,259 @@ fn process_scoped_use_list(
             _ => {}
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// FEAT-045: pub use → ReExportEntry emission
+// ---------------------------------------------------------------------------
+
+/// Walk the `argument` of a `pub use …` declaration and append one
+/// `ReExportEntry` per distinct `raw_target` (the path prefix shared by a
+/// group of re-exported leaves). Invoked only when [`has_pub_visibility`]
+/// returned `true`.
+///
+/// Mapping rules (per FEAT-045 AC):
+/// - `pub use foo::bar::Baz;`        → `raw_target = "foo::bar"`, one spec `{Baz, Baz}`
+/// - `pub use foo::bar::Baz as Qux;` → `raw_target = "foo::bar"`, one spec `{Baz, Qux}`
+/// - `pub use foo::{Bar, Baz};`      → `raw_target = "foo"`,      two specs
+/// - Nested grouped imports recurse via [`collect_pub_use_specs_in_list`]
+///   with the combined prefix; each combined prefix produces its own
+///   `ReExportEntry`.
+/// - `pub use foo;` (single segment) — nothing to re-export from a non-empty
+///   prefix; emitted as nothing. Same boundary the existing import path
+///   tolerates.
+/// - `pub use foo::*;` (wildcards) — explicitly out of scope (FEAT-045 v1).
+fn collect_pub_use_reexports(
+    arg: &tree_sitter::Node,
+    source: &[u8],
+    module_name: &str,
+    line: usize,
+    result: &mut ExtractionResult,
+) {
+    match arg.kind() {
+        "scoped_identifier" => {
+            let full = arg.utf8_text(source).unwrap_or("");
+            if let Some((prefix, leaf)) = split_scoped_path(full) {
+                push_reexport_entry(
+                    result,
+                    module_name,
+                    prefix,
+                    line,
+                    vec![ReExportSpec {
+                        exported_name: leaf.to_owned(),
+                        local_name: leaf.to_owned(),
+                    }],
+                );
+            }
+        }
+        "use_as_clause" => {
+            // `pub use foo::bar::Baz as Qux;`
+            let path_text = arg
+                .child_by_field_name("path")
+                .and_then(|n| n.utf8_text(source).ok())
+                .unwrap_or("");
+            let alias = arg
+                .child_by_field_name("alias")
+                .and_then(|n| n.utf8_text(source).ok())
+                .unwrap_or("");
+            if let Some((prefix, leaf)) = split_scoped_path(path_text) {
+                let local = if alias.is_empty() { leaf } else { alias };
+                push_reexport_entry(
+                    result,
+                    module_name,
+                    prefix,
+                    line,
+                    vec![ReExportSpec {
+                        exported_name: leaf.to_owned(),
+                        local_name: local.to_owned(),
+                    }],
+                );
+            }
+        }
+        "scoped_use_list" => {
+            // `pub use foo::{Bar, Baz};` and nested groups.
+            let prefix = arg
+                .child_by_field_name("path")
+                .and_then(|n| n.utf8_text(source).ok())
+                .unwrap_or("");
+            if let Some(list_node) = arg.child_by_field_name("list") {
+                // Accumulate `(combined_prefix, ReExportSpec)` for every
+                // leaf in this group (recursing through nested groups), then
+                // bucket by combined_prefix and push one ReExportEntry per
+                // bucket. Order-stable: leaves keep grammar order, nested
+                // groups expand inline.
+                let mut buckets: Vec<(String, Vec<ReExportSpec>)> = Vec::new();
+                collect_pub_use_specs_in_list(&list_node, source, prefix, &mut buckets);
+                for (raw_target, specs) in buckets {
+                    push_reexport_entry(result, module_name, &raw_target, line, specs);
+                }
+            }
+        }
+        // `identifier`, `crate`, `self`, `super`, `use_list`, `use_wildcard` —
+        // not supported by FEAT-045 v1. `use_wildcard` is explicit OOS;
+        // bare-identifier `pub use foo;` has no source-side prefix and so
+        // does not fit the canonical-collapse model.
+        _ => {}
+    }
+}
+
+/// Recursive walker for the `list` field of a `scoped_use_list` (or a
+/// nested `scoped_use_list` inside it). Appends specs into `buckets`,
+/// keyed by the combined prefix (so a single `pub use foo::{bar::Baz, Qux};`
+/// produces two buckets: `"foo::bar"` and `"foo"`).
+fn collect_pub_use_specs_in_list(
+    list_node: &tree_sitter::Node,
+    source: &[u8],
+    prefix: &str,
+    buckets: &mut Vec<(String, Vec<ReExportSpec>)>,
+) {
+    let mut cursor = list_node.walk();
+    for child in list_node.children(&mut cursor) {
+        if !child.is_named() {
+            continue;
+        }
+        match child.kind() {
+            "identifier" | "self" => {
+                let name = child.utf8_text(source).unwrap_or("");
+                if !name.is_empty() && !prefix.is_empty() {
+                    push_spec_into_bucket(
+                        buckets,
+                        prefix,
+                        ReExportSpec {
+                            exported_name: name.to_owned(),
+                            local_name: name.to_owned(),
+                        },
+                    );
+                }
+            }
+            "scoped_identifier" => {
+                // `pub use foo::{bar::Baz};` — the leaf is `Baz`, the prefix
+                // becomes `foo::bar`.
+                let text = child.utf8_text(source).unwrap_or("");
+                if let Some((inner_prefix, leaf)) = split_scoped_path(text) {
+                    let combined = combine_prefix(prefix, inner_prefix);
+                    push_spec_into_bucket(
+                        buckets,
+                        &combined,
+                        ReExportSpec {
+                            exported_name: leaf.to_owned(),
+                            local_name: leaf.to_owned(),
+                        },
+                    );
+                }
+            }
+            "use_as_clause" => {
+                // `pub use foo::{Bar as Baz};` — the path's last segment is
+                // the exported name; the alias is the local name.
+                let path_text = child
+                    .child_by_field_name("path")
+                    .and_then(|n| n.utf8_text(source).ok())
+                    .unwrap_or("");
+                let alias = child
+                    .child_by_field_name("alias")
+                    .and_then(|n| n.utf8_text(source).ok())
+                    .unwrap_or("");
+                if path_text.contains("::") {
+                    // e.g. `bar::Baz as Qux` — split into prefix + leaf.
+                    if let Some((inner_prefix, leaf)) = split_scoped_path(path_text) {
+                        let combined = combine_prefix(prefix, inner_prefix);
+                        let local = if alias.is_empty() { leaf } else { alias };
+                        push_spec_into_bucket(
+                            buckets,
+                            &combined,
+                            ReExportSpec {
+                                exported_name: leaf.to_owned(),
+                                local_name: local.to_owned(),
+                            },
+                        );
+                    }
+                } else if !path_text.is_empty() && !prefix.is_empty() {
+                    // e.g. `Bar as Baz` — leaf is `Bar`, prefix unchanged.
+                    let local = if alias.is_empty() { path_text } else { alias };
+                    push_spec_into_bucket(
+                        buckets,
+                        prefix,
+                        ReExportSpec {
+                            exported_name: path_text.to_owned(),
+                            local_name: local.to_owned(),
+                        },
+                    );
+                }
+            }
+            "scoped_use_list" => {
+                // `pub use foo::{bar::{Baz, Qux}};`
+                let inner_path = child
+                    .child_by_field_name("path")
+                    .and_then(|n| n.utf8_text(source).ok())
+                    .unwrap_or("");
+                let combined_prefix = combine_prefix(prefix, inner_path);
+                if let Some(inner_list) = child.child_by_field_name("list") {
+                    collect_pub_use_specs_in_list(&inner_list, source, &combined_prefix, buckets);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Append `spec` into the bucket for `prefix` (creating one if needed).
+/// First-occurrence wins for bucket ordering (matches grammar order).
+fn push_spec_into_bucket(
+    buckets: &mut Vec<(String, Vec<ReExportSpec>)>,
+    prefix: &str,
+    spec: ReExportSpec,
+) {
+    for (key, specs) in buckets.iter_mut() {
+        if key == prefix {
+            specs.push(spec);
+            return;
+        }
+    }
+    buckets.push((prefix.to_owned(), vec![spec]));
+}
+
+/// Split a `::`-scoped path into `(prefix, leaf)`. Returns `None` for
+/// single-segment paths (no prefix to re-export from).
+fn split_scoped_path(path: &str) -> Option<(&str, &str)> {
+    let idx = path.rfind("::")?;
+    let (prefix, rest) = path.split_at(idx);
+    let leaf = &rest[2..]; // skip the "::"
+    if prefix.is_empty() || leaf.is_empty() {
+        None
+    } else {
+        Some((prefix, leaf))
+    }
+}
+
+/// Combine a parent prefix with an inner-group prefix using `::` joiner.
+/// Empty inputs are tolerated (rare; defensive).
+fn combine_prefix(outer: &str, inner: &str) -> String {
+    match (outer.is_empty(), inner.is_empty()) {
+        (true, _) => inner.to_owned(),
+        (_, true) => outer.to_owned(),
+        _ => format!("{}::{}", outer, inner),
+    }
+}
+
+/// Push a single ReExportEntry into `result.reexports` if it has at least
+/// one spec and a non-empty raw_target. Pure helper.
+fn push_reexport_entry(
+    result: &mut ExtractionResult,
+    module_name: &str,
+    raw_target: &str,
+    line: usize,
+    specs: Vec<ReExportSpec>,
+) {
+    if raw_target.is_empty() || specs.is_empty() {
+        return;
+    }
+    result.reexports.push(ReExportEntry {
+        from_module: module_name.to_owned(),
+        raw_target: raw_target.to_owned(),
+        line,
+        specs,
+        is_star: false,
+    });
 }
 
 /// Register a `short_name → full_path` entry in the extraction's `use_aliases`
@@ -1414,6 +1697,149 @@ impl G {
             "impl-method-scoped use must populate use_aliases; aliases were: {:?}",
             r.use_aliases
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // FEAT-045: pub use → ReExportEntry emission
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn feat_045_pub_use_simple_emits_reexport() {
+        let r = extract("pub use foo::bar::Baz;\n");
+        assert_eq!(r.reexports.len(), 1, "one ReExportEntry expected");
+        let entry = &r.reexports[0];
+        assert_eq!(entry.from_module, "src.handler");
+        assert_eq!(entry.raw_target, "foo::bar");
+        assert_eq!(entry.line, 1);
+        assert!(!entry.is_star);
+        assert_eq!(entry.specs.len(), 1);
+        assert_eq!(entry.specs[0].exported_name, "Baz");
+        assert_eq!(entry.specs[0].local_name, "Baz");
+    }
+
+    #[test]
+    fn feat_045_pub_use_aliased_carries_local_name() {
+        let r = extract("pub use foo::bar::Baz as Qux;\n");
+        assert_eq!(r.reexports.len(), 1);
+        let entry = &r.reexports[0];
+        assert_eq!(entry.raw_target, "foo::bar");
+        assert_eq!(entry.specs.len(), 1);
+        assert_eq!(entry.specs[0].exported_name, "Baz");
+        assert_eq!(entry.specs[0].local_name, "Qux");
+    }
+
+    #[test]
+    fn feat_045_pub_use_grouped_emits_one_entry_per_target() {
+        let r = extract("pub use foo::{Bar, Baz};\n");
+        assert_eq!(
+            r.reexports.len(),
+            1,
+            "single shared raw_target collapses to one entry; got: {:?}",
+            r.reexports
+        );
+        let entry = &r.reexports[0];
+        assert_eq!(entry.raw_target, "foo");
+        let names: Vec<(&str, &str)> = entry
+            .specs
+            .iter()
+            .map(|s| (s.exported_name.as_str(), s.local_name.as_str()))
+            .collect();
+        assert_eq!(names, vec![("Bar", "Bar"), ("Baz", "Baz")]);
+    }
+
+    #[test]
+    fn feat_045_pub_use_nested_grouped_buckets_by_prefix() {
+        // `pub use foo::{bar::{Baz, Qux}};` — nested group expands to two
+        // leaves under combined prefix `foo::bar`. One bucket, one entry.
+        let r = extract("pub use foo::{bar::{Baz, Qux}};\n");
+        assert_eq!(r.reexports.len(), 1, "one bucket expected");
+        let entry = &r.reexports[0];
+        assert_eq!(entry.raw_target, "foo::bar");
+        let names: Vec<&str> = entry
+            .specs
+            .iter()
+            .map(|s| s.exported_name.as_str())
+            .collect();
+        assert_eq!(names, vec!["Baz", "Qux"]);
+
+        // And a mixed shape: `pub use foo::{bar::Baz, Qux};` — two buckets,
+        // one for `foo::bar`, one for `foo`.
+        let r2 = extract("pub use foo::{bar::Baz, Qux};\n");
+        assert_eq!(r2.reexports.len(), 2);
+        let by_target: std::collections::HashMap<_, _> = r2
+            .reexports
+            .iter()
+            .map(|e| (e.raw_target.as_str(), &e.specs))
+            .collect();
+        assert_eq!(by_target.get("foo::bar").map(|s| s.len()), Some(1));
+        assert_eq!(by_target.get("foo").map(|s| s.len()), Some(1));
+        assert_eq!(by_target.get("foo::bar").unwrap()[0].exported_name, "Baz");
+        assert_eq!(by_target.get("foo").unwrap()[0].exported_name, "Qux");
+    }
+
+    #[test]
+    fn feat_045_pub_use_intra_crate_canonical_chain_shape() {
+        // Mirrors a barrel's view: `lib.rs` re-exports a sibling module's
+        // type. Confirms the entry shape downstream FEAT-046/047 will feed
+        // into ReExportGraph::build().
+        let r = extract("pub use crate::types::Node;\npub use crate::graph::CodeGraph;\n");
+        assert_eq!(r.reexports.len(), 2);
+
+        let by_target: std::collections::HashMap<_, _> = r
+            .reexports
+            .iter()
+            .map(|e| (e.raw_target.as_str(), &e.specs))
+            .collect();
+        assert_eq!(
+            by_target
+                .get("crate::types")
+                .map(|s| s[0].exported_name.as_str()),
+            Some("Node")
+        );
+        assert_eq!(
+            by_target
+                .get("crate::graph")
+                .map(|s| s[0].exported_name.as_str()),
+            Some("CodeGraph")
+        );
+
+        // Sanity: existing Imports + use_aliases pipeline is untouched
+        // (ReExportEntry is additive in FEAT-045).
+        let imports: Vec<&str> = r
+            .edges
+            .iter()
+            .filter(|e| e.2.kind == EdgeKind::Imports)
+            .map(|e| e.1.as_str())
+            .collect();
+        assert!(imports.contains(&"crate::types::Node"));
+        assert!(imports.contains(&"crate::graph::CodeGraph"));
+        assert_eq!(
+            r.use_aliases.get("Node").map(String::as_str),
+            Some("crate::types::Node")
+        );
+    }
+
+    #[test]
+    fn feat_045_plain_use_does_not_emit_reexport() {
+        // Visibility check: plain `use` (private) must NOT produce a
+        // ReExportEntry — nothing is being re-exported from this module.
+        let r = extract("use foo::bar::Baz;\n");
+        assert!(
+            r.reexports.is_empty(),
+            "plain `use` must not emit ReExportEntry; got: {:?}",
+            r.reexports
+        );
+    }
+
+    #[test]
+    fn feat_045_pub_crate_use_still_emits_reexport() {
+        // Restricted-pub `pub(crate) use` IS still a re-export within the
+        // crate (Rust semantics). Canonical-collapse needs the entry so
+        // intra-crate barrel chains can be walked. Wildcards remain OOS.
+        let r = extract("pub(crate) use foo::bar::Baz;\n");
+        assert_eq!(r.reexports.len(), 1);
+        assert_eq!(r.reexports[0].raw_target, "foo::bar");
+        assert_eq!(r.reexports[0].specs[0].exported_name, "Baz");
     }
 
     #[test]

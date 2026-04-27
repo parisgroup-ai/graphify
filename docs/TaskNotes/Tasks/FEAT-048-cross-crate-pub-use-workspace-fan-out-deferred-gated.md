@@ -6,6 +6,8 @@ scheduled: 2026-04-26
 timeEstimate: 90
 pomodoros: 0
 designDoc: '[[docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md]]'
+projects:
+- '[[sprint.md|Current Sprint]]'
 tags:
 - task
 - feat

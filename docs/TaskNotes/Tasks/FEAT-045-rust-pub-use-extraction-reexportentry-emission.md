@@ -6,6 +6,8 @@ scheduled: 2026-04-26
 timeEstimate: 25
 pomodoros: 0
 designDoc: '[[docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md]]'
+projects:
+- '[[sprint.md|Current Sprint]]'
 tags:
 - task
 - feat
@@ -28,12 +30,12 @@ The visibility check is mechanical — tree-sitter's `use_declaration` node carr
 
 ## Subtasks
 
-- [ ] Tree-sitter playground check: confirm `visibility_modifier` placement on `use_declaration` (sibling child? wrapped node?)
-- [ ] In `extract_use_declaration` (rust_lang.rs), short-circuit the existing alias-emission path when `pub` is absent and emit `ReExportEntry` when present
-- [ ] Map `pub use foo::bar::Baz;` → `ReExportEntry { from_module, raw_target: "foo::bar", line, specs: [{exported_name: "Baz", local_name: "Baz"}], is_star: false }`
-- [ ] Map `pub use foo::bar::Baz as Qux;` → set `local_name: "Qux"`, `exported_name: "Baz"`
-- [ ] Map `pub use foo::{Bar, Baz};` → one `ReExportSpec` per leaf (reuse `process_scoped_use_list`)
-- [ ] Tests: 4-5 cases mirroring `reexport_graph.rs`'s test suite (simple, aliased, grouped, nested grouped, intra-crate canonical chain)
+- [x] Tree-sitter playground check: confirm `visibility_modifier` placement on `use_declaration` (sibling child? wrapped node?)
+- [x] In `extract_use_declaration` (rust_lang.rs), short-circuit the existing alias-emission path when `pub` is absent and emit `ReExportEntry` when present
+- [x] Map `pub use foo::bar::Baz;` → `ReExportEntry { from_module, raw_target: "foo::bar", line, specs: [{exported_name: "Baz", local_name: "Baz"}], is_star: false }`
+- [x] Map `pub use foo::bar::Baz as Qux;` → set `local_name: "Qux"`, `exported_name: "Baz"`
+- [x] Map `pub use foo::{Bar, Baz};` → one `ReExportSpec` per leaf (reuse `process_scoped_use_list`)
+- [x] Tests: 4-5 cases mirroring `reexport_graph.rs`'s test suite (simple, aliased, grouped, nested grouped, intra-crate canonical chain)
 
 ## Out of scope
 
