@@ -32,19 +32,24 @@ Scope-of-work is significant; this is a multi-day task on the order of FEAT-021 
 
 ## Subtasks
 
-- [ ] Spike: read FEAT-021/025/026/028 implementations, sketch a Rust analogue
-- [ ] Decide on canonical id format
-- [ ] Plan task breakdown
+- [x] Spike: read FEAT-021/025/026/028 implementations, sketch a Rust analogue
+- [x] Decide on canonical id format
+- [x] Plan task breakdown
 - [ ] Implement per-project ReExportGraph for Rust (mirror TS architecture)
 - [ ] Add canonical-resolution walker
 - [ ] Optional: cross-project fan-out (mirror FEAT-028)
 - [ ] Add report writer fan-out for `alternative_paths` (mirror TS Part B / FEAT-025)
+
+## Design doc
+
+- [docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md](../../superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md) — spike findings, decisions for Q1/Q2/Q3, FEAT-045/046/047(/048) follow-up split
 
 ## Related
 
 - Surfaced by BUG-022 root-cause investigation
 - Cat 5 in BUG-022 findings
 - Reference architecture: TypeScript FEAT-021, FEAT-025, FEAT-026, FEAT-028
+- Out of scope (filed during spike): `src.Cycle` is a type alias (`pub type Cycle = Vec<String>;`), not a re-export — separate feature, tracked as FEAT-049 candidate
 
 ## Related
 
