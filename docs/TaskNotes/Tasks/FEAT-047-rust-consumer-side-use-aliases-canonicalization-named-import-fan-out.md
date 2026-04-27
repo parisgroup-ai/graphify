@@ -1,8 +1,9 @@
 ---
 uid: feat-047
-status: open
+status: done
 priority: low
 scheduled: 2026-04-26
+completed: 2026-04-27
 timeEstimate: 30
 pomodoros: 0
 timeSpent: 38
