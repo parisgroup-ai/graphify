@@ -4,6 +4,9 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- fix(extract): Rust `pub type X = Y;` (and the rare non-pub `type X = Y;`) declarations now register as local symbols (FEAT-049). Previously the Rust extractor's top-level match in `extract_file` had no `type_item` arm — so the alias's name never landed in `ExtractionResult` as a `Defines` edge target, BUG-018's `known_modules` seeding pass missed it, and consumer references like `use crate::Cycle;` resolved to a non-local placeholder (`src.Cycle`, confidence ≤ 0.5) that `graphify suggest stubs` then promoted as an external prefix candidate. New handler `extract_type_item` (in `crates/graphify-extract/src/rust_lang.rs`) reuses `extract_named_type` exactly as the struct/enum/trait handlers do, with `NodeKind::Class` as the closest semantic fit (the enum has no `TypeAlias` variant; adding one would cascade through every report writer and match arm in the workspace). RHS canonical-collapse (mapping `Foo` → `mod::Bar` when the RHS is a path) is intentionally out of scope: the dogfood case (`pub type Cycle = Vec<String>;` in `crates/graphify-report/src/lib.rs`) has a `generic_type` RHS that doesn't fit the barrel-collapse model — the structural fix (Defines edge + `known_modules` seed) is sufficient. Self-dogfood: `graphify suggest stubs` candidate count 7 → 6 — `src.Cycle` collapsed onto the canonical `src.Cycle` local symbol, leaving only `src.Community` (a cross-crate `pub use` correctly owned by the gated FEAT-048).
+
 ## [0.13.4] - 2026-04-27
 
 ### Deferred

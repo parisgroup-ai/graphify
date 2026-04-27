@@ -63,6 +63,9 @@ impl LanguageExtractor for RustExtractor {
                 "trait_item" => {
                     extract_trait_item(&child, source, path, module_name, &mut result);
                 }
+                "type_item" => {
+                    extract_type_item(&child, source, path, module_name, &mut result);
+                }
                 "impl_item" => {
                     extract_impl_item(&child, source, path, module_name, &mut result);
                 }
@@ -686,6 +689,31 @@ fn extract_trait_item(
     result: &mut ExtractionResult,
 ) {
     extract_named_type(node, source, path, module_name, NodeKind::Trait, result);
+}
+
+// FEAT-049: `pub type X = Y;` (and the rare non-pub `type X = Y;`) had no
+// extractor handler, so the alias never landed in `known_modules` via BUG-018's
+// Defines-target seeding. Consumer references like `use crate::Cycle;` then
+// resolved to a non-local placeholder (`src.Cycle`) at confidence ≤ 0.5, and
+// `graphify suggest stubs` falsely promoted the alias as an external prefix.
+// Reuses `extract_named_type` exactly as struct/enum/trait do — `type_item`'s
+// `name` field carries the alias short-name (`type_identifier`) regardless of
+// the RHS shape (`generic_type`, `scoped_type_identifier`, `tuple_type`,
+// `reference_type`, …), so no RHS parsing is needed for the local-symbol
+// registration path. RHS canonical-collapse (mapping `Foo` → `mod::Bar` when
+// the RHS is a path) is intentionally out of scope: the actual dogfood case
+// (`pub type Cycle = Vec<String>;`) has a generic RHS that doesn't fit the
+// barrel-collapse model. NodeKind::Class is reused because the enum has no
+// `TypeAlias` variant; adding one would cascade through every report writer
+// and match arm in the workspace.
+fn extract_type_item(
+    node: &tree_sitter::Node,
+    source: &[u8],
+    path: &Path,
+    module_name: &str,
+    result: &mut ExtractionResult,
+) {
+    extract_named_type(node, source, path, module_name, NodeKind::Class, result);
 }
 
 fn extract_named_type(
@@ -1853,5 +1881,62 @@ impl G {
             "nested-fn use must not leak into outer scope; aliases were: {:?}",
             r.use_aliases
         );
+    }
+
+    // ----- FEAT-049: pub type alias collapse (Defines edge for type_item) ----
+
+    #[test]
+    fn feat_049_pub_type_alias_emits_defines_edge() {
+        // `pub type Cycle = Vec<String>;` is the dogfood case from
+        // graphify-report. Without the extractor handler, `Cycle` never lands
+        // in `known_modules` and consumer `use crate::Cycle;` references
+        // resolve to a non-local placeholder, surfacing in `suggest stubs`.
+        let r = extract("pub type Cycle = Vec<String>;\n");
+        let defines: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "src.handler.Cycle")
+            .collect();
+        assert_eq!(
+            defines.len(),
+            1,
+            "expected one Defines edge to src.handler.Cycle; edges: {:?}",
+            r.edges
+        );
+        let symbol = r
+            .nodes
+            .iter()
+            .find(|n| n.id == "src.handler.Cycle")
+            .expect("type alias symbol node missing");
+        assert_eq!(symbol.kind, NodeKind::Class);
+        assert!(symbol.is_local);
+    }
+
+    #[test]
+    fn feat_049_private_type_alias_also_emits_defines_edge() {
+        // Non-pub `type X = Y;` should still register the local symbol — same
+        // shape as struct/enum/trait, which never gate on visibility. Keeps
+        // intra-crate references resolvable when the alias is consumed via
+        // sibling-module access patterns.
+        let r = extract("type ShortAlias = u64;\n");
+        let symbol = r.nodes.iter().find(|n| n.id == "src.handler.ShortAlias");
+        assert!(
+            symbol.is_some(),
+            "private type alias must still register a Defines edge; nodes: {:?}",
+            r.nodes.iter().map(|n| &n.id).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn feat_049_scoped_rhs_type_alias_still_registers_lhs() {
+        // RHS shape (`scoped_type_identifier`) must not affect LHS extraction;
+        // canonical-collapse of the RHS is deliberately out of scope.
+        let r = extract("pub type Foo = other::Bar;\n");
+        let defines: Vec<_> = r
+            .edges
+            .iter()
+            .filter(|(_, t, e)| e.kind == EdgeKind::Defines && t == "src.handler.Foo")
+            .collect();
+        assert_eq!(defines.len(), 1, "edges: {:?}", r.edges);
     }
 }

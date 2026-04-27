@@ -1,8 +1,9 @@
 ---
 uid: feat-049
-status: open
+status: done
 priority: low
 scheduled: 2026-04-27
+completed: 2026-04-27
 timeEstimate: 45
 pomodoros: 0
 designDoc: '[[docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md]]'
@@ -33,11 +34,11 @@ Pick option 1 if the underlying graph quality matters (consumers reading `analys
 
 ## Subtasks
 
-- [ ] Spike: tree-sitter playground check — does `type_item` carry the target as scoped path? confirm node shape
-- [ ] Decide between option 1 (full pipeline) and option 2 (suggest-stubs filter); document rationale in commit
-- [ ] Implementation per chosen option
-- [ ] Tests: 2-3 cases (simple `pub type X = Y;`, scoped `pub type X = mod::Y;`, generic `pub type X<T> = Y<T>;`)
-- [ ] Dogfood verification: `src.Cycle` no longer surfaces in `graphify-report` candidates of `graphify suggest stubs`
+- [x] Spike: tree-sitter playground check — does `type_item` carry the target as scoped path? confirm node shape
+- [x] Decide between option 1 (full pipeline) and option 2 (suggest-stubs filter); document rationale in commit
+- [x] Implementation per chosen option
+- [x] Tests: 2-3 cases (simple `pub type X = Y;`, scoped `pub type X = mod::Y;`, generic `pub type X<T> = Y<T>;`)
+- [x] Dogfood verification: `src.Cycle` no longer surfaces in `graphify-report` candidates of `graphify suggest stubs`
 
 ## Out of scope
 
