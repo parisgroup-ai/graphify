@@ -5,6 +5,14 @@ priority: low
 scheduled: 2026-04-26
 timeEstimate: 30
 pomodoros: 0
+timeSpent: 38
+timeEntries:
+- date: 2026-04-26
+  minutes: 38
+  note: source=<usage>,heuristic=75000,observed=143166,delta_pct=-47.6,partial_reason=dogfood_AC_was_FEAT-048_territory
+  type: manual
+  executor: claude-solo
+  tokens: 143166
 designDoc: '[[docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md]]'
 projects:
 - '[[sprint.md|Current Sprint]]'

@@ -5,6 +5,14 @@ priority: low
 scheduled: 2026-04-26
 timeEstimate: 90
 pomodoros: 0
+timeSpent: 18
+timeEntries:
+- date: 2026-04-26
+  minutes: 18
+  note: source=<usage>,heuristic=50000,observed=79337,delta_pct=-37.0,path_B_gate_failed,cross_crate_count=1_vs_5,ADR=docs/adr/0002
+  type: manual
+  executor: claude-solo
+  tokens: 79337
 designDoc: '[[docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md]]'
 projects:
 - '[[sprint.md|Current Sprint]]'

@@ -1,10 +1,19 @@
 ---
 uid: feat-045
-status: open
+status: done
 priority: low
 scheduled: 2026-04-26
+completed: 2026-04-26
 timeEstimate: 25
 pomodoros: 0
+timeSpent: 28
+timeEntries:
+- date: 2026-04-26
+  minutes: 28
+  note: source=<usage>,heuristic=67000,observed=94336,delta_pct=-29.0
+  type: manual
+  executor: claude-solo
+  tokens: 94336
 designDoc: '[[docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md]]'
 projects:
 - '[[sprint.md|Current Sprint]]'

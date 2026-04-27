@@ -1,63 +1,64 @@
-# Session Brief — 2026-04-26 (BUG-025 + CHORE-011 + BUG-021 wave)
+# Session Brief — 2026-04-27 (FEAT-044 wave: Rust intra-crate pub use collapse)
 
 ## Last Session Summary
 
-Three fixes shipped in sequence — all in the F-cluster (FEAT-043 follow-ups). BUG-025 closed the function-body `use_declaration` blind spot in the Rust extractor; CHORE-011 paid down the `graphify-report → graphify-extract` layer-crossing FEAT-043 introduced by moving `ExternalStubs` to `graphify-core`; BUG-021 made `suggest stubs`'s `already_covered_prefixes` report the actual matched stub instead of a normalized top segment. Each commit benefited from the previous: CHORE-011's cli reference inside `apply_suggestions` only became visible to the extractor because of BUG-025; BUG-021 was mechanically trivial because CHORE-011 had just consolidated the matcher API in core. Sprint dropped from 5 → 2 open tasks; both remaining (CHORE-010 cross-language test gap, FEAT-044 Rust re-export collapse) are LOW priority.
+Dispatched the 4-slice plan that decomposed FEAT-044 (Rust re-export collapse) into FEAT-045 → FEAT-046 → FEAT-047 → FEAT-048. The first three landed clean (3 feat commits, 873 workspace tests / +4, 0 cycles, no hotspot regression). FEAT-048 ran Path B by design — its task body had a self-imposed gate (≥5 cross-crate misclassifications) that the workspace fails (1 hit, `src.Community`); the dispatch produced ADR 0002 documenting the deferral + re-open criteria instead of forcing implementation. Net: Rust intra-crate `pub use` is now collapsed canonically (mirrors TS FEAT-021/025/026); cross-crate is gated; type-alias collapse (`pub type`) is filed as FEAT-049 follow-up because the dogfood gap traces there, not to FEAT-047.
 
 ## Current State
 
-- Branch: `main`, fully synced with origin (0 ahead / 0 behind)
+- Branch: `main`, **4 commits ahead of `origin/main`** (push happens at session-close commit)
 - Working tree: clean (after this close commit)
-- Latest release: `v0.13.2` (unchanged — no version bump this session, all fixes are unreleased on `main` at `[Unreleased]` in CHANGELOG)
-- TaskNotes: 74 total / 2 open / 0 in-progress / 72 done
-- `graphify suggest stubs` candidate count: 7 (down from 9 at session start; cumulative wave from session start of 35 → 7 = -80%)
+- Latest release: `v0.13.3` (unchanged — this wave is unreleased on `main`, will need a `v0.13.4` cut next session if a release feels warranted)
+- TaskNotes: 79 total, 3 open (FEAT-047 still `open` despite all 4/4 subtasks ticked, FEAT-048 `open` as deferral artifact, FEAT-049 newly filed)
+- `graphify suggest stubs` candidate count: **7, unchanged** — confirms the FEAT-047 dogfood AC was misattributed. The 2 sticky candidates that motivated FEAT-048/049 (`src.Community` cross-crate, `src.Cycle` type-alias) are exactly what those tasks own
 
 ## Commits This Session
 
-`dcf7866..d53353f` (3 commits, all pushed):
+`b9d476e..cc529ce` (4 commits, NOT pushed yet — close commit will push):
 
-- `c805b48` fix(extract): walk function/method bodies for use_declaration (BUG-025)
-- `edda9e6` chore(deps): move ExternalStubs to graphify-core, drop report→extract dep (CHORE-011)
-- `d53353f` fix(report): suggest stubs records actual matched stub, not top segment (BUG-021)
+- `b9d476e` feat(extract): rust pub use → ReExportEntry emission (FEAT-045)
+- `02c86f4` feat(extract): rust per-project pub-use canonical collapse (FEAT-046)
+- `0c8a1c4` feat(extract): rust consumer-side use_aliases canonicalization (FEAT-047)
+- `cc529ce` docs(adr): defer FEAT-048 — cross-crate pub use count below gate threshold
 
-(plus the close commit landing now)
+(plus the close commit landing now with task-tick markdown updates + CLAUDE.md learnings + this brief + FEAT-049 task file)
 
 ## Decisions Made (don't re-debate)
 
-- **BUG-025 went option 1 (recurse function_item bodies for use_declaration) over option 2 (post-walk entire AST)**. Option 2 would have bypassed the lexical-scope hygiene BUG-024 specifically established. The new `walk_for_uses` helper deliberately mirrors `walk_for_bindings` (BUG-024) skip-discipline — `function_item` and `impl_item` return without descending. Approximation accepted: aliases land in the file-wide `use_aliases` map (truly per-scope is v2 with no current consumer); harmless because last-write-wins is correct when both fns import the same path
-- **CHORE-011 went all-in (no shim) when removing `ExternalStubs` from extract**. Internal workspace API, no published SDK contract to preserve. Old paths `graphify_extract::stubs::ExternalStubs` and `graphify_extract::ExternalStubs` deleted entirely; consumers now import directly from `graphify_core`. New convenience re-export `pub use stubs::ExternalStubs;` at the bottom of `graphify-core/src/lib.rs` keeps the import shape parity
-- **BUG-021 went option (a) — add `matching_prefix()` and use it in `score_stubs`**. Option (b) (rename `already_covered_prefixes` to `already_covered_via_prefixes` and document the asymmetry) would have been documenting the bug rather than fixing it. With the fix, the field name is exactly accurate
-- **Heuristic gotcha worth knowing**: `graphify-summary.json`'s cross-project edge count is name-based module overlap, NOT Cargo-dep direction. After CHORE-011, `graphify-report → graphify-extract` still showed 81 edges even though there are zero references in code or Cargo.toml. The architectural win is real; the heuristic is imprecise. Verify via `grep -rn "graphify_extract" crates/graphify-report/` (should be zero) or `cargo build -p graphify-report` succeeding without the dep
-- **Each commit prepared the ground for the next**: BUG-025 made function-scoped `use_declaration` visible → CHORE-011's `use graphify_extract::stubs::ExternalStubs;` inside `apply_suggestions` (line 5290) became extractor-visible and got rewritten cleanly → BUG-021 had a single consolidated `ExternalStubs` API in core to extend with `matching_prefix()`
+- **FEAT-046 went rename + widen** (`has_ts_reexport_work` → `has_reexport_work`, gated on `TypeScript || Rust`) over the alternative of duplicating the gate condition. Single source of truth for the build trigger; the language-specific resolver callbacks branch internally
+- **FEAT-046 needed BOTH exact-match AND prefix-match edge rewrite** — discovered during implementation. Rust raw_targets aren't module-shaped pre-resolution, so a Calls edge to `Bar::new()` lands as `src.Bar.new` (not `src.Bar`); the canonical map keys on `src.Bar`, so a prefix-match shape (`src.Bar.new` → `src.foo.Bar.new`) is the load-bearing complement to the exact-match path. Helper `rewrite_via_barrel_prefix` (private, in `graphify-cli/src/main.rs`)
+- **FEAT-047 returned `outcome: partial` despite all 4 subtasks done** — the work assigned to FEAT-047 IS complete (rewrite, ordering, integration test); the 4th AC ("dogfood `src.Community` drops") was a design-doc misattribution. `src.Community` is a cross-crate `pub use` (graphify-core → graphify-report), so it's genuinely FEAT-048 territory. Honest signal preserved: `partial` outcome with detailed note. The user has a pending decision on whether to close the task as `done` manually (work is complete) or leave it `open` until the AC is corrected
+- **FEAT-048 went Path B (deferral) over Path A (full implementation)** — task body's own gate (subtask 1) requires ≥5 cross-crate misclassifications; workspace shows 1. Forcing Path A would have violated the task's own guard. ADR 0002 (`docs/adr/0002-cargo-workspace-reexport-graph-gate.md`) records the gate-check evidence + 3 re-open criteria. CHANGELOG `[Unreleased] ### Deferred` entry landed
+- **FEAT-049 filed (low priority) instead of expanding FEAT-047 scope** — type aliases (`pub type Cycle = Vec<String>;`) are a separate detection problem (different tree-sitter node kind) from `pub use`. Body documents the option-1 (full pipeline, mirrors FEAT-045) vs option-2 (suggest-stubs filter) trade-off and leans option 1 with the same justification as FEAT-021/045 (data quality > reporting band-aid)
+- **CLAUDE.md updated** with FEAT-045/046/047 facts as a contiguous block right after the TS FEAT-028 bullet, plus FEAT-048 deferral note + FEAT-049 follow-up note. Mirrors the existing TS narrative shape so the Rust path reads as the natural mirror
 
 ## Architectural Health
 
-`graphify check --config graphify.toml` — all 5 projects PASS:
+`graphify check --config graphify.toml` — all 5 projects PASS (run during FEAT-046 + FEAT-048 dispatches; baseline holds across the wave):
 
-- `graphify-core`: PASS, 0 cycles, 292 nodes, 449 edges, 10 communities, max_hotspot 0.478 (`src.policy`) — net +7 nodes / +10 edges across the 3 commits (BUG-025: ~0/0, CHORE-011: +6/+9 from the moved stubs.rs, BUG-021: +1/+1 from the new matching_prefix method)
-- `graphify-extract`: PASS, 0 cycles, 288 nodes, 592 edges, max_hotspot 0.435 (`src.resolver`) — net -7 nodes / -9 edges from CHORE-011 (stubs.rs left); BUG-025 added back a few edges from the new walk_for_uses helper contributing imports it couldn't before
-- `graphify-report`: PASS, 0 cycles, 195/388/6/0.454 (`src.pr_summary`) — unchanged
-- `graphify-cli`: PASS, 0 cycles, 375/588/7/0.452 (`src.install`) — -1 node / -1 edge from one fewer cross-crate import (CHORE-011)
-- `graphify-mcp`: PASS, 0 cycles, 102/118/4/0.600 (`src.server`) — unchanged
+- 0 cycles introduced, no hotspot >0.85
+- Workspace tests: **873 pass, 0 fail** (was 869 → +4 from FEAT-046 integration test + FEAT-047 unit + integration tests; FEAT-045 added 7 in its own commit but those landed before this baseline check)
+- `graphify suggest stubs` candidate count: 7 (unchanged from session start — this is *correct* given the cross-crate / type-alias residue, not a regression)
 
-Workspace tests: **860 pass, 0 fail** (was 851 at session start — +5 BUG-025 + +4 BUG-021; CHORE-011 was a move so net 0). All hotspots well under the 0.85 CI threshold.
+## Open Items (3 follow-ups)
 
-## Open Items (2 follow-ups, both low priority)
-
-- **CHORE-010** (low): F2 — `suggest stubs` cross-language same-prefix collision test gap. Pure addition of test coverage. Subtasks: 0/3
-- **FEAT-044** (low): F7 — Rust re-export collapse, mirrors TS FEAT-021/025/026/028 (multi-day; only worth picking up if Rust re-export volume becomes user-visible). Subtasks: 0/7
+- **FEAT-047** (low, status=open): code complete; pending user decision on close-as-done vs leave-open until AC#4 of design doc gets corrected. Recommended action: `tn done FEAT-047` next session with note `AC#4 was FEAT-048 territory per session 2026-04-27 close`
+- **FEAT-048** (low, status=open): deferred via ADR 0002, gate at ≥5 cross-crate misclassifications. Re-open trigger: workspace count crosses threshold OR a single high-edge cross-crate hit (~50+ edges) becomes user-visible. Subtasks 1+2 ticked, 3-7 deliberately open
+- **FEAT-049** (low, status=open): type-alias collapse follow-up (`pub type X = Y;`). Surfaced by FEAT-047's dogfood gap analysis. 5 subtasks; recommend option 1 (full pipeline) over option 2 (suggest-stubs filter). Will close `src.Cycle` when it lands
 
 ## Suggested Next Steps
 
-1. **Cut a `v0.13.3` release** — three meaningful fixes since `v0.13.2` (BUG-025, BUG-021, CHORE-011), all under `[Unreleased]` in CHANGELOG. Per CLAUDE.md release workflow: bump `[workspace.package].version` in root `Cargo.toml`, `cargo build --release -p graphify-cli`, commit, tag explicitly to that commit (`git tag v0.13.3 <SHA>`), `git push origin main --tags`, then `cargo install --path crates/graphify-cli --force` to refresh local PATH binary. CI release workflow on `v*` tag push will build the 4 binary targets
-
-2. **CHORE-010 (low priority)** — small test gap, ~15-30 min with the same test infrastructure that BUG-021's integration test used. Cross-language collision: e.g. a Rust prefix `serde` colliding with a TS prefix `serde` from a sibling project — need to verify the suggester treats them as separate candidates (current behavior may already be correct; the task is to add a regression guard test, not a fix)
-
-3. **FEAT-044 (multi-day, low priority)** — only worth scoping if Rust re-export volume actually becomes user-visible in the dogfood candidates. Currently the remaining 7 candidates split as: 1 cross-project (`matches` macro shim), 3 graphify-cli per-project (`toml_edit` legitimate external + `env` macro/stdlib + `src.install.copy_plan.INTEGRATIONS` likely a constant ref pattern), 1 graphify-core (`Selector` likely a Rust re-export), 2 graphify-report (`src.Community` + `src.Cycle` — definitely Rust re-exports from graphify-core through `pub use`). FEAT-044 would absorb the latter 3 if it lands
+1. **Cut a `v0.13.4` release** — three meaningful feat commits since `v0.13.3` (FEAT-045/046/047) plus the FEAT-048 deferral ADR. Per CLAUDE.md release workflow: bump `[workspace.package].version` in root `Cargo.toml`, `cargo build --release -p graphify-cli`, commit, `git tag v0.13.4 <SHA>` (explicit SHA, not HEAD), `git push origin main --tags`, then `cargo install --path crates/graphify-cli --force` to refresh local PATH binary. CHANGELOG already has an `[Unreleased]` block — promote it to `[0.13.4] - 2026-04-27`
+2. **Close FEAT-047** — code is complete and committed. Run `tn done FEAT-047` with a note explaining the AC#4 misattribution. Cleans up the sprint count and stops the open-task table from carrying a misleading row
+3. **FEAT-049** if scope feels right — additive, ~45m estimate, uses FEAT-046 plumbing if option 1. Closes the last visible dogfood candidate (`src.Cycle`) that traces to a fixable bug rather than gated future work
 
 ## Frozen Modules / Hot Spots
 
-- `src.server` (graphify-mcp, 0.60) — duplicated CLI logic per CLAUDE.md known-debt note
-- `src.resolver` (graphify-extract, 0.435) — case 1-9 ladder is intentionally long; refactor would risk losing dispatch ordering
+- `src.server` (graphify-mcp, 0.60) — duplicated CLI logic (known debt per CLAUDE.md)
+- `src.policy` (graphify-core, 0.49) — unchanged this session
+- `src.resolver` (graphify-extract, 0.43) — slight delta from FEAT-047's new public method `rewrite_use_alias_targets`; under threshold
 
-Don't touch either without a specific user-approved task.
+## Notes for Future Reader
+
+- The FEAT-044 design doc (at `docs/superpowers/specs/2026-04-26-feat-044-rust-reexport-collapse-design.md`) overestimated FEAT-047's reach — its AC#4 attributed a cross-crate dogfood delta to FEAT-047 that was genuinely FEAT-048 territory. If you read the design doc when planning FEAT-049 or any successor, double-check the per-task AC against the FEAT-044 → FEAT-045/046/047/048 split before committing to acceptance criteria
+- Cumulative subagent tokens this session: 463k (4 dispatches). Hook fired 2x (cwd-mismatch issue still active for first dispatch — known). The 463k is calibration signal, not capacity — per CHORE-005 the model context window is the actual constraint
