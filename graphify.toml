@@ -35,6 +35,7 @@ external_stubs = [
   "debug_assert", "debug_assert_eq", "debug_assert_ne",
   "panic", "todo", "unimplemented", "unreachable", "dbg",
   "matches",
+  "env",  # `env!("CARGO_PKG_VERSION")` — stdlib macro, FEAT-031 strips `!`
   "include_str",
   # Workspace siblings — referenced cross-crate; declaring them here
   # tells graphify "these are intentional architectural dependencies, not

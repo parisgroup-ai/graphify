@@ -1,8 +1,9 @@
 ---
 uid: bug-026
-status: open
+status: done
 priority: normal
 scheduled: 2026-04-27
+completed: 2026-04-27
 pomodoros: 0
 tags:
 - task
@@ -27,6 +28,24 @@ Surfaced post-FEAT-049 by the dogfood `graphify suggest stubs` run on this repo 
 - `crates/graphify-cli/src/main.rs:5318` — `std::env::current_exe()`
 
 All three callsites carry the `std::` qualifier in source, yet `graphify suggest stubs` reports `env` as the prefix and `env` as the example, indicating the captured edge target is bare `env::*` (not `std::env::*`). The bug is somewhere between `extract_calls_recursive` (rust_lang.rs) and the post-resolution stub matcher.
+
+## Investigation outcome (root cause was different)
+
+Inspection of `report/graphify-cli/graph.json` (via `jq '.links[] | select(.target | test("env"))'`) showed the original hypothesis was **wrong**:
+
+- The 3 `std::env::*` callsites at lines 3995, 5293, 5318 were ALREADY correctly classified as `ExpectedExternal` (confidence 0.5, kind `ExpectedExternal`) — the existing `std` stub matched them as `std::env::var_os`, `std::env::current_dir`, `std::env::current_exe` verbatim. No prefix-stripping bug exists in the extractor.
+- The actual ambiguous `env` edges traced to 2 different callsites:
+  - `crates/graphify-cli/src/main.rs:5333` — `env!("CARGO_PKG_VERSION")`
+  - `crates/graphify-cli/src/session.rs:224` — `env!("CARGO_PKG_VERSION")`
+- `env!` is a Rust stdlib macro. FEAT-031 strips trailing `!` from macro invocations (intentional, mirrors how `format!`, `println!`, `assert!`, `matches!`, `vec!` are handled — they all land as bare names against `external_stubs`). The bare `env` was missing from the stubs list, so it surfaced as a non-stubbed external candidate.
+
+## Resolution
+
+Config-only change: `env` added to `[settings].external_stubs` in `graphify.toml`, alongside the other stdlib macros (`format`, `println`, `eprintln`, `print`, `vec`, `write`, `writeln`, `assert*`, `panic`, `todo`, `unimplemented`, `unreachable`, `dbg`, `matches`, `include_str`).
+
+No extractor change — the FEAT-031 macro-name-extraction is correct as designed. Per the CLAUDE.md self-dogfood rule, Rust macros are legitimate `external_stubs` candidates ("real workspace siblings, real third-party deps, **Rust macros**").
+
+Self-dogfood: `graphify suggest stubs` candidate count 2 → 1. The remaining 1 candidate is `src.Community` (cross-crate `pub use graphify_core::community::Community;`), which is the FEAT-048 deferred gate signal (current count 1, threshold 5).
 
 ## Reproduction
 
