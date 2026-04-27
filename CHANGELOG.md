@@ -4,6 +4,8 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.6] - 2026-04-27
+
 ### Changed
 - chore(stubs): `env` added to `[settings].external_stubs` (BUG-026). Investigation revealed the original task hypothesis was wrong — `std::env::current_dir()` and friends were already correctly classified as `ExpectedExternal` via the existing `std` stub. The remaining 2 ambiguous edges traced to `env!("CARGO_PKG_VERSION")` callsites at `crates/graphify-cli/src/main.rs:5333` and `crates/graphify-cli/src/session.rs:224` — `env!` is a Rust stdlib macro that FEAT-031's `!`-stripping pass converts to bare `env`, same shape as `format!`/`println!`/`matches!` already in stubs. Fix is config-only, mirrors `matches` add (post-BUG-024). Self-dogfood: `graphify suggest stubs` candidate count 2 → 1 — only `src.Community` remains (FEAT-048 deferred gate signal at threshold 1/5). The repo is now at the terminal state: zero false-positive candidates, only the architectural-real signal that's intentionally below FEAT-048's re-open threshold.
 
