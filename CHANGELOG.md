@@ -4,6 +4,9 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- feat(extract): per-project Rust `pub use` re-export canonical collapse (FEAT-046). The TS-only `ReExportGraph` build pass in `graphify-cli/src/main.rs::run_extract_with_workspace` now also fires when a project contains Rust sources (gate widened from `Language::TypeScript` to `TypeScript || Rust`). Consumes the `ReExportEntry` records FEAT-045 emits on `pub use foo::Bar;` declarations, walks `resolve_canonical` per spec, and accumulates `barrel_to_canonical` rewrites + `canonical_to_alt_paths` exactly like the existing TS path. Two key asymmetries vs TS Part B: (1) `pub use` does NOT create a barrel symbol node in Rust today (the extractor emits an Imports edge to the use-target, not a node), so the barrel-symbol-node-drop step is a no-op for Rust; the load-bearing piece is the consumer-side edge target rewrite. (2) Rust Calls/Imports raw_targets (`Bar::new`, `crate::Bar`) are NOT module-shaped pre-resolution, so the existing pre-loop string-rewrite at the all_raw_edges stage can't catch them — the new rewrite hooks in AFTER `resolver.resolve()` produces a dot-notation id, with both exact-match (`src.Bar` → `src.foo.Bar`) and prefix-match (`src.Bar.new` → `src.foo.Bar.new`) shapes covered by a new private helper `rewrite_via_barrel_prefix`. Out of scope for FEAT-046: cross-crate `pub use` fan-out (FEAT-048, gated), type-alias collapse (FEAT-049 candidate), consumer-side `use_aliases` rewrite (FEAT-047). Dogfood baseline holds: `graphify suggest stubs` candidate count steady at 7, cycles still 0, no hotspot >0.85. The dogfood self-references that triggered FEAT-044 (`src.Community`, `src.Cycle`) are dominantly cross-crate or type-alias-shaped, so FEAT-046 alone produces no visible candidate-count delta — the win lands when FEAT-048 ships.
+
 ## [0.13.3] - 2026-04-26
 
 ### Changed

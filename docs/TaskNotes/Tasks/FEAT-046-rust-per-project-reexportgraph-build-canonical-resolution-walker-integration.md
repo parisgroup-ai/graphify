@@ -30,12 +30,12 @@ One asymmetry vs TS Part B: `pub use` in Rust does NOT create a barrel symbol no
 
 ## Subtasks
 
-- [ ] Gate the existing `has_ts_reexport_work` block in `run_extract_with_workspace` on `Rust` language presence too
-- [ ] Wire a Rust resolver callback that mirrors the TS one (apply local_prefix; lookup in `known_modules`)
-- [ ] For each Rust `ReExportEntry`, walk `resolve_canonical` and accumulate `barrel_to_canonical` + `canonical_to_alt_paths`
-- [ ] At consumer-side edge resolution, repoint targets matching `barrel_to_canonical` keys to the canonical id (no symbol-node drop)
-- [ ] Integration test: 2-file Rust project (`lib.rs` with `pub use foo::Bar;` + `consumer.rs` with `use crate::Bar; fn _test() { Bar::new(); }`) asserts the Calls edge from `consumer` lands at `src.foo.Bar`, not `src.Bar`
-- [ ] Verify `cargo test --workspace` and `graphify run --config graphify.toml` baseline holds
+- [x] Gate the existing `has_ts_reexport_work` block in `run_extract_with_workspace` on `Rust` language presence too
+- [x] Wire a Rust resolver callback that mirrors the TS one (apply local_prefix; lookup in `known_modules`)
+- [x] For each Rust `ReExportEntry`, walk `resolve_canonical` and accumulate `barrel_to_canonical` + `canonical_to_alt_paths`
+- [x] At consumer-side edge resolution, repoint targets matching `barrel_to_canonical` keys to the canonical id (no symbol-node drop)
+- [x] Integration test: 2-file Rust project (`lib.rs` with `pub use foo::Bar;` + `consumer.rs` with `use crate::Bar; fn _test() { Bar::new(); }`) asserts the Calls edge from `consumer` lands at `src.foo.Bar`, not `src.Bar`
+- [x] Verify `cargo test --workspace` and `graphify run --config graphify.toml` baseline holds
 
 ## Out of scope
 

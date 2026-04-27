@@ -2615,9 +2615,30 @@ fn run_extract_with_workspace(
     // resolver pass knows the target is already resolved to a canonical
     // module id (no re-resolve needed).
     let mut named_import_edges: Vec<(String, String, graphify_core::types::Edge)> = Vec::new();
-    let has_ts_reexport_work = (!all_reexports.is_empty() || !all_named_imports.is_empty())
-        && languages.contains(&Language::TypeScript);
-    if has_ts_reexport_work {
+    // FEAT-046: Rust `pub use` re-export collapse reuses the same
+    // `ReExportGraph` build pass + walker as TS. The Rust extractor (FEAT-045)
+    // emits `ReExportEntry` records on `pub use foo::bar::Baz;` declarations
+    // into `result.reexports`, just like the TS extractor does for
+    // `export … from …`. The walker is language-agnostic — its only Rust-vs-TS
+    // dependency is the `resolve_cb` closure that translates raw_target
+    // strings to dot-notation module ids. `resolver.resolve(...)` already
+    // handles every language branch (case 6 strips `crate::`, case 8 looks up
+    // the bare module, case 8.5 synthesizes `{from_module}.{raw}`), so the
+    // existing TS callback below works for Rust raw_targets too.
+    //
+    // Asymmetry vs TS Part B: `pub use` does NOT create a barrel symbol node
+    // in Rust (the extractor emits an Imports edge to the use-target, not a
+    // node), so the barrel-symbol-node-drop step (`all_nodes.retain(...)`) is
+    // a no-op for Rust. The load-bearing piece is the consumer-side edge
+    // target rewrite — when `consumer.rs::use crate::Bar; Bar::new();`
+    // resolves the Calls edge target to `src.Bar`, we rewrite it to the
+    // canonical `src.foo.Bar`. Because Rust raw_targets for Calls (`Bar::new`)
+    // are NOT module-shaped pre-resolution, the rewrite must run AFTER
+    // `resolver.resolve()`. See the post-resolve rewrite a few hundred lines
+    // below.
+    let has_reexport_work = (!all_reexports.is_empty() || !all_named_imports.is_empty())
+        && (languages.contains(&Language::TypeScript) || languages.contains(&Language::Rust));
+    if has_reexport_work {
         let package_modules_owned: HashSet<String> =
             package_modules.iter().map(|s| (*s).to_owned()).collect();
         let reexport_resolver = &resolver;
@@ -2971,6 +2992,38 @@ fn run_extract_with_workspace(
         let (resolved_target, is_local, resolver_confidence) =
             resolver.resolve(&raw_target, &src_id, is_package);
 
+        // FEAT-046: Rust re-export canonical collapse. Rust Calls/Imports
+        // raw_targets (`Bar::new`, `crate::Bar`) are NOT module-shaped
+        // pre-resolution, so the pre-loop string-rewrite at line ~2914 can't
+        // catch them. After `resolver.resolve()` produces a dot-notation id
+        // (e.g. `src.Bar` via the FEAT-031 use-alias fallback), check
+        // `barrel_to_canonical` and repoint the edge at the canonical
+        // declaration (e.g. `src.foo.Bar`).
+        //
+        // Two match shapes:
+        //   1. Exact: `src.Bar` → `src.foo.Bar` (Imports edges, struct refs).
+        //   2. Prefix: `src.Bar.new` → `src.foo.Bar.new` (method/symbol Calls
+        //      edges where the resolver promoted `Bar::new` through the
+        //      FEAT-031 `use`-alias fallback to `src.Bar.new`). The `Bar.new`
+        //      symbol id isn't itself in the barrel_to_canonical map, but it
+        //      lives "under" the `src.Bar` barrel scope. Rewrite the prefix.
+        //
+        // Safe to run for every language — the map is empty for non-Rust /
+        // non-TS configs and TS edges already got rewritten pre-resolution
+        // so a second hit here is either a no-op (target already canonical)
+        // or harmless idempotency.
+        let (resolved_target, is_local) =
+            if let Some(canonical) = barrel_to_canonical.get(&resolved_target) {
+                let canonical_is_local = resolver.is_local_module(canonical);
+                (canonical.clone(), canonical_is_local || is_local)
+            } else if let Some((rewritten, canonical_is_local)) =
+                rewrite_via_barrel_prefix(&resolved_target, &barrel_to_canonical, &resolver)
+            {
+                (rewritten, canonical_is_local || is_local)
+            } else {
+                (resolved_target, is_local)
+            };
+
         // Step 1: Apply resolver confidence (never upgrade past extractor's value).
         let final_confidence = edge.confidence.min(resolver_confidence);
 
@@ -3007,6 +3060,32 @@ fn run_extract_with_workspace(
     }
 
     (graph, extra_owned, stats)
+}
+
+/// FEAT-046 helper: rewrite `target` when it lives "under" a barrel id in
+/// `barrel_to_canonical`. Returns `Some((rewritten, canonical_is_local))` if
+/// the prefix replacement succeeded, `None` otherwise.
+///
+/// Match shape: `target` starts with `{barrel_id}.` (note the trailing dot —
+/// guards against false positives like `src.BarOther` matching the `src.Bar`
+/// barrel). The rewrite is `{canonical_id}.{rest}` where `rest` is the
+/// suffix after the barrel prefix. Used for symbol-suffix Calls edges like
+/// `src.Bar.new` → `src.foo.Bar.new` after the FEAT-031 use-alias fallback
+/// promotes `Bar::new` through the barrel scope.
+fn rewrite_via_barrel_prefix(
+    target: &str,
+    barrel_to_canonical: &HashMap<String, String>,
+    resolver: &graphify_extract::resolver::ModuleResolver,
+) -> Option<(String, bool)> {
+    for (barrel_id, canonical_id) in barrel_to_canonical {
+        let prefix = format!("{}.", barrel_id);
+        if let Some(rest) = target.strip_prefix(&prefix) {
+            let rewritten = format!("{}.{}", canonical_id, rest);
+            let canonical_is_local = resolver.is_local_module(&rewritten);
+            return Some((rewritten, canonical_is_local));
+        }
+    }
+    None
 }
 
 fn find_nearest_ancestor_file(start_path: &Path, file_name: &str) -> Option<PathBuf> {
