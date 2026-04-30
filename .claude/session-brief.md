@@ -1,81 +1,60 @@
-# Session Brief — 2026-04-27 (admin/share wave: CLAUDE.md compaction + session-close skill v1.5.0)
+# Session Brief — 2026-04-30 (BUG-028 / GH #15: session-brief baseline-age structural fix + v0.13.7)
 
 ## Last Session Summary
 
-Sessão curta de admin/manutenção que rodou imediatamente após a wave BUG-026 + BUG-027 + v0.13.6 ter fechado. Dois deliverables: (1) commitar e empurrar a compactação do `CLAUDE.md` que tinha ficado unstaged ao final da sessão anterior, e (2) limpar o sinal `session-close skill modified` que vinha sendo carregado entre sessões via `/share-skill session-close`. Durante o share, detectei que a edição local (CHORE-1456 multi-instance commit mutex) era explicitamente ToStudy-specific e violava Step 3b da meta-skill share-skill — generalizei o bloco antes de empurrar para `parisgroup-ai/ai-skills-parisgroup` e bumpei a versão `1.4.0 → 1.5.0`. Net: 1 commit local + 1 commit remoto (org skills repo).
+Sessão atacou GH issue #15 (`graphify session brief` reportando `stale: true / baseline_age_days: 12` permanente após `cp` de promoção de baseline). Diagnóstico imediato: `baseline_age_days` em `crates/graphify-cli/src/session.rs:284` lia mtime do **diretório** `report/baseline/`, e POSIX dir-mtime não atualiza em sobrescrita de arquivo existente — só em add/remove de entrada. Optei pela rota estrutural ("opção C") em vez do fix mínimo: stampar `analysis.json` com `generated_at` (ISO 8601 UTC) no top-level, e rewrite da função pra walk de `report/baseline/` (depth ≤ 1, cobre single-file e per-project layouts), parsing do campo via chrono, com fallback pro mtime do **arquivo** (não dir) em snapshots legados. Schema additivo (`Option<String>` com `#[serde(default)]`). Release v0.13.7 publicada — commit, tag, push, install local, GH issue fechada.
 
 ## Current State
 
-- Branch: `main`, em sync com `origin/main` após push (commit `644236f`)
+- Branch: `main`, em sync com `origin/main` (ahead=0 behind=0, push de `ca6a1b9` confirmado)
 - Working tree: clean
-- Latest release: **`v0.13.6`** (inalterada desde a sessão anterior; CI run 24989121202 verificado verde)
-- TaskNotes: **78 total**, **1 open** (FEAT-048, deferred via ADR-0002), 77 done — inalterado nessa sessão
+- Latest release: **`v0.13.7`** — release CI `25175705701` ainda `in_progress` no momento do close (~4min ETA típico)
+- TaskNotes: **79 total**, **1 open** (FEAT-048, deferred via ADR-0002), 78 done — BUG-028 criada e fechada nessa sessão
 - `graphify check`: PASS em todos os 5 projetos, 0 ciclos, max hotspot `src.server` @ 0.600 (graphify-mcp), todos sob threshold 0.85
-- Skills Sync: **0 modified, 17 unshared** (todas as 17 são project-specific intencionalmente local-only — sinal "modified" carry-over zerado)
+- `graphify --version` local = 0.13.7 (atualizado via `cargo install --path crates/graphify-cli --force`)
 
 ## Commits This Session
 
-`5ec137e..644236f` (1 commit local pushed):
+`8f7017a..ca6a1b9` (1 commit local, pushed):
 
-- `644236f` docs(claude.md): compact conventions bullets for readability — diff cirúrgico (+15/-17 linhas) na seção Conventions. Bullets longos de BUG-018, cases 8.5/8.6, BUG-023/024/025 (consolidados num bullet único com ponteiro pra task files), FEAT-021/028/045-047, CHORE-011, FEAT-043, FEAT-049/BUG-027 foram condensados preservando todos os fatos load-bearing — asymmetry notes, ADR pointers, gotchas, design pivots. Commit foi feito após `/session-start` flagar o working tree sujo cuja origem era edit unstaged do `/session-close` anterior.
-
-E em `parisgroup-ai/ai-skills-parisgroup` (master, 1 commit):
-
-- `75a1cc3` feat: update session-close skill — bumpa `session-close` SKILL.md `1.4.0 → 1.5.0`. Mudança: bloco "Multi-instance commit mutex" generalizado de `(CHORE-1456, ToStudy-specific)` com 2 paths absolutos do monorepo cursos para `(optional project-side support)` com fallback no-op para projetos sem o mutex. Diff +7/-1 linha.
+- `ca6a1b9` fix(session): bump 0.13.7 — baseline age reads `generated_at`, not dir mtime (BUG-028, GH #15) — 13 arquivos alterados, +407/-57 linhas. Inclui: novo módulo `crates/graphify-report/src/time_utils.rs` (extração chrono-free de `now_iso8601`/`format_epoch_seconds_utc` que estavam privados em `consolidation.rs`); adição de `generated_at: String` no top-level de `analysis.json` via `write_analysis_json_with_allowlist`; rewrite de `baseline_age_days` (walk depth≤1, prefere `generated_at`, fallback file mtime, retorna menor idade); `AnalysisSnapshot::generated_at: Option<String>` com `#[serde(default)]`; struct-literal updates em 4 sites (`graphify-core/src/diff.rs`, `graphify-cli/src/main.rs`, `graphify-report/src/{consolidation,smells}.rs`); 7 testes unitários novos em `session.rs` cobrindo no-baseline, empty-baseline, generated_at-presente, mtime-fallback, nested layout, pick-youngest, parse-error; 3 testes em `time_utils.rs`; bump 0.13.6 → 0.13.7 em `Cargo.toml`/`Cargo.lock`; CHANGELOG entry; CLAUDE.md schema note; task `BUG-028-*.md`. Smoke-test pre-commit confirmou correção: dir mtime backdated pra 2020-04-18, brief reporta `stale: false / baseline_age_days: 0`.
 
 ## Decisions Made (don't re-debate)
 
-- **CLAUDE.md compaction era safe-to-commit em vez de revertível.** A inspeção da diff confirmou: 0 fatos load-bearing perdidos. Reescrita pura de prosa pra legibilidade, e o CLAUDE.md é lido em todo `/session-start` então o ROI da compactação é alto. Alternativa "revert and ignore" foi descartada.
-- **Generalizar o bloco mutex em vez de pular o share** (escolha A vs B vs C oferecida ao operator). Step 3b da `share-skill` exige skill project-agnostic; o bloco original violava com tag explícita `(ToStudy-specific)` + paths `memory-bank/topics/multi-instance-coordination.md` e `docs/product/decisions/2026-04-26-session-close-mutex.md`. Generalizar custou ~5 min e deixa a skill compartilhada útil pra qualquer projeto que adote o pattern; "push as-is" teria poluído o repo compartilhado.
-- **Bump 1.4.0 → 1.5.0 em vez de 1.4.1.** Adição de novo bloco de documentação (mesmo que opcional) é minor bump, não patch. `/sync-skills` usa version pra sinalizar conteúdo novo a teammates.
-- **Não rodar brainstorm de próximo ciclo nessa sessão.** Operator escolheu A (share-skill) sobre B (brainstorm) — consistente com a recomendação no `/session-start` de que brainstorm misturado com fim de sessão de fix wave tende a sair raso.
+- **Opção C (raiz) em vez de A (walk + file mtime puro) ou B (single-file).** Trade-off oferecido: A era 10 linhas e robusto mas dependia de mtime; B era trivial mas quebrava em multi-project; C tocava schema mas resolvia raiz. User pediu "fazer o certo mesmo que de trabalho" — escolheu C. Schema fan-out controlado: `analysis.json` ganha 1 campo, `AnalysisSnapshot` ganha 1 campo `Option<String>` com `#[serde(default)]`, struct literals atualizados em 4 sites de teste/build. Zero quebra em consumers.
+- **Extrair `time_utils` em vez de `pub(crate)` os helpers de `consolidation.rs`.** A intenção era manter `graphify-report` chrono-free (consolidation.rs já tinha o pattern). Extrair pra módulo dedicado deixa explícito que é util compartilhado, não acidental. 3 testes pequenos cobrindo zero/known-value/shape.
+- **Fallback pro mtime do arquivo (não dir) em snapshots legados.** Garante que 0.13.6 snapshots ainda funcionam — `--force` agora correto, sem precisar de regen com 0.13.7. `Option<String>` + `#[serde(default)]` em `AnalysisSnapshot` cobre o serde side; o reader em session.rs usa `serde_json::Value` direto pra ficar tolerante a JSON legado.
+- **Pick-youngest em vez de pick-oldest pra multi-baseline.** Operator promote em batch, importa freshness. Documentado inline em `baseline_age_days`.
 
 ## Architectural Health (Graphify)
 
 `graphify check --config graphify.toml` — todos os 5 projetos PASS:
 
 - 0 ciclos introduzidos, 0 policy violations
-- Hotspots inalterados desde a sessão anterior (commit foi doc-only, não tocou source):
+- Hotspots inalterados pre/pós sessão (mudanças foram aditivas em writers + leitor de session, sem topology change):
   - `src.server` (graphify-mcp) @ 0.600
   - `src.install` (graphify-cli) @ 0.453
   - `src.pr_summary` (graphify-report) @ 0.444
-  - `src.graph.CodeGraph` (graphify-core) @ 0.400
   - `src.lang.ExtractionResult` (graphify-extract) @ 0.400
+  - `src.graph.CodeGraph` (graphify-core) @ 0.400
 - Todos bem sob o threshold CI de 0.85
-- Info noise: `unresolved re-export chain for symbol 'Community' from 'src' (ends at graphify_core::community.Community)` — esperado, é literalmente o sinal de gate de FEAT-048 (ADR-0002, threshold 1/5)
+- Info noise: `unresolved re-export chain for symbol 'Community' from 'src' (ends at graphify_core::community.Community)` — esperado, sinal de gate de FEAT-048 (ADR-0002, threshold 1/5)
 
 ## Skills Sync
 
-- **Modified (unsynced): 0** — `session-close` foi compartilhada nessa sessão (`75a1cc3` em `parisgroup-ai/ai-skills-parisgroup`). Sinal carry-over que aparecia no brief anterior está zerado.
-- **Local-only: 17** — todas project-specific intencionais (chatstudy-qa-compare, course-debug, formmodal-audit, listpage-builder, etc.). Pra silenciar individualmente: `touch ~/.claude/skills/<name>/.skills-sync-ignore`.
+- **Modified (unsynced): 2** — `share-skill` e `sync-skills`. **Carry-over de edição matinal hoje (2026-04-30 08:22-08:23)**, não dessa sessão. Ambos têm `.bak-20260430` siblings indicando edição manual recente. Não tocados nessa sessão. Recomendação: rodar `/share-skill share-skill` e `/share-skill sync-skills` na próxima sessão se as edições foram intencionais, ou descartar os `.bak` files se foram experimento.
+- **Local-only: 17** — todas project-specific intencionais. Mesma lista da sessão anterior.
 
-## Open Items
+## Open Items / Suggested Next Steps
 
-Inalterado da sessão anterior — só **FEAT-048** (deferred via ADR-0002) continua como única task aberta, gated em ≥5 hits cross-crate; workspace mostra 1 hit.
+1. **Aguardar release CI v0.13.7 finalizar** (~4min ETA típico, run `25175705701`). Se falhar, investigar antes de qualquer trabalho novo.
+2. **Triar carry-over das 2 skills modificadas** (`share-skill`, `sync-skills`) — entender se edição matinal foi pra share ou era experimento descartável. Sessão anterior encerrou em 08:00 e essa começou 14:30+, então a janela 08:22-08:23 caiu entre as duas. Provável que tenha sido outra instance ou ação manual fora do Claude Code.
+3. **Brainstorm próximo ciclo** — backlog `tn` agora tem só FEAT-048 (deferred). Sem warm-up óbvio. Próxima sessão pode começar com `/brainstorm` ou caçar candidatos no backlog do GitHub (que após fechar #15 zerou).
 
-Backlog continua em estado terminal-clean. Nenhum item novo gerado nessa sessão (foi admin pura). Os triggers de re-abertura permanecem:
+## Quick reference
 
-1. Consumer report de misclassificação no graphify
-2. `graphify suggest stubs` count > 1
-3. Cross-crate `pub use` hits ≥5 (FEAT-048 re-open)
-4. Nova frente de feature (requer brainstorm)
-
-## Suggested Next Steps
-
-1. **Brainstorm de próximo ciclo** quando bater appetite — o estado terminal-clean já dura 2 sessões consecutivas. Possíveis frentes não-priorizadas:
-   - Drift check em consumer real (rodar graphify em `parisgroup-ai/cursos` ou PageShell e ver se aparece sinal interessante)
-   - Nova linguagem extractor (Java? Kotlin? Swift?)
-   - Refinar `graphify suggest stubs` UX (formato de output, filtros)
-   - MCP tools novos (mais cobertura analítica via assistente AI)
-2. **Refresh local PATH binary** se em algum momento `graphify --version` divergir de `Cargo.toml` — `cargo install --path crates/graphify-cli --force`. Hoje está alinhado em 0.13.6.
-3. **Skills Sync — nada a fazer.** Carry-over zerado; futuras edições em qualquer skill global devem ser empurradas no mesmo ciclo via `/share-skill <name>` em vez de virarem sinal de próxima sessão.
-
-## Self-dogfood metric trail
-
-| Session marker | `suggest stubs` count | Notes |
-|---|---|---|
-| End of FEAT-044 wave | 7 | FEAT-049 closed `src.Cycle` |
-| Start of BUG-026/027 wave | 6 | matches+toml_edit added |
-| After BUG-027 | 2 | INTEGRATIONS, Selector::Project, Selector::Group collapsed |
-| After BUG-026 | 1 | `env` macro stub added; só `src.Community`/FEAT-048-gate |
-| End of this session | 1 | inalterado — só admin/share |
+- GH issue #15 fechada com comment + repro do smoke test e link pro release
+- BUG-028 task em `docs/TaskNotes/Tasks/BUG-028-fix-session-brief-baseline-age-reads-dir-mtime-instead-of-analysis-json.md`, status `done`
+- Release CI: https://github.com/parisgroup-ai/graphify/actions/runs/25175705701
+- Tag: https://github.com/parisgroup-ai/graphify/releases/tag/v0.13.7
+- Commit: https://github.com/parisgroup-ai/graphify/commit/ca6a1b9
