@@ -204,6 +204,7 @@ mod tests {
     fn snapshot(nodes: Vec<NodeSnapshot>, edges: Vec<EdgeSnapshot>) -> AnalysisSnapshot {
         use graphify_core::diff::SummarySnapshot;
         AnalysisSnapshot {
+            generated_at: None,
             summary: SummarySnapshot {
                 total_nodes: nodes.len(),
                 total_edges: edges.len(),

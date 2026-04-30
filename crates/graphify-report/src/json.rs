@@ -7,6 +7,7 @@ use graphify_core::{
     metrics::{HotspotType, NodeMetrics},
 };
 
+use crate::time_utils::now_iso8601;
 use crate::{Community, Cycle};
 
 // ---------------------------------------------------------------------------
@@ -151,6 +152,13 @@ struct ConfidenceSummary {
 
 #[derive(Serialize)]
 struct AnalysisJson<'a> {
+    /// ISO 8601 UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) of the moment this
+    /// `analysis.json` was written. Added in 0.13.7 (BUG-028) so consumers
+    /// like `graphify session brief` can compute baseline freshness from
+    /// payload content instead of filesystem mtimes — directory mtimes don't
+    /// update on in-place file overwrites, which is the standard baseline-
+    /// promotion gesture (`cp report/<proj>/analysis.json report/baseline/`).
+    generated_at: String,
     nodes: Vec<MetricsRecord<'a>>,
     edges: Vec<EdgeRecord<'a>>,
     communities: Vec<CommunityRecord<'a>>,
@@ -310,6 +318,7 @@ pub fn write_analysis_json_with_allowlist(
     };
 
     let payload = AnalysisJson {
+        generated_at: now_iso8601(),
         nodes,
         edges: edges_rec,
         communities: communities_rec,

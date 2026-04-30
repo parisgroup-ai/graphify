@@ -1557,6 +1557,10 @@ fn cmd_diff(
             let total_communities = communities.len();
             let total_cycles = cycles_simple.len();
             let a = AnalysisSnapshot {
+                // Live snapshot built in-memory for diff; no on-disk artifact,
+                // so consumers (drift report, smells) get None and fall back
+                // to file mtime if they need an age.
+                generated_at: None,
                 nodes: metrics
                     .iter()
                     .map(|m| graphify_core::diff::NodeSnapshot {

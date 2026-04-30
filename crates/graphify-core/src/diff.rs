@@ -15,6 +15,14 @@ use crate::metrics::HotspotType;
 /// types. It mirrors the JSON shape exactly so any analysis.json can be loaded.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AnalysisSnapshot {
+    /// ISO 8601 UTC timestamp of when the snapshot was written. Added in
+    /// 0.13.7 (BUG-028) so `graphify session brief` can compute baseline
+    /// freshness without depending on filesystem mtimes (directory mtimes
+    /// don't update on in-place file overwrites). Absent on snapshots
+    /// written by 0.13.6 or earlier — consumers must fall back to
+    /// `analysis.json`'s own file mtime for those.
+    #[serde(default)]
+    pub generated_at: Option<String>,
     pub nodes: Vec<NodeSnapshot>,
     pub communities: Vec<CommunitySnapshot>,
     pub cycles: Vec<Vec<String>>,
@@ -645,6 +653,7 @@ mod tests {
         let total_communities = communities.len();
         let total_cycles = cycles.len();
         AnalysisSnapshot {
+            generated_at: None,
             nodes,
             communities,
             cycles,

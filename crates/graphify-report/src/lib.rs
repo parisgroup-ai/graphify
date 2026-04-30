@@ -15,6 +15,7 @@ pub mod obsidian;
 pub mod pr_summary;
 pub mod smells;
 pub mod suggest;
+pub mod time_utils;
 pub mod trend_json;
 pub mod trend_markdown;
 

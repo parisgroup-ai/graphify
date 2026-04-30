@@ -4,6 +4,11 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.7] - 2026-04-30
+
+### Fixed
+- fix(session): `graphify session brief` reports correct `baseline_age_days` after baseline promotion (BUG-028, GH issue #15). Pre-fix, `baseline_age_days` in `crates/graphify-cli/src/session.rs` read the directory mtime of `report/baseline/` and converted to days. POSIX directory mtimes only update on entry add/remove — overwriting an existing file in place (the standard baseline-promotion gesture `cp report/<proj>/analysis.json report/baseline/analysis.json`) leaves the dir mtime untouched, so the warning permanently surfaced the age of the dir's first creation regardless of how recent the contents were. `--force` did not help because it called the same broken function. Root fix in two places: (1) `analysis.json` now carries a top-level `generated_at` field (ISO 8601 UTC, format `YYYY-MM-DDTHH:MM:SSZ`) stamped at write time by `graphify-report::json::write_analysis_json_with_allowlist`. (2) `baseline_age_days` walks `report/baseline/` (depth ≤ 1) for `analysis.json` files, parses each one's `generated_at` via chrono, falls back to the file's own mtime (NOT dir mtime) when the field is absent (legacy 0.13.6 snapshots), and returns the smallest age across all found files — youngest baseline wins, matching operator intent after a batch promotion. The chrono-free `format_epoch_seconds_utc` helper from `consolidation.rs` was extracted to a new `graphify-report::time_utils` module so json.rs and consolidation.rs share the stamp helper without each pulling chrono. Schema is additive: `AnalysisSnapshot::generated_at: Option<String>` carries `#[serde(default)]` so 0.13.6 snapshots still load through `graphify diff` without modification. Multi-project layouts (`baseline/<project>/analysis.json`) work too — the walk covers both single-file (`baseline/analysis.json`) and nested forms. 7 new unit tests cover the no-baseline, empty-baseline, generated_at-present, mtime-fallback, nested-layout, multiple-baselines-pick-youngest, and chrono-parse paths.
+
 ## [0.13.6] - 2026-04-27
 
 ### Changed

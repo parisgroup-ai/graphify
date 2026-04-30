@@ -281,11 +281,84 @@ fn fs_mtime(p: &Path) -> Result<SystemTime> {
     Ok(std::fs::metadata(p)?.modified()?)
 }
 
+/// Age in days of the freshest `analysis.json` under `report/baseline/`.
+///
+/// Returns `None` when no `analysis.json` is found (no baseline ever
+/// promoted) — that's the no-warn path.
+///
+/// **Why not the directory mtime?** POSIX directory mtimes only update on
+/// entry add/remove. Overwriting an existing file in place leaves the dir
+/// mtime untouched, so the dir-mtime approach (used pre-0.13.7) reported
+/// the age of the dir's *first creation*, not the freshness of its
+/// contents — even after a fresh `cp report/<proj>/analysis.json
+/// report/baseline/analysis.json`. See GH issue #15 / BUG-028.
+///
+/// **Order of preference, per file:**
+/// 1. Top-level `generated_at` field (ISO 8601 UTC, written by 0.13.7+).
+/// 2. The file's own mtime (legacy compat for snapshots written by 0.13.6
+///    or earlier).
+///
+/// **Multi-baseline:** scans `baseline/` and `baseline/*/` (depth ≤ 1) so
+/// both single-project (`baseline/analysis.json`) and multi-project
+/// (`baseline/<proj>/analysis.json`) layouts work. Returns the smallest
+/// age across all found files — the youngest baseline wins, matching
+/// the operator's mental model after a batch promotion.
 fn baseline_age_days(output_root: &Path) -> Option<i64> {
-    let baseline = output_root.join("baseline");
-    let mtime = std::fs::metadata(&baseline).ok()?.modified().ok()?;
+    let baseline_root = output_root.join("baseline");
+    if !baseline_root.is_dir() {
+        return None;
+    }
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let direct = baseline_root.join("analysis.json");
+    if direct.is_file() {
+        candidates.push(direct);
+    }
+    if let Ok(entries) = std::fs::read_dir(&baseline_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let nested = path.join("analysis.json");
+                if nested.is_file() {
+                    candidates.push(nested);
+                }
+            }
+        }
+    }
+
     let now = SystemTime::now();
+    candidates
+        .iter()
+        .filter_map(|path| analysis_file_age_days(path, now))
+        .min()
+}
+
+/// Age in days of a single `analysis.json` artifact, preferring the
+/// embedded `generated_at` field over the file's mtime.
+fn analysis_file_age_days(path: &Path, now: SystemTime) -> Option<i64> {
+    if let Ok(raw) = std::fs::read_to_string(path) {
+        if let Ok(parsed) = serde_json::from_str::<Value>(&raw) {
+            if let Some(ts) = parsed.get("generated_at").and_then(Value::as_str) {
+                if let Some(age) = parse_iso8601_age_days(ts, now) {
+                    return Some(age);
+                }
+            }
+        }
+    }
+    let mtime = std::fs::metadata(path).ok()?.modified().ok()?;
     let elapsed = now.duration_since(mtime).ok()?;
+    Some((elapsed.as_secs() / 86_400) as i64)
+}
+
+/// Parse an ISO 8601 UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`) into an age in
+/// days relative to `now`. Returns `None` on parse failure or future
+/// timestamps (which would be negative — caller treats as "absent" so the
+/// fallback can take over).
+fn parse_iso8601_age_days(ts: &str, now: SystemTime) -> Option<i64> {
+    use chrono::{DateTime, Utc};
+    let parsed: DateTime<Utc> = DateTime::parse_from_rfc3339(ts).ok()?.with_timezone(&Utc);
+    let parsed_st: SystemTime = parsed.into();
+    let elapsed = now.duration_since(parsed_st).ok()?;
     Some((elapsed.as_secs() / 86_400) as i64)
 }
 
@@ -646,5 +719,168 @@ mod tests {
             Some(vec!["x".into(), "y".into()])
         );
         assert!(parse_cycle(&json!(42)).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // BUG-028: baseline_age_days reads `generated_at` from analysis.json,
+    // not the directory mtime.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn baseline_age_returns_none_when_no_baseline_dir() {
+        let tmp = TempDir::new().unwrap();
+        assert!(baseline_age_days(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn baseline_age_returns_none_when_baseline_dir_empty() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("baseline")).unwrap();
+        assert!(baseline_age_days(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn baseline_age_uses_generated_at_field_when_present() {
+        // Repro of GH issue #15: dir mtime can be wildly old, but the
+        // `generated_at` field in the file should win.
+        let tmp = TempDir::new().unwrap();
+        let baseline = tmp.path().join("baseline");
+        std::fs::create_dir_all(&baseline).unwrap();
+        let body = json!({
+            "generated_at": Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            "nodes": [],
+            "edges": [],
+            "communities": [],
+            "cycles": [],
+            "summary": {
+                "total_nodes": 0, "total_edges": 0,
+                "total_communities": 0, "total_cycles": 0,
+                "top_hotspots": []
+            }
+        });
+        std::fs::write(
+            baseline.join("analysis.json"),
+            serde_json::to_string_pretty(&body).unwrap(),
+        )
+        .unwrap();
+
+        let age = baseline_age_days(tmp.path()).expect("expected an age");
+        assert_eq!(age, 0, "expected 0 days for a just-stamped baseline");
+    }
+
+    #[test]
+    fn baseline_age_falls_back_to_file_mtime_when_field_absent() {
+        // Legacy snapshot (no `generated_at`) — must fall back to file
+        // mtime, NOT directory mtime. The file mtime is fresh because we
+        // just wrote it; the directory mtime is also fresh on first
+        // creation but the test shape would still pass with the old
+        // (broken) implementation. This test guards the fallback path.
+        let tmp = TempDir::new().unwrap();
+        let baseline = tmp.path().join("baseline");
+        std::fs::create_dir_all(&baseline).unwrap();
+        let body = json!({
+            "nodes": [], "edges": [], "communities": [], "cycles": [],
+            "summary": {
+                "total_nodes": 0, "total_edges": 0,
+                "total_communities": 0, "total_cycles": 0,
+                "top_hotspots": []
+            }
+        });
+        std::fs::write(
+            baseline.join("analysis.json"),
+            serde_json::to_string_pretty(&body).unwrap(),
+        )
+        .unwrap();
+
+        let age = baseline_age_days(tmp.path()).expect("expected an age");
+        assert_eq!(age, 0, "fresh file should report 0d via mtime fallback");
+    }
+
+    #[test]
+    fn baseline_age_walks_nested_per_project_layout() {
+        // Multi-project layout: report/baseline/<project>/analysis.json.
+        let tmp = TempDir::new().unwrap();
+        let proj = tmp.path().join("baseline").join("my-svc");
+        std::fs::create_dir_all(&proj).unwrap();
+        let body = json!({
+            "generated_at": Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            "nodes": [], "edges": [], "communities": [], "cycles": [],
+            "summary": {
+                "total_nodes": 0, "total_edges": 0,
+                "total_communities": 0, "total_cycles": 0,
+                "top_hotspots": []
+            }
+        });
+        std::fs::write(
+            proj.join("analysis.json"),
+            serde_json::to_string_pretty(&body).unwrap(),
+        )
+        .unwrap();
+
+        let age = baseline_age_days(tmp.path()).expect("expected an age");
+        assert_eq!(age, 0);
+    }
+
+    #[test]
+    fn baseline_age_picks_youngest_across_multiple_baselines() {
+        // Two project baselines, one stamped 30 days ago, one stamped now.
+        // The function must report the youngest age — operators promote in
+        // batch and care about freshness, not staleness of stragglers.
+        let tmp = TempDir::new().unwrap();
+        let baseline = tmp.path().join("baseline");
+        let old = baseline.join("old-svc");
+        let fresh = baseline.join("fresh-svc");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&fresh).unwrap();
+
+        let mk_body = |ts: String| {
+            json!({
+                "generated_at": ts,
+                "nodes": [], "edges": [], "communities": [], "cycles": [],
+                "summary": {
+                    "total_nodes": 0, "total_edges": 0,
+                    "total_communities": 0, "total_cycles": 0,
+                    "top_hotspots": []
+                }
+            })
+        };
+
+        let thirty_days_ago = Utc::now() - chrono::Duration::days(30);
+        std::fs::write(
+            old.join("analysis.json"),
+            serde_json::to_string_pretty(&mk_body(
+                thirty_days_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            fresh.join("analysis.json"),
+            serde_json::to_string_pretty(&mk_body(
+                Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let age = baseline_age_days(tmp.path()).expect("expected an age");
+        assert_eq!(age, 0, "youngest baseline should win");
+    }
+
+    #[test]
+    fn parse_iso8601_age_handles_known_value() {
+        // 7 days ago should yield 7 (give-or-take rounding to whole days).
+        let now = SystemTime::now();
+        let seven_days_ago = Utc::now() - chrono::Duration::days(7);
+        let ts = seven_days_ago.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let age = parse_iso8601_age_days(&ts, now).expect("parse failed");
+        assert!((6..=7).contains(&age), "expected 6 or 7 days, got {}", age);
+    }
+
+    #[test]
+    fn parse_iso8601_age_returns_none_on_garbage() {
+        let now = SystemTime::now();
+        assert!(parse_iso8601_age_days("not-a-date", now).is_none());
+        assert!(parse_iso8601_age_days("", now).is_none());
     }
 }
