@@ -202,24 +202,6 @@ struct ProjectCheck {
     max_hotspot_score: Option<f64>,
 }
 
-impl ProjectConfig {
-    /// Collapse the TOML-facing `Option<LocalPrefix>` into the runtime
-    /// `EffectiveLocalPrefix` form. Omitted fields collapse to
-    /// `EffectiveLocalPrefix::omitted()` (single empty string, wrap mode).
-    /// Transitional bridge for legacy callers — Tasks 3-8 of FEAT-049
-    /// progressively plumb the full `EffectiveLocalPrefix` into walker /
-    /// resolver / cache. Retained on the impl as a stable conversion API
-    /// even though Task 8 removed the last in-tree caller in
-    /// `cmd_suggest_stubs` (which now reads `local_prefix` directly).
-    #[allow(dead_code)]
-    fn effective_local_prefix(&self) -> EffectiveLocalPrefix {
-        self.local_prefix
-            .as_ref()
-            .map(EffectiveLocalPrefix::from)
-            .unwrap_or_else(EffectiveLocalPrefix::omitted)
-    }
-}
-
 // ---------------------------------------------------------------------------
 // CLI definition
 // ---------------------------------------------------------------------------
