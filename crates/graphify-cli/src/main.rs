@@ -2243,14 +2243,14 @@ fn build_phase1_for_workspace(
     let extra_owned: Vec<String> = settings.exclude.clone().unwrap_or_default();
     let extra_excludes: Vec<&str> = extra_owned.iter().map(|s| s.as_str()).collect();
 
-    // Transitional: legacy callers still consume a single String prefix.
-    // Tasks 3-5 plumb the full EffectiveLocalPrefix through walker/resolver/cache.
-    let (effective_local_prefix, _auto) = match &project.local_prefix {
-        Some(lp) => (EffectiveLocalPrefix::from(lp).first().to_string(), false),
-        None => (
-            detect_local_prefix(&repo_path, &languages, &extra_excludes),
-            true,
-        ),
+    // FEAT-049: full EffectiveLocalPrefix plumbing — replaces the prior
+    // `.first().to_string()` transitional bridge.
+    let effective: EffectiveLocalPrefix = match &project.local_prefix {
+        Some(lp) => EffectiveLocalPrefix::from(lp),
+        None => {
+            let detected = detect_local_prefix(&repo_path, &languages, &extra_excludes);
+            EffectiveLocalPrefix::from(&LocalPrefix::Single(detected))
+        }
     };
 
     let psr4_mappings: Vec<(String, String)> = if languages.contains(&Language::Php) {
@@ -2266,10 +2266,10 @@ fn build_phase1_for_workspace(
         Vec::new()
     };
 
-    let files = graphify_extract::discover_files_with_psr4(
+    let files = graphify_extract::discover_files_eff_with_psr4(
         &repo_path,
         &languages,
-        &effective_local_prefix,
+        &effective,
         &extra_excludes,
         &psr4_mappings,
     );
@@ -2279,10 +2279,10 @@ fn build_phase1_for_workspace(
     let cache = match (force, cache_dir) {
         (false, Some(dir)) => {
             let cache_path = dir.join(".graphify-cache.json");
-            ExtractionCache::load(&cache_path, &effective_local_prefix)
-                .unwrap_or_else(|| ExtractionCache::new(&effective_local_prefix))
+            ExtractionCache::load_eff(&cache_path, &effective)
+                .unwrap_or_else(|| ExtractionCache::new_eff(&effective))
         }
-        _ => ExtractionCache::new(&effective_local_prefix),
+        _ => ExtractionCache::new_eff(&effective),
     };
 
     let python_extractor = PythonExtractor::new();
@@ -2292,7 +2292,7 @@ fn build_phase1_for_workspace(
     let php_extractor = PhpExtractor::new();
 
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
-    resolver.set_local_prefix(&effective_local_prefix);
+    resolver.set_local_prefixes(&effective.prefixes, effective.wrap);
     for file in &files {
         resolver.register_module_path(&file.module_name, &file.path, file.is_package);
     }
@@ -2457,21 +2457,24 @@ fn run_extract_with_workspace(
     let extra_owned: Vec<String> = settings.exclude.clone().unwrap_or_default();
     let extra_excludes: Vec<&str> = extra_owned.iter().map(|s| s.as_str()).collect();
 
-    // Transitional: legacy callers still consume a single String prefix.
-    // Tasks 3-5 plumb the full EffectiveLocalPrefix through walker/resolver/cache.
-    let (effective_local_prefix, auto_detected) = match &project.local_prefix {
-        Some(lp) => (EffectiveLocalPrefix::from(lp).first().to_string(), false),
-        None => (
-            detect_local_prefix(&repo_path, &languages, &extra_excludes),
-            true,
-        ),
+    // FEAT-049: full EffectiveLocalPrefix plumbing — replaces the prior
+    // `.first().to_string()` transitional bridge.
+    let (effective, auto_detected): (EffectiveLocalPrefix, bool) = match &project.local_prefix {
+        Some(lp) => (EffectiveLocalPrefix::from(lp), false),
+        None => {
+            let detected = detect_local_prefix(&repo_path, &languages, &extra_excludes);
+            (
+                EffectiveLocalPrefix::from(&LocalPrefix::Single(detected)),
+                true,
+            )
+        }
     };
 
     if auto_detected {
-        let shown_prefix = if effective_local_prefix.is_empty() {
+        let shown_prefix = if effective.first().is_empty() {
             "(root-level)"
         } else {
-            effective_local_prefix.as_str()
+            effective.first()
         };
         eprintln!(
             "[{}] Auto-detected local_prefix: {}",
@@ -2501,23 +2504,24 @@ fn run_extract_with_workspace(
     };
 
     // Discover files (PSR-4-aware for PHP; degrades to regular discovery for other languages).
-    let files = graphify_extract::discover_files_with_psr4(
+    let files = graphify_extract::discover_files_eff_with_psr4(
         &repo_path,
         &languages,
-        &effective_local_prefix,
+        &effective,
         &extra_excludes,
         &psr4_mappings,
     );
 
     // BUG-009: Warn when discovery finds very few files — likely misconfigured
-    // repo path or local_prefix.
+    // repo path or local_prefix. Show the cache-key form so multi-prefix
+    // configs surface as `multi:app|lib` instead of just the head prefix.
     if files.len() <= 1 {
         eprintln!(
             "Warning: project '{}' discovered only {} file(s). Check repo path ('{}') and local_prefix ('{}') configuration.",
             project.name,
             files.len(),
             project.repo,
-            effective_local_prefix,
+            effective.cache_key(),
         );
     }
 
@@ -2525,10 +2529,10 @@ fn run_extract_with_workspace(
     let cache = match (force, cache_dir) {
         (false, Some(dir)) => {
             let cache_path = dir.join(".graphify-cache.json");
-            ExtractionCache::load(&cache_path, &effective_local_prefix)
-                .unwrap_or_else(|| ExtractionCache::new(&effective_local_prefix))
+            ExtractionCache::load_eff(&cache_path, &effective)
+                .unwrap_or_else(|| ExtractionCache::new_eff(&effective))
         }
-        _ => ExtractionCache::new(&effective_local_prefix),
+        _ => ExtractionCache::new_eff(&effective),
     };
 
     let mut stats = CacheStats {
@@ -2545,7 +2549,7 @@ fn run_extract_with_workspace(
 
     // Build resolver.
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
-    resolver.set_local_prefix(&effective_local_prefix);
+    resolver.set_local_prefixes(&effective.prefixes, effective.wrap);
     for file in &files {
         resolver.register_module_path(&file.module_name, &file.path, file.is_package);
     }
@@ -2629,7 +2633,7 @@ fn run_extract_with_workspace(
         .collect();
 
     // Build new cache from extraction results and count stats.
-    let mut new_cache = ExtractionCache::new(&effective_local_prefix);
+    let mut new_cache = ExtractionCache::new_eff(&effective);
     let mut results: Vec<(String, ExtractionResult)> =
         Vec::with_capacity(extraction_with_meta.len());
 

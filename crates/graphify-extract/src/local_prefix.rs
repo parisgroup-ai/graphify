@@ -77,6 +77,23 @@ impl EffectiveLocalPrefix {
         }
     }
 
+    /// The prefix string to pass to legacy `&str`-based APIs.
+    ///
+    /// In wrap mode (`Single`), returns the head prefix — legacy callers
+    /// prepend it to file paths to compute module ids. In no-wrap mode
+    /// (`Multi`), returns an empty string so legacy paths are computed
+    /// relative to the project root with no prepending.
+    ///
+    /// Centralizes the wrap-rule used by the `_eff` walker entry points
+    /// and any future legacy bridge sites.
+    pub fn legacy_prefix(&self) -> &str {
+        if self.wrap {
+            self.first()
+        } else {
+            ""
+        }
+    }
+
     /// Predicate: is this module id "local" by virtue of its top segment?
     /// In wrap mode this is trivially true (every walker-discovered file
     /// already gets the prefix applied). In no-wrap mode, returns true iff
@@ -237,6 +254,29 @@ mod tests {
             LocalPrefix::Multi(v) => assert_eq!(v, vec!["app".to_string(), "lib".to_string()]),
             _ => panic!("expected Multi"),
         }
+    }
+
+    #[test]
+    fn legacy_prefix_wrap_returns_first() {
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Single("src".to_string()));
+        assert_eq!(eff.legacy_prefix(), "src");
+    }
+
+    #[test]
+    fn legacy_prefix_no_wrap_returns_empty() {
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "app".to_string(),
+            "lib".to_string(),
+        ]));
+        assert_eq!(eff.legacy_prefix(), "");
+    }
+
+    #[test]
+    fn legacy_prefix_omitted_returns_empty_string() {
+        // Omitted form is wrap-mode with empty first prefix — equivalent
+        // to legacy "no prefix configured" path.
+        let eff = EffectiveLocalPrefix::omitted();
+        assert_eq!(eff.legacy_prefix(), "");
     }
 
     #[test]

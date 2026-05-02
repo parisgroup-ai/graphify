@@ -279,12 +279,7 @@ pub fn path_to_module_eff(
     file: &Path,
     prefix: &crate::EffectiveLocalPrefix,
 ) -> String {
-    if prefix.wrap {
-        path_to_module(base, file, prefix.first())
-    } else {
-        // No-wrap: pass an empty prefix so existing logic skips prepending.
-        path_to_module(base, file, "")
-    }
+    path_to_module(base, file, prefix.legacy_prefix())
 }
 
 /// `EffectiveLocalPrefix`-aware variant of [`discover_files`].
@@ -305,11 +300,10 @@ pub fn discover_files_eff_with_psr4(
     extra_excludes: &[&str],
     psr4_mappings: &[(String, String)],
 ) -> Vec<DiscoveredFile> {
-    let legacy_prefix = if prefix.wrap { prefix.first() } else { "" };
     discover_files_with_psr4(
         root,
         languages,
-        legacy_prefix,
+        prefix.legacy_prefix(),
         extra_excludes,
         psr4_mappings,
     )
