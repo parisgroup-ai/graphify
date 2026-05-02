@@ -48,6 +48,17 @@ impl ExtractionCache {
         }
     }
 
+    /// `EffectiveLocalPrefix`-aware constructor — preferred over [`Self::new`]
+    /// for FEAT-049 multi-root support. The cache file's `local_prefix` field
+    /// holds `prefix.cache_key()`, which is `"multi:<sorted prefixes>"` for
+    /// array mode and bare prefix for string mode.
+    pub fn new_eff(prefix: &crate::EffectiveLocalPrefix) -> Self {
+        Self {
+            local_prefix: prefix.cache_key(),
+            entries: HashMap::new(),
+        }
+    }
+
     /// Look up a cached extraction by relative path and expected SHA256.
     ///
     /// Returns `Some` only if the path exists in the cache AND the stored
@@ -86,6 +97,13 @@ impl ExtractionCache {
             local_prefix: file.local_prefix,
             entries: file.entries,
         })
+    }
+
+    /// `EffectiveLocalPrefix`-aware loader. Returns `None` on any of the
+    /// existing miss conditions plus when the on-disk `local_prefix` field
+    /// doesn't match `prefix.cache_key()`.
+    pub fn load_eff(path: &Path, prefix: &crate::EffectiveLocalPrefix) -> Option<Self> {
+        Self::load(path, &prefix.cache_key())
     }
 
     /// Remove entries whose keys are not in `active_paths`.
@@ -348,6 +366,109 @@ mod tests {
         let cached = cached.unwrap();
         assert!(!cached.nodes.is_empty());
         assert!(!cached.edges.is_empty());
+    }
+
+    #[test]
+    fn cache_key_single_string_preserves_legacy_format() {
+        use crate::{EffectiveLocalPrefix, LocalPrefix};
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Single("app".to_string()));
+        let cache = ExtractionCache::new_eff(&eff);
+        // Key on disk should be just "app" — same as legacy ExtractionCache::new("app")
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        cache.save(&path);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("\"local_prefix\": \"app\""), "raw: {raw}");
+    }
+
+    #[test]
+    fn cache_key_multi_uses_marker_format() {
+        use crate::{EffectiveLocalPrefix, LocalPrefix};
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "lib".to_string(),
+            "app".to_string(),
+        ]));
+        let cache = ExtractionCache::new_eff(&eff);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        cache.save(&path);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        // Sorted: app|lib. Marker: multi:
+        assert!(
+            raw.contains("\"local_prefix\": \"multi:app|lib\""),
+            "raw: {raw}"
+        );
+    }
+
+    #[test]
+    fn cache_load_eff_round_trip_single() {
+        use crate::{EffectiveLocalPrefix, LocalPrefix};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Single("src".to_string()));
+        let mut cache = ExtractionCache::new_eff(&eff);
+        cache.insert("a.py".to_string(), "h1".to_string(), make_result());
+        cache.save(&path);
+
+        let loaded = ExtractionCache::load_eff(&path, &eff).unwrap();
+        assert!(loaded.lookup("a.py", "h1").is_some());
+    }
+
+    #[test]
+    fn cache_load_eff_round_trip_multi() {
+        use crate::{EffectiveLocalPrefix, LocalPrefix};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "app".to_string(),
+            "lib".to_string(),
+        ]));
+        let mut cache = ExtractionCache::new_eff(&eff);
+        cache.insert("a.ts".to_string(), "h1".to_string(), make_result());
+        cache.save(&path);
+
+        let loaded = ExtractionCache::load_eff(&path, &eff).unwrap();
+        assert!(loaded.lookup("a.ts", "h1").is_some());
+    }
+
+    #[test]
+    fn cache_load_eff_invalidates_when_switching_string_to_multi() {
+        use crate::{EffectiveLocalPrefix, LocalPrefix};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+
+        let single = EffectiveLocalPrefix::from(&LocalPrefix::Single("app".to_string()));
+        let multi = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec!["app".to_string()]));
+
+        let mut cache = ExtractionCache::new_eff(&single);
+        cache.insert("a.ts".to_string(), "h1".to_string(), make_result());
+        cache.save(&path);
+
+        // Loading with Multi(["app"]) must miss — different node IDs land in the graph.
+        assert!(ExtractionCache::load_eff(&path, &multi).is_none());
+    }
+
+    #[test]
+    fn cache_load_eff_stable_under_multi_reorder() {
+        use crate::{EffectiveLocalPrefix, LocalPrefix};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("c.json");
+
+        let a = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "app".to_string(),
+            "lib".to_string(),
+        ]));
+        let b = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "lib".to_string(),
+            "app".to_string(),
+        ]));
+
+        let mut cache = ExtractionCache::new_eff(&a);
+        cache.insert("x.ts".to_string(), "h1".to_string(), make_result());
+        cache.save(&path);
+
+        // Reordering must not invalidate.
+        assert!(ExtractionCache::load_eff(&path, &b).is_some());
     }
 
     #[test]
