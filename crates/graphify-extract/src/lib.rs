@@ -31,8 +31,9 @@ pub use ts_contract::{
 };
 pub use typescript::TypeScriptExtractor;
 pub use walker::{
-    detect_local_prefix, discover_files, discover_files_with_psr4, path_to_module,
-    path_to_module_psr4, DiscoveredFile,
+    detect_local_prefix, discover_files, discover_files_eff, discover_files_eff_with_psr4,
+    discover_files_with_psr4, path_to_module, path_to_module_eff, path_to_module_psr4,
+    DiscoveredFile,
 };
 pub use workspace_reexport::{
     CrossProjectHop, CrossProjectResolution, ProjectReExportContext, WorkspaceAliasTarget,

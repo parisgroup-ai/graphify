@@ -269,6 +269,52 @@ pub fn discover_files_with_psr4(
     results
 }
 
+/// `EffectiveLocalPrefix`-aware variant of [`path_to_module`].
+///
+/// In wrap mode (`Single`), behaves identically to the legacy `path_to_module`.
+/// In no-wrap mode (`Multi`), returns the module id from the relative path
+/// without any prepended prefix.
+pub fn path_to_module_eff(
+    base: &Path,
+    file: &Path,
+    prefix: &crate::EffectiveLocalPrefix,
+) -> String {
+    if prefix.wrap {
+        path_to_module(base, file, prefix.first())
+    } else {
+        // No-wrap: pass an empty prefix so existing logic skips prepending.
+        path_to_module(base, file, "")
+    }
+}
+
+/// `EffectiveLocalPrefix`-aware variant of [`discover_files`].
+pub fn discover_files_eff(
+    root: &Path,
+    languages: &[Language],
+    prefix: &crate::EffectiveLocalPrefix,
+    extra_excludes: &[&str],
+) -> Vec<DiscoveredFile> {
+    discover_files_eff_with_psr4(root, languages, prefix, extra_excludes, &[])
+}
+
+/// `EffectiveLocalPrefix`-aware variant of [`discover_files_with_psr4`].
+pub fn discover_files_eff_with_psr4(
+    root: &Path,
+    languages: &[Language],
+    prefix: &crate::EffectiveLocalPrefix,
+    extra_excludes: &[&str],
+    psr4_mappings: &[(String, String)],
+) -> Vec<DiscoveredFile> {
+    let legacy_prefix = if prefix.wrap { prefix.first() } else { "" };
+    discover_files_with_psr4(
+        root,
+        languages,
+        legacy_prefix,
+        extra_excludes,
+        psr4_mappings,
+    )
+}
+
 /// Detect the effective `local_prefix` for a project when the config omits it.
 ///
 /// Heuristic:
@@ -990,5 +1036,114 @@ mod tests {
             path_to_module_psr4(base, file, "", mappings),
             "scripts.seed"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // _eff (EffectiveLocalPrefix-aware) entry points — FEAT-049 Task 3
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn path_to_module_no_wrap_keeps_natural_id() {
+        use crate::EffectiveLocalPrefix;
+        use crate::LocalPrefix;
+        let base = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/lib/util.ts");
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "app".to_string(),
+            "lib".to_string(),
+        ]));
+        assert_eq!(path_to_module_eff(base, file, &eff), "lib.util");
+    }
+
+    #[test]
+    fn path_to_module_no_wrap_unmatched_root_still_no_wrap() {
+        // Multi-mode does NOT filter out non-matching files — the walker
+        // discovers everything; the array is purely a naming hint.
+        use crate::EffectiveLocalPrefix;
+        use crate::LocalPrefix;
+        let base = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/scripts/build.ts");
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "app".to_string(),
+            "lib".to_string(),
+        ]));
+        // `scripts` is not in the Multi list, but the file is still discovered —
+        // its module id stays natural.
+        assert_eq!(path_to_module_eff(base, file, &eff), "scripts.build");
+    }
+
+    #[test]
+    fn path_to_module_wrap_uses_single_prefix_unchanged() {
+        use crate::EffectiveLocalPrefix;
+        use crate::LocalPrefix;
+        let base = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/lib/util.ts");
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Single("src".to_string()));
+        // Mirrors current behavior — `lib/util.ts` under `local_prefix = "src"`
+        // becomes `src.lib.util`.
+        assert_eq!(path_to_module_eff(base, file, &eff), "src.lib.util");
+    }
+
+    #[test]
+    fn path_to_module_wrap_idempotent_on_already_prefixed() {
+        use crate::EffectiveLocalPrefix;
+        use crate::LocalPrefix;
+        let base = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/src/foo.ts");
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Single("src".to_string()));
+        assert_eq!(path_to_module_eff(base, file, &eff), "src.foo");
+    }
+
+    #[test]
+    fn path_to_module_omitted_returns_root_relative() {
+        use crate::EffectiveLocalPrefix;
+        let base = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/foo/bar.ts");
+        let eff = EffectiveLocalPrefix::omitted();
+        assert_eq!(path_to_module_eff(base, file, &eff), "foo.bar");
+    }
+
+    #[test]
+    fn path_to_go_package_no_wrap_keeps_natural_id() {
+        use crate::EffectiveLocalPrefix;
+        use crate::LocalPrefix;
+        let base = std::path::Path::new("/repo");
+        let file = std::path::Path::new("/repo/cmd/server/main.go");
+        let eff = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec!["cmd".to_string()]));
+        // Multi mode: no wrapping. Package path = `cmd.server`.
+        assert_eq!(path_to_module_eff(base, file, &eff), "cmd.server");
+    }
+
+    #[test]
+    fn discover_files_eff_returns_same_set_in_either_mode() {
+        use crate::{EffectiveLocalPrefix, LocalPrefix};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("app")).unwrap();
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::write(root.join("app/index.ts"), "").unwrap();
+        std::fs::write(root.join("lib/util.ts"), "").unwrap();
+
+        let single = EffectiveLocalPrefix::from(&LocalPrefix::Single("src".to_string()));
+        let multi = EffectiveLocalPrefix::from(&LocalPrefix::Multi(vec![
+            "app".to_string(),
+            "lib".to_string(),
+        ]));
+
+        let langs = vec![Language::TypeScript];
+        let files_single = discover_files_eff(root, &langs, &single, &[]);
+        let files_multi = discover_files_eff(root, &langs, &multi, &[]);
+
+        // Both modes discover the same files (just with different module IDs).
+        assert_eq!(files_single.len(), 2);
+        assert_eq!(files_multi.len(), 2);
+
+        let multi_ids: Vec<String> = files_multi.iter().map(|f| f.module_name.clone()).collect();
+        assert!(multi_ids.contains(&"app".to_string())); // app/index.ts → "app"
+        assert!(multi_ids.contains(&"lib.util".to_string()));
+
+        let single_ids: Vec<String> = files_single.iter().map(|f| f.module_name.clone()).collect();
+        assert!(single_ids.contains(&"src.app".to_string()));
+        assert!(single_ids.contains(&"src.lib.util".to_string()));
     }
 }
