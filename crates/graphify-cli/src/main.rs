@@ -208,7 +208,10 @@ impl ProjectConfig {
     /// `EffectiveLocalPrefix::omitted()` (single empty string, wrap mode).
     /// Transitional bridge for legacy callers — Tasks 3-8 of FEAT-049
     /// progressively plumb the full `EffectiveLocalPrefix` into walker /
-    /// resolver / cache.
+    /// resolver / cache. Retained on the impl as a stable conversion API
+    /// even though Task 8 removed the last in-tree caller in
+    /// `cmd_suggest_stubs` (which now reads `local_prefix` directly).
+    #[allow(dead_code)]
     fn effective_local_prefix(&self) -> EffectiveLocalPrefix {
         self.local_prefix
             .as_ref()
@@ -3296,17 +3299,19 @@ fn barrel_exclusion_ids<'a>(
     if !consolidation.suppress_barrel_cycles() {
         return Vec::new();
     }
-    // Transitional: only the Single string form participates in barrel
-    // suppression today. Multi-mode barrel exclusion is wired in Task 8.
-    let prefix: &'a str = match &project.local_prefix {
-        Some(LocalPrefix::Single(p)) if !p.is_empty() => p.as_str(),
+    // Multi-prefix support (FEAT-049 Task 8): every declared root is a
+    // candidate barrel id; the allowlist filters to the ones the user
+    // marked for suppression. Lifetime `'a` flows from `&'a ProjectConfig`
+    // through to `&'a str` borrows of the owned `String`s inside `Multi`.
+    let candidates: Vec<&'a str> = match &project.local_prefix {
+        Some(LocalPrefix::Single(p)) if !p.is_empty() => vec![p.as_str()],
+        Some(LocalPrefix::Multi(v)) => v.iter().map(|s| s.as_str()).collect(),
         _ => return Vec::new(),
     };
-    if consolidation.matches(prefix) {
-        vec![prefix]
-    } else {
-        Vec::new()
-    }
+    candidates
+        .into_iter()
+        .filter(|p| consolidation.matches(p))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -5540,7 +5545,7 @@ fn cmd_suggest_stubs(
     // Load each project's graph.json + build per-project ExternalStubs.
     struct Loaded {
         name: String,
-        local_prefix: String,
+        local_prefixes: Vec<String>,
         stubs: ExternalStubs,
         graph: GraphSnapshot,
     }
@@ -5584,16 +5589,14 @@ fn cmd_suggest_stubs(
             continue;
         }
 
-        // Transitional: suggest stubs still operates per single prefix.
-        // Multi-prefix shadowing handled in Task 8.
-        let effective = project.effective_local_prefix();
-        let local_prefix = if effective.is_multi() {
-            effective.first().to_string()
-        } else if effective.first().is_empty() {
-            // Preserve legacy default: when omitted, suggest stubs assumed "src".
-            "src".to_string()
-        } else {
-            effective.first().to_string()
+        // FEAT-049 Task 8: every declared root contributes to the shadow-set.
+        // For Multi the full vec flows through; for Single the lone prefix is
+        // wrapped; for omitted/empty fall back to the legacy "src" default so
+        // shadowing-by-default behaviour is preserved.
+        let local_prefixes: Vec<String> = match &project.local_prefix {
+            Some(LocalPrefix::Single(s)) if !s.is_empty() => vec![s.clone()],
+            Some(LocalPrefix::Single(_)) | None => vec!["src".to_string()],
+            Some(LocalPrefix::Multi(v)) => v.clone(),
         };
 
         let stubs = ExternalStubs::new(
@@ -5605,7 +5608,7 @@ fn cmd_suggest_stubs(
 
         loaded.push(Loaded {
             name: project.name.clone(),
-            local_prefix,
+            local_prefixes,
             stubs,
             graph,
         });
@@ -5618,11 +5621,20 @@ fn cmd_suggest_stubs(
         std::process::exit(1);
     }
 
+    // Stable backing slice for `ProjectInput.local_prefixes: &[&str]` — the
+    // `Vec<&str>` produced inside `.map()` would be dropped at the end of
+    // the closure, so build a parallel vector first and borrow from it.
+    let prefix_buffers: Vec<Vec<&str>> = loaded
+        .iter()
+        .map(|l| l.local_prefixes.iter().map(|s| s.as_str()).collect())
+        .collect();
+
     let inputs: Vec<ProjectInput<'_>> = loaded
         .iter()
-        .map(|l| ProjectInput {
+        .zip(prefix_buffers.iter())
+        .map(|(l, prefixes)| ProjectInput {
             name: l.name.as_str(),
-            local_prefix: l.local_prefix.as_str(),
+            local_prefixes: prefixes.as_slice(),
             current_stubs: &l.stubs,
             graph: &l.graph,
         })
@@ -6097,6 +6109,81 @@ mod tests {
         std::fs::write(&file, "export const Foo = 1;\n").unwrap();
 
         assert_eq!(find_nearest_ancestor_file(&file, "tsconfig.json"), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Task 8 (FEAT-049): barrel_exclusion_ids multi-prefix support
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn barrel_exclusion_array_mode_returns_all_matching_prefixes() {
+        use graphify_extract::LocalPrefix;
+        // Build a project with a Multi prefix where two of three roots are in
+        // the consolidation allowlist.
+        let project = ProjectConfig {
+            name: "mobile".to_string(),
+            repo: "./apps/mobile".to_string(),
+            lang: vec!["typescript".to_string()],
+            local_prefix: Some(LocalPrefix::Multi(vec![
+                "app".to_string(),
+                "lib".to_string(),
+                "components".to_string(),
+            ])),
+            external_stubs: Vec::new(),
+            check: None,
+        };
+        let raw = ConsolidationConfigRaw {
+            allowlist: vec!["^(app|lib)$".to_string()], // matches app, lib — not components
+            intentional_mirrors: std::collections::HashMap::new(),
+            suppress_barrel_cycles: true,
+        };
+        let consolidation = ConsolidationConfig::compile(raw).unwrap();
+        let excluded = barrel_exclusion_ids(&project, &consolidation);
+        let set: std::collections::HashSet<&str> = excluded.into_iter().collect();
+        assert!(set.contains("app"));
+        assert!(set.contains("lib"));
+        assert!(!set.contains("components"));
+    }
+
+    #[test]
+    fn barrel_exclusion_single_mode_unchanged() {
+        use graphify_extract::LocalPrefix;
+        let project = ProjectConfig {
+            name: "p".to_string(),
+            repo: "./p".to_string(),
+            lang: vec!["typescript".to_string()],
+            local_prefix: Some(LocalPrefix::Single("src".to_string())),
+            external_stubs: Vec::new(),
+            check: None,
+        };
+        let raw = ConsolidationConfigRaw {
+            allowlist: vec!["^src$".to_string()],
+            intentional_mirrors: std::collections::HashMap::new(),
+            suppress_barrel_cycles: true,
+        };
+        let consolidation = ConsolidationConfig::compile(raw).unwrap();
+        let excluded = barrel_exclusion_ids(&project, &consolidation);
+        assert_eq!(excluded, vec!["src"]);
+    }
+
+    #[test]
+    fn barrel_exclusion_disabled_when_no_suppress() {
+        use graphify_extract::LocalPrefix;
+        let project = ProjectConfig {
+            name: "p".to_string(),
+            repo: "./p".to_string(),
+            lang: vec!["typescript".to_string()],
+            local_prefix: Some(LocalPrefix::Multi(vec!["app".to_string()])),
+            external_stubs: Vec::new(),
+            check: None,
+        };
+        let raw = ConsolidationConfigRaw {
+            allowlist: vec!["^app$".to_string()],
+            intentional_mirrors: std::collections::HashMap::new(),
+            suppress_barrel_cycles: false,
+        };
+        let consolidation = ConsolidationConfig::compile(raw).unwrap();
+        assert!(barrel_exclusion_ids(&project, &consolidation).is_empty());
     }
 }
 

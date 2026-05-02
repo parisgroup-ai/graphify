@@ -37,7 +37,11 @@ pub struct GraphLink {
 
 pub struct ProjectInput<'a> {
     pub name: &'a str,
-    pub local_prefix: &'a str,
+    /// All local-root prefixes (single string for legacy `local_prefix = "src"`
+    /// configs, multiple for `local_prefix = ["app", "lib", ...]`). Every entry
+    /// is added to the shadow-set so the scorer never suggests one as an
+    /// `external_stub`.
+    pub local_prefixes: &'a [&'a str],
     pub current_stubs: &'a graphify_core::ExternalStubs,
     pub graph: &'a GraphSnapshot,
 }
@@ -163,8 +167,10 @@ pub fn score_stubs(projects: &[ProjectInput<'_>], min_edges: u64) -> SuggestRepo
     // shadowing safety (rule (a) + (b) from the spec).
     let mut shadow_set: BTreeSet<String> = BTreeSet::new();
     for p in projects {
-        if !p.local_prefix.is_empty() {
-            shadow_set.insert(p.local_prefix.to_string());
+        for prefix in p.local_prefixes {
+            if !prefix.is_empty() {
+                shadow_set.insert((*prefix).to_string());
+            }
         }
         for n in &p.graph.nodes {
             if n.is_local {
@@ -519,13 +525,13 @@ mod tests {
         let inputs = vec![
             ProjectInput {
                 name: "proj-a",
-                local_prefix: "crate_a",
+                local_prefixes: &["crate_a"],
                 current_stubs: &empty_stubs,
                 graph: &proj_a_graph,
             },
             ProjectInput {
                 name: "proj-b",
-                local_prefix: "crate_b",
+                local_prefixes: &["crate_b"],
                 current_stubs: &empty_stubs,
                 graph: &proj_b_graph,
             },
@@ -642,7 +648,7 @@ mod tests {
         };
         let inputs = vec![ProjectInput {
             name: "proj-a",
-            local_prefix: "crate_a",
+            local_prefixes: &["crate_a"],
             current_stubs: &empty,
             graph: &g,
         }];
@@ -680,13 +686,13 @@ mod tests {
         let inputs = vec![
             ProjectInput {
                 name: "proj-a",
-                local_prefix: "crate_a",
+                local_prefixes: &["crate_a"],
                 current_stubs: &empty,
                 graph: &g_a,
             },
             ProjectInput {
                 name: "proj-b",
-                local_prefix: "crate_b",
+                local_prefixes: &["crate_b"],
                 current_stubs: &empty,
                 graph: &g_b,
             },
@@ -714,7 +720,7 @@ mod tests {
         };
         let inputs = vec![ProjectInput {
             name: "proj-a",
-            local_prefix: "crate_a",
+            local_prefixes: &["crate_a"],
             current_stubs: &stubs,
             graph: &g,
         }];
@@ -744,7 +750,7 @@ mod tests {
         };
         let inputs = vec![ProjectInput {
             name: "proj-a",
-            local_prefix: "crate_a",
+            local_prefixes: &["crate_a"],
             current_stubs: &stubs,
             graph: &g,
         }];
@@ -780,13 +786,13 @@ mod tests {
         let inputs = vec![
             ProjectInput {
                 name: "proj-a",
-                local_prefix: "src",
+                local_prefixes: &["src"],
                 current_stubs: &empty,
                 graph: &g_a,
             },
             ProjectInput {
                 name: "proj-b",
-                local_prefix: "crate_b",
+                local_prefixes: &["crate_b"],
                 current_stubs: &empty,
                 graph: &g_b,
             },
@@ -836,7 +842,7 @@ mod tests {
         };
         let inputs = vec![ProjectInput {
             name: "proj-a",
-            local_prefix: "crate_a",
+            local_prefixes: &["crate_a"],
             current_stubs: &empty,
             graph: &g,
         }];
@@ -912,13 +918,13 @@ mod tests {
         let inputs = vec![
             ProjectInput {
                 name: "proj-a",
-                local_prefix: "a",
+                local_prefixes: &["a"],
                 current_stubs: &empty,
                 graph: &g_a,
             },
             ProjectInput {
                 name: "proj-b",
-                local_prefix: "b",
+                local_prefixes: &["b"],
                 current_stubs: &empty,
                 graph: &g_b,
             },
@@ -962,13 +968,13 @@ mod tests {
         let inputs = vec![
             ProjectInput {
                 name: "proj-a",
-                local_prefix: "a",
+                local_prefixes: &["a"],
                 current_stubs: &stubs,
                 graph: &g_a,
             },
             ProjectInput {
                 name: "proj-b",
-                local_prefix: "b",
+                local_prefixes: &["b"],
                 current_stubs: &stubs,
                 graph: &g_b,
             },
@@ -1041,13 +1047,13 @@ mod tests {
         let inputs = vec![
             ProjectInput {
                 name: "proj-a",
-                local_prefix: "a",
+                local_prefixes: &["a"],
                 current_stubs: &empty,
                 graph: &g_a,
             },
             ProjectInput {
                 name: "proj-b",
-                local_prefix: "b",
+                local_prefixes: &["b"],
                 current_stubs: &empty,
                 graph: &g_b,
             },
@@ -1069,6 +1075,66 @@ mod tests {
     }
 
     #[test]
+    fn score_stubs_skips_all_multi_prefixes_in_shadow_set() {
+        // Multi-root project: app, lib, components are all local. None of them
+        // should be suggested as external_stub even if they appear in nodes
+        // of OTHER projects (which they do here).
+        use graphify_core::ExternalStubs;
+        let empty = ExternalStubs::default();
+
+        let g_mobile = GraphSnapshot {
+            nodes: vec![],
+            links: vec![],
+        };
+        let g_other = GraphSnapshot {
+            // Python-style ids so `extract_prefix` splits on `.` and produces
+            // bare prefixes ("lib", "app") that the shadow-set can match.
+            nodes: vec![
+                make_node("src.x", "Python", true),
+                make_node("lib.foo", "Python", false),
+                make_node("app.bar", "Python", false),
+            ],
+            links: vec![
+                make_link("src.x", "lib.foo", 5),
+                make_link("src.x", "app.bar", 5),
+            ],
+        };
+        let inputs = vec![
+            ProjectInput {
+                name: "mobile",
+                local_prefixes: &["app", "lib", "components"],
+                current_stubs: &empty,
+                graph: &g_mobile,
+            },
+            ProjectInput {
+                name: "other",
+                local_prefixes: &["src"],
+                current_stubs: &empty,
+                graph: &g_other,
+            },
+        ];
+
+        let report = score_stubs(&inputs, 1);
+        let suggestions: Vec<&str> = report
+            .settings_candidates
+            .iter()
+            .map(|s| s.prefix.as_str())
+            .collect();
+        assert!(!suggestions.contains(&"lib"));
+        assert!(!suggestions.contains(&"app"));
+        // Per-project candidates also should not contain app/lib.
+        for cands in report.per_project_candidates.values() {
+            for c in cands {
+                assert_ne!(c.prefix, "lib");
+                assert_ne!(c.prefix, "app");
+            }
+        }
+        // Confirm both prefixes were recognised as shadowed.
+        assert!(report.shadowed_prefixes.contains(&"app".to_string()));
+        assert!(report.shadowed_prefixes.contains(&"lib".to_string()));
+    }
+
+    #[test]
     fn render_json_round_trips() {
         use graphify_core::ExternalStubs;
         let empty = ExternalStubs::default();
@@ -1082,7 +1148,7 @@ mod tests {
         };
         let inputs = vec![ProjectInput {
             name: "proj-a",
-            local_prefix: "a",
+            local_prefixes: &["a"],
             current_stubs: &empty,
             graph: &g,
         }];
