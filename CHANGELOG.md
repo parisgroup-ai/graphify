@@ -4,6 +4,8 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-05-02
+
 ### Changed
 - **CHORE-012**: hoist `validate_local_prefix` from `graphify-cli` into
   `graphify-extract::local_prefix` (re-exported from the crate root). MCP
