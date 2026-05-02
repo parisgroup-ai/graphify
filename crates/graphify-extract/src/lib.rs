@@ -18,7 +18,7 @@ pub use go::GoExtractor;
 pub use lang::{
     ExtractionResult, LanguageExtractor, NamedImportEntry, ReExportEntry, ReExportSpec,
 };
-pub use local_prefix::{EffectiveLocalPrefix, LocalPrefix};
+pub use local_prefix::{validate_local_prefix, EffectiveLocalPrefix, LocalPrefix};
 pub use php::PhpExtractor;
 pub use python::PythonExtractor;
 pub use reexport_graph::{

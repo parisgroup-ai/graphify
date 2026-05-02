@@ -1,8 +1,9 @@
 ---
 uid: chore-012
-status: open
+status: done
 priority: low
 scheduled: 2026-05-02
+completed: 2026-05-02
 pomodoros: 0
 tags:
 - task
@@ -28,12 +29,12 @@ Today the validator lives at `crates/graphify-cli/src/main.rs:1925` (free functi
 
 ## Subtasks
 
-- [ ] Move `validate_local_prefix` into `crates/graphify-extract/src/local_prefix.rs` as a `pub fn`. Keep the same signature: `(project_name: &str, lp: &Option<LocalPrefix>, languages: &[String]) -> Result<Option<String>, String>`.
-- [ ] Re-export from `crates/graphify-extract/src/lib.rs` alongside `LocalPrefix` / `EffectiveLocalPrefix`.
-- [ ] Update CLI `load_config` to call `graphify_extract::validate_local_prefix` instead of the local copy.
-- [ ] Update MCP `load_config` to call it too — same shape (Err → exit 1, Ok(Some(warn)) → eprintln!, Ok(None) → no-op).
-- [ ] Move the 7 unit tests from `crates/graphify-cli/src/main.rs` to `crates/graphify-extract/src/local_prefix.rs` `mod tests`.
-- [ ] Smoke verify: run MCP with a `[settings]` block containing `local_prefix = ["src"]` (single-element array). stderr should now show the "Prefer the string form" warning.
+- [x] Move `validate_local_prefix` into `crates/graphify-extract/src/local_prefix.rs` as a `pub fn`. Keep the same signature: `(project_name: &str, lp: &Option<LocalPrefix>, languages: &[String]) -> Result<Option<String>, String>`.
+- [x] Re-export from `crates/graphify-extract/src/lib.rs` alongside `LocalPrefix` / `EffectiveLocalPrefix`.
+- [x] Update CLI `load_config` to call `graphify_extract::validate_local_prefix` instead of the local copy.
+- [x] Update MCP `load_config` to call it too — same shape (Err → exit 1, Ok(Some(warn)) → eprintln!, Ok(None) → no-op).
+- [x] Move the 7 unit tests from `crates/graphify-cli/src/main.rs` to `crates/graphify-extract/src/local_prefix.rs` `mod tests`.
+- [x] Smoke verify: run MCP with a `[settings]` block containing `local_prefix = ["src"]` (single-element array). stderr should now show the "Prefer the string form" warning.
 
 ## Notes
 

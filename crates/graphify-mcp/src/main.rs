@@ -17,8 +17,8 @@ use graphify_core::{
     ExternalStubs,
 };
 use graphify_extract::{
-    EffectiveLocalPrefix, ExtractionResult, GoExtractor, LanguageExtractor, LocalPrefix,
-    PhpExtractor, PythonExtractor, RustExtractor, TypeScriptExtractor,
+    validate_local_prefix, EffectiveLocalPrefix, ExtractionResult, GoExtractor, LanguageExtractor,
+    LocalPrefix, PhpExtractor, PythonExtractor, RustExtractor, TypeScriptExtractor,
 };
 
 use crate::server::GraphifyServer;
@@ -163,13 +163,41 @@ fn load_config(path: &Path) -> Config {
             std::process::exit(1);
         }
     };
-    match toml::from_str::<Config>(&text) {
+    let cfg = match toml::from_str::<Config>(&text) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Invalid config {:?}: {e}", path);
             std::process::exit(1);
         }
+    };
+    // CHORE-012: mirror the CLI's per-project local_prefix validation so MCP
+    // surfaces the same warnings (single-element array, dupes) and fail-fast
+    // conditions (empty array, PHP+array). Plus the DOC-002 PHP+string warning.
+    for project in &cfg.project {
+        match validate_local_prefix(&project.name, &project.local_prefix, &project.lang) {
+            Err(msg) => {
+                eprintln!("Invalid config {:?}: {msg}", path);
+                std::process::exit(1);
+            }
+            Ok(Some(warn)) => eprintln!("Warning: {warn}"),
+            Ok(None) => {}
+        }
+
+        let is_php = project.lang.iter().any(|l| l.eq_ignore_ascii_case("php"));
+        let has_string_prefix = matches!(
+            &project.local_prefix,
+            Some(LocalPrefix::Single(p)) if !p.is_empty()
+        );
+        if is_php && has_string_prefix {
+            eprintln!(
+                "Warning: project '{}' sets local_prefix for a PHP project — \
+                 PSR-4 mappings from composer.json should be used instead. \
+                 Consider removing local_prefix.",
+                project.name
+            );
+        }
     }
+    cfg
 }
 
 // ---------------------------------------------------------------------------

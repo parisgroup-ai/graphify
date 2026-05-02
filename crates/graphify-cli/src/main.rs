@@ -24,6 +24,7 @@ use graphify_core::{
 };
 use graphify_extract::{
     cache::{sha256_hex, CacheStats, ExtractionCache},
+    validate_local_prefix,
     walker::detect_local_prefix,
     EffectiveLocalPrefix, ExtractionResult, GoExtractor, LanguageExtractor, LocalPrefix,
     PhpExtractor, PythonExtractor, RustExtractor, TypeScriptExtractor,
@@ -1909,60 +1910,6 @@ fn load_snapshot(path: &Path) -> AnalysisSnapshot {
 // ---------------------------------------------------------------------------
 // Config loading helpers
 // ---------------------------------------------------------------------------
-
-/// Validate a project's `local_prefix` value. Returns `Ok(Some(warning))` when
-/// the value is legal but suspect (single-element array, dupes), `Ok(None)`
-/// when fully clean, and `Err(message)` on a fail-fast condition (empty array,
-/// `Multi` on PHP).
-fn validate_local_prefix(
-    project_name: &str,
-    lp: &Option<LocalPrefix>,
-    languages: &[String],
-) -> Result<Option<String>, String> {
-    let Some(lp) = lp else {
-        return Ok(None);
-    };
-
-    let is_php_only =
-        !languages.is_empty() && languages.iter().all(|l| l.eq_ignore_ascii_case("php"));
-
-    match lp {
-        LocalPrefix::Single(_) => Ok(None),
-        LocalPrefix::Multi(v) if v.is_empty() => Err(format!(
-            "Project '{project_name}' has an empty local_prefix array. \
-             Either remove the field or list at least one root directory."
-        )),
-        LocalPrefix::Multi(_) if is_php_only => Err(format!(
-            "Project '{project_name}' is PHP and uses a local_prefix array. \
-             PHP projects derive prefixes from PSR-4 in composer.json — remove \
-             local_prefix entirely."
-        )),
-        LocalPrefix::Multi(v) if v.len() == 1 => Ok(Some(format!(
-            "Project '{project_name}' uses a single-element local_prefix array. \
-             Prefer the string form: local_prefix = \"{}\". \
-             The array form skips wrapping; the string form preserves the legacy \
-             namespace prefix.",
-            v[0]
-        ))),
-        LocalPrefix::Multi(v) => {
-            let mut seen = std::collections::HashSet::new();
-            let dupes: Vec<&str> = v
-                .iter()
-                .filter(|s| !seen.insert((*s).clone()))
-                .map(|s| s.as_str())
-                .collect();
-            if !dupes.is_empty() {
-                Ok(Some(format!(
-                    "Project '{project_name}' has duplicate local_prefix entries: {}. \
-                     Dedup'd silently; consider cleaning up graphify.toml.",
-                    dupes.join(", ")
-                )))
-            } else {
-                Ok(None)
-            }
-        }
-    }
-}
 
 fn load_config(path: &Path) -> Config {
     let text = match std::fs::read_to_string(path) {
@@ -6421,63 +6368,5 @@ local_prefix = ["app", "lib", "components"]
             }
             _ => panic!("expected Multi"),
         }
-    }
-
-    // validate_local_prefix is a free function called by load_config; we can test
-    // it directly without spinning up a full config file.
-    #[test]
-    fn validate_local_prefix_empty_array_returns_err() {
-        let lp = LocalPrefix::Multi(Vec::new());
-        let err = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]).unwrap_err();
-        assert!(err.contains("empty"), "err was: {err}");
-        assert!(err.contains("'p'"), "err was: {err}");
-    }
-
-    #[test]
-    fn validate_local_prefix_single_element_array_returns_warning() {
-        let lp = LocalPrefix::Multi(vec!["src".to_string()]);
-        let result = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]);
-        let warning = result.unwrap();
-        assert!(warning.is_some(), "expected a warning");
-        let w = warning.unwrap();
-        assert!(w.contains("single-element"), "warning was: {w}");
-        assert!(w.contains("local_prefix = \"src\""), "warning was: {w}");
-    }
-
-    #[test]
-    fn validate_local_prefix_multi_dupes_emit_warning() {
-        let lp = LocalPrefix::Multi(vec![
-            "app".to_string(),
-            "lib".to_string(),
-            "app".to_string(),
-        ]);
-        let result = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]);
-        let warning = result.unwrap();
-        assert!(warning.is_some(), "expected a dupe warning");
-        let w = warning.unwrap();
-        assert!(w.contains("duplicate"), "warning was: {w}");
-    }
-
-    #[test]
-    fn validate_local_prefix_php_rejects_array_form() {
-        let lp = LocalPrefix::Multi(vec!["app".to_string()]);
-        let err = validate_local_prefix("p", &Some(lp), &["php".to_string()]).unwrap_err();
-        assert!(err.contains("PHP"), "err was: {err}");
-        assert!(err.contains("PSR-4"), "err was: {err}");
-    }
-
-    #[test]
-    fn validate_local_prefix_string_form_no_warning() {
-        let lp = LocalPrefix::Single("src".to_string());
-        let result = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]);
-        let warning = result.unwrap();
-        assert!(warning.is_none());
-    }
-
-    #[test]
-    fn validate_local_prefix_omitted_no_warning() {
-        let result = validate_local_prefix("p", &None, &["typescript".to_string()]);
-        let warning = result.unwrap();
-        assert!(warning.is_none());
     }
 }

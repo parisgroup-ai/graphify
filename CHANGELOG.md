@@ -4,6 +4,17 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **CHORE-012**: hoist `validate_local_prefix` from `graphify-cli` into
+  `graphify-extract::local_prefix` (re-exported from the crate root). MCP
+  `load_config` now invokes the validator with the same shape as the CLI
+  (Err → exit 1, Ok(Some) → stderr warning, Ok(None) → no-op), plus the
+  DOC-002 PHP+string follow-up warning. Closes the v0.14.0 "Known
+  Limitations" gap where single-element-array warnings, empty-array
+  fail-fast, and PHP+array rejection only fired from the CLI. The 6
+  validator unit tests moved alongside the function. No behavior change
+  for callers — pure parity fix.
+
 ## [0.14.0] - 2026-05-02
 
 ### Added
@@ -15,13 +26,6 @@ All notable changes to Graphify will be documented in this file.
   wrapping behavior, zero breaking change. Auto-detect emits an advisory
   warning when a multi-root pattern is suspected. See
   `docs/superpowers/specs/2026-05-02-feat-049-multi-root-local-prefix-design.md`.
-
-### Known Limitations
-- MCP server config (`crates/graphify-mcp/src/main.rs`) does not call
-  `validate_local_prefix` — single-element-array warning fires from the
-  `graphify` CLI but not from MCP. Tracked as follow-up; right fix is
-  hoisting the validator into `graphify-extract::local_prefix` for shared
-  consumption.
 
 ## [0.13.7] - 2026-04-30
 
