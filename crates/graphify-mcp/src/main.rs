@@ -17,8 +17,8 @@ use graphify_core::{
     ExternalStubs,
 };
 use graphify_extract::{
-    walker::discover_files, ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor,
-    PythonExtractor, RustExtractor, TypeScriptExtractor,
+    EffectiveLocalPrefix, ExtractionResult, GoExtractor, LanguageExtractor, LocalPrefix,
+    PhpExtractor, PythonExtractor, RustExtractor, TypeScriptExtractor,
 };
 
 use crate::server::GraphifyServer;
@@ -54,7 +54,7 @@ struct ProjectConfig {
     name: String,
     repo: String,
     lang: Vec<String>,
-    local_prefix: Option<String>,
+    local_prefix: Option<LocalPrefix>,
     #[serde(default)]
     external_stubs: Vec<String>,
 }
@@ -199,12 +199,20 @@ fn parse_languages(lang_strs: &[String]) -> Vec<Language> {
 fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
     let repo_path = PathBuf::from(&project.repo);
     let languages = parse_languages(&project.lang);
-    let local_prefix = project.local_prefix.as_deref().unwrap_or("");
+
+    // FEAT-049: full EffectiveLocalPrefix plumbing — mirrors the CLI's
+    // run_extract pipeline. Omitted `local_prefix` collapses to the empty
+    // wrap-mode form (legacy behavior).
+    let effective: EffectiveLocalPrefix = match &project.local_prefix {
+        Some(lp) => EffectiveLocalPrefix::from(lp),
+        None => EffectiveLocalPrefix::omitted(),
+    };
 
     let extra_owned: Vec<String> = settings.exclude.clone().unwrap_or_default();
     let extra_excludes: Vec<&str> = extra_owned.iter().map(|s| s.as_str()).collect();
 
-    let files = discover_files(&repo_path, &languages, local_prefix, &extra_excludes);
+    let files =
+        graphify_extract::discover_files_eff(&repo_path, &languages, &effective, &extra_excludes);
 
     if files.len() <= 1 {
         eprintln!(
@@ -212,7 +220,7 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
             project.name,
             files.len(),
             project.repo,
-            local_prefix,
+            effective.cache_key(),
         );
     }
 
@@ -223,7 +231,7 @@ fn run_extract(project: &ProjectConfig, settings: &Settings) -> CodeGraph {
     let php_extractor = PhpExtractor::new();
 
     let mut resolver = graphify_extract::resolver::ModuleResolver::new(&repo_path);
-    resolver.set_local_prefix(local_prefix);
+    resolver.set_local_prefixes(&effective.prefixes, effective.wrap);
     for file in &files {
         resolver.register_module(&file.module_name);
     }
