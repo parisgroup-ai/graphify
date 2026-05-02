@@ -25,8 +25,8 @@ use graphify_core::{
 use graphify_extract::{
     cache::{sha256_hex, CacheStats, ExtractionCache},
     walker::detect_local_prefix,
-    ExtractionResult, GoExtractor, LanguageExtractor, PhpExtractor, PythonExtractor, RustExtractor,
-    TypeScriptExtractor,
+    EffectiveLocalPrefix, ExtractionResult, GoExtractor, LanguageExtractor, LocalPrefix,
+    PhpExtractor, PythonExtractor, RustExtractor, TypeScriptExtractor,
 };
 use graphify_report::{
     check_report::{
@@ -179,7 +179,7 @@ struct ProjectConfig {
     name: String,
     repo: String,
     lang: Vec<String>,
-    local_prefix: Option<String>,
+    local_prefix: Option<LocalPrefix>,
     /// Package prefixes the project declares as intentionally external.
     /// Matching edges get `ConfidenceKind::ExpectedExternal` instead of
     /// `Ambiguous`, so the ambiguity metric reflects real extraction noise.
@@ -200,6 +200,21 @@ struct ProjectConfig {
 struct ProjectCheck {
     max_cycles: Option<usize>,
     max_hotspot_score: Option<f64>,
+}
+
+impl ProjectConfig {
+    /// Collapse the TOML-facing `Option<LocalPrefix>` into the runtime
+    /// `EffectiveLocalPrefix` form. Omitted fields collapse to
+    /// `EffectiveLocalPrefix::omitted()` (single empty string, wrap mode).
+    /// Transitional bridge for legacy callers — Tasks 3-8 of FEAT-049
+    /// progressively plumb the full `EffectiveLocalPrefix` into walker /
+    /// resolver / cache.
+    fn effective_local_prefix(&self) -> EffectiveLocalPrefix {
+        self.local_prefix
+            .as_ref()
+            .map(EffectiveLocalPrefix::from)
+            .unwrap_or_else(EffectiveLocalPrefix::omitted)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1907,6 +1922,60 @@ fn load_snapshot(path: &Path) -> AnalysisSnapshot {
 // Config loading helpers
 // ---------------------------------------------------------------------------
 
+/// Validate a project's `local_prefix` value. Returns `Ok(Some(warning))` when
+/// the value is legal but suspect (single-element array, dupes), `Ok(None)`
+/// when fully clean, and `Err(message)` on a fail-fast condition (empty array,
+/// `Multi` on PHP).
+fn validate_local_prefix(
+    project_name: &str,
+    lp: &Option<LocalPrefix>,
+    languages: &[String],
+) -> Result<Option<String>, String> {
+    let Some(lp) = lp else {
+        return Ok(None);
+    };
+
+    let is_php_only =
+        !languages.is_empty() && languages.iter().all(|l| l.eq_ignore_ascii_case("php"));
+
+    match lp {
+        LocalPrefix::Single(_) => Ok(None),
+        LocalPrefix::Multi(v) if v.is_empty() => Err(format!(
+            "Project '{project_name}' has an empty local_prefix array. \
+             Either remove the field or list at least one root directory."
+        )),
+        LocalPrefix::Multi(_) if is_php_only => Err(format!(
+            "Project '{project_name}' is PHP and uses a local_prefix array. \
+             PHP projects derive prefixes from PSR-4 in composer.json — remove \
+             local_prefix entirely."
+        )),
+        LocalPrefix::Multi(v) if v.len() == 1 => Ok(Some(format!(
+            "Project '{project_name}' uses a single-element local_prefix array. \
+             Prefer the string form: local_prefix = \"{}\". \
+             The array form skips wrapping; the string form preserves the legacy \
+             namespace prefix.",
+            v[0]
+        ))),
+        LocalPrefix::Multi(v) => {
+            let mut seen = std::collections::HashSet::new();
+            let dupes: Vec<&str> = v
+                .iter()
+                .filter(|s| !seen.insert((*s).clone()))
+                .map(|s| s.as_str())
+                .collect();
+            if !dupes.is_empty() {
+                Ok(Some(format!(
+                    "Project '{project_name}' has duplicate local_prefix entries: {}. \
+                     Dedup'd silently; consider cleaning up graphify.toml.",
+                    dupes.join(", ")
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
 fn load_config(path: &Path) -> Config {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
@@ -1936,18 +2005,30 @@ fn load_config(path: &Path) -> Config {
         eprintln!("Invalid [consolidation] section in {:?}: {err}", path);
         std::process::exit(1);
     }
-    // DOC-002: PSR-4 mappings from composer.json already provide the PHP
-    // namespace prefix structure; resolver case 7 does not re-apply
-    // `local_prefix`, so setting one for a PHP project is silently ignored.
-    // Non-fatal warning — changing resolver behavior retroactively would
-    // double-prefix any config that does set one.
+    // FEAT-049: validate local_prefix per-project (string vs array semantics,
+    // dedup, PHP rejection in array form). Plus the legacy DOC-002 warning
+    // for PHP projects that still set the string form (PSR-4 supersedes it).
     for project in &cfg.project {
+        match validate_local_prefix(&project.name, &project.local_prefix, &project.lang) {
+            Err(msg) => {
+                eprintln!("Invalid config {:?}: {msg}", path);
+                std::process::exit(1);
+            }
+            Ok(Some(warn)) => eprintln!("Warning: {warn}"),
+            Ok(None) => {}
+        }
+
+        // DOC-002: PSR-4 mappings from composer.json already provide the PHP
+        // namespace prefix structure; resolver case 7 does not re-apply
+        // `local_prefix`, so setting the legacy string form for a PHP project
+        // is silently ignored. Non-fatal warning. (Array form is rejected
+        // outright by validate_local_prefix above.)
         let is_php = project.lang.iter().any(|l| l.eq_ignore_ascii_case("php"));
-        let has_prefix = project
-            .local_prefix
-            .as_deref()
-            .is_some_and(|p| !p.is_empty());
-        if is_php && has_prefix {
+        let has_string_prefix = matches!(
+            &project.local_prefix,
+            Some(LocalPrefix::Single(p)) if !p.is_empty()
+        );
+        if is_php && has_string_prefix {
             eprintln!(
                 "Warning: project '{}' sets local_prefix for a PHP project — \
                  PSR-4 mappings from composer.json should be used instead. \
@@ -2162,8 +2243,10 @@ fn build_phase1_for_workspace(
     let extra_owned: Vec<String> = settings.exclude.clone().unwrap_or_default();
     let extra_excludes: Vec<&str> = extra_owned.iter().map(|s| s.as_str()).collect();
 
-    let (effective_local_prefix, _auto) = match project.local_prefix.as_deref() {
-        Some(prefix) => (prefix.to_owned(), false),
+    // Transitional: legacy callers still consume a single String prefix.
+    // Tasks 3-5 plumb the full EffectiveLocalPrefix through walker/resolver/cache.
+    let (effective_local_prefix, _auto) = match &project.local_prefix {
+        Some(lp) => (EffectiveLocalPrefix::from(lp).first().to_string(), false),
         None => (
             detect_local_prefix(&repo_path, &languages, &extra_excludes),
             true,
@@ -2374,8 +2457,10 @@ fn run_extract_with_workspace(
     let extra_owned: Vec<String> = settings.exclude.clone().unwrap_or_default();
     let extra_excludes: Vec<&str> = extra_owned.iter().map(|s| s.as_str()).collect();
 
-    let (effective_local_prefix, auto_detected) = match project.local_prefix.as_deref() {
-        Some(prefix) => (prefix.to_owned(), false),
+    // Transitional: legacy callers still consume a single String prefix.
+    // Tasks 3-5 plumb the full EffectiveLocalPrefix through walker/resolver/cache.
+    let (effective_local_prefix, auto_detected) = match &project.local_prefix {
+        Some(lp) => (EffectiveLocalPrefix::from(lp).first().to_string(), false),
         None => (
             detect_local_prefix(&repo_path, &languages, &extra_excludes),
             true,
@@ -3207,8 +3292,10 @@ fn barrel_exclusion_ids<'a>(
     if !consolidation.suppress_barrel_cycles() {
         return Vec::new();
     }
-    let prefix = match project.local_prefix.as_deref() {
-        Some(p) if !p.is_empty() => p,
+    // Transitional: only the Single string form participates in barrel
+    // suppression today. Multi-mode barrel exclusion is wired in Task 8.
+    let prefix: &'a str = match &project.local_prefix {
+        Some(LocalPrefix::Single(p)) if !p.is_empty() => p.as_str(),
         _ => return Vec::new(),
     };
     if consolidation.matches(prefix) {
@@ -5493,10 +5580,17 @@ fn cmd_suggest_stubs(
             continue;
         }
 
-        let local_prefix = project
-            .local_prefix
-            .clone()
-            .unwrap_or_else(|| "src".to_string());
+        // Transitional: suggest stubs still operates per single prefix.
+        // Multi-prefix shadowing handled in Task 8.
+        let effective = project.effective_local_prefix();
+        let local_prefix = if effective.is_multi() {
+            effective.first().to_string()
+        } else if effective.first().is_empty() {
+            // Preserve legacy default: when omitted, suggest stubs assumed "src".
+            "src".to_string()
+        } else {
+            effective.first().to_string()
+        };
 
         let stubs = ExternalStubs::new(
             settings_stubs
@@ -6191,5 +6285,123 @@ mod explain_printer_tests {
             "palette=disabled output must contain no ANSI escapes; got:\n{:?}",
             out
         );
+    }
+}
+
+#[cfg(test)]
+mod local_prefix_validation_tests {
+    use super::*;
+
+    #[test]
+    fn load_config_accepts_string_form_local_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graphify.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[project]]
+name = "p"
+repo = "./p"
+lang = ["typescript"]
+local_prefix = "src"
+"#,
+        )
+        .unwrap();
+        let cfg = load_config(&path);
+        let lp = cfg.project[0].local_prefix.as_ref().unwrap();
+        match lp {
+            LocalPrefix::Single(s) => assert_eq!(s, "src"),
+            _ => panic!("expected Single"),
+        }
+    }
+
+    #[test]
+    fn load_config_accepts_array_form_local_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("graphify.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[project]]
+name = "p"
+repo = "./p"
+lang = ["typescript"]
+local_prefix = ["app", "lib", "components"]
+"#,
+        )
+        .unwrap();
+        let cfg = load_config(&path);
+        let lp = cfg.project[0].local_prefix.as_ref().unwrap();
+        match lp {
+            LocalPrefix::Multi(v) => {
+                assert_eq!(
+                    v,
+                    &vec![
+                        "app".to_string(),
+                        "lib".to_string(),
+                        "components".to_string()
+                    ]
+                );
+            }
+            _ => panic!("expected Multi"),
+        }
+    }
+
+    // validate_local_prefix is a free function called by load_config; we can test
+    // it directly without spinning up a full config file.
+    #[test]
+    fn validate_local_prefix_empty_array_returns_err() {
+        let lp = LocalPrefix::Multi(Vec::new());
+        let err = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]).unwrap_err();
+        assert!(err.contains("empty"), "err was: {err}");
+        assert!(err.contains("'p'"), "err was: {err}");
+    }
+
+    #[test]
+    fn validate_local_prefix_single_element_array_returns_warning() {
+        let lp = LocalPrefix::Multi(vec!["src".to_string()]);
+        let result = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]);
+        let warning = result.unwrap();
+        assert!(warning.is_some(), "expected a warning");
+        let w = warning.unwrap();
+        assert!(w.contains("single-element"), "warning was: {w}");
+        assert!(w.contains("local_prefix = \"src\""), "warning was: {w}");
+    }
+
+    #[test]
+    fn validate_local_prefix_multi_dupes_emit_warning() {
+        let lp = LocalPrefix::Multi(vec![
+            "app".to_string(),
+            "lib".to_string(),
+            "app".to_string(),
+        ]);
+        let result = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]);
+        let warning = result.unwrap();
+        assert!(warning.is_some(), "expected a dupe warning");
+        let w = warning.unwrap();
+        assert!(w.contains("duplicate"), "warning was: {w}");
+    }
+
+    #[test]
+    fn validate_local_prefix_php_rejects_array_form() {
+        let lp = LocalPrefix::Multi(vec!["app".to_string()]);
+        let err = validate_local_prefix("p", &Some(lp), &["php".to_string()]).unwrap_err();
+        assert!(err.contains("PHP"), "err was: {err}");
+        assert!(err.contains("PSR-4"), "err was: {err}");
+    }
+
+    #[test]
+    fn validate_local_prefix_string_form_no_warning() {
+        let lp = LocalPrefix::Single("src".to_string());
+        let result = validate_local_prefix("p", &Some(lp), &["typescript".to_string()]);
+        let warning = result.unwrap();
+        assert!(warning.is_none());
+    }
+
+    #[test]
+    fn validate_local_prefix_omitted_no_warning() {
+        let result = validate_local_prefix("p", &None, &["typescript".to_string()]);
+        let warning = result.unwrap();
+        assert!(warning.is_none());
     }
 }
