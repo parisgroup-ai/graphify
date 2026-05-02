@@ -119,6 +119,17 @@ pub struct ModuleResolver {
     /// Used by language-specific resolver branches that need to re-prepend the
     /// prefix when stripping a language-rooted prefix like Rust's `crate::`.
     local_prefix: String,
+    /// `true` when `set_local_prefix*` was called with wrap-mode semantics
+    /// (Single TOML form). `false` for `Multi` array mode — `apply_local_prefix`
+    /// becomes a no-op so paths stay in their natural form.
+    wrap_mode: bool,
+    /// Full list of prefixes (Multi mode). Length 1 in wrap mode, length 0
+    /// when never set, length N for Multi. Used by callers that need to
+    /// know all roots (e.g. consumer-side `is_local_module` future hooks).
+    /// In wrap mode, equals `vec![local_prefix.clone()]`.
+    // FEAT-049: consumed by future tasks
+    #[allow(dead_code)]
+    local_prefixes: Vec<String>,
     /// Per-source-module short-name → full-path alias map (FEAT-031). Each
     /// entry corresponds to a `use` declaration captured in the source file
     /// (e.g. `use crate::types::Node;` in `src/graph.rs` registers
@@ -147,6 +158,8 @@ impl ModuleResolver {
             go_module_path: None,
             psr4_mappings: Vec::new(),
             local_prefix: String::new(),
+            wrap_mode: true,
+            local_prefixes: Vec::new(),
             use_aliases_by_module: HashMap::new(),
             root: normalize_path(root),
         }
@@ -158,14 +171,45 @@ impl ModuleResolver {
     /// auto-prefixes module names — without this, `crate::types::Node` from
     /// any module in the crate resolves to `types.Node` instead of
     /// `src.types.Node` and never matches a known local module (BUG-016).
+    /// Legacy wrapper: equivalent to `set_local_prefixes(&[prefix], true)`.
+    /// Preserved so existing callers don't need migration in lockstep.
     pub fn set_local_prefix(&mut self, prefix: &str) {
-        self.local_prefix = prefix.to_owned();
+        if prefix.is_empty() {
+            self.local_prefix.clear();
+            self.local_prefixes.clear();
+        } else {
+            self.local_prefix = prefix.to_owned();
+            self.local_prefixes = vec![prefix.to_owned()];
+        }
+        self.wrap_mode = true;
+    }
+
+    /// Multi-prefix-aware setter.
+    ///
+    /// `wrap = true` (Single TOML form): `prefixes` must contain exactly one
+    /// non-empty entry; `apply_local_prefix` will prepend it to bare ids.
+    ///
+    /// `wrap = false` (Multi TOML form): `prefixes` may contain N entries;
+    /// `apply_local_prefix` becomes a no-op (paths stay in natural form).
+    /// `local_prefix` (the legacy field) is set to the FIRST entry for
+    /// compatibility with code paths that still read it directly during the
+    /// migration window — but those paths should not affect resolution in
+    /// no-wrap mode.
+    pub fn set_local_prefixes(&mut self, prefixes: &[String], wrap: bool) {
+        self.wrap_mode = wrap;
+        self.local_prefixes = prefixes.to_vec();
+        self.local_prefix = prefixes.first().cloned().unwrap_or_default();
     }
 
     /// Prepend `self.local_prefix` to `id` when non-empty and not already
     /// present. Empty `id` collapses to the bare prefix; empty prefix is a
-    /// no-op.
+    /// no-op. In Multi (no-wrap) mode this is a pass-through — paths are
+    /// already in natural form.
     fn apply_local_prefix(&self, id: &str) -> String {
+        if !self.wrap_mode {
+            // Multi mode: paths are already in natural form — no-op.
+            return id.to_owned();
+        }
         if self.local_prefix.is_empty() {
             return id.to_owned();
         }
@@ -2802,5 +2846,37 @@ mod tests {
             "same-module symbol must shadow aliased import"
         );
         assert!(is_local);
+    }
+
+    #[test]
+    fn set_local_prefixes_single_acts_like_set_local_prefix() {
+        let mut r = ModuleResolver::new(std::path::Path::new("/repo"));
+        r.set_local_prefixes(&["src".to_string()], true);
+        // apply_local_prefix should prepend "src." to bare ids — wrap mode active.
+        assert_eq!(r.apply_local_prefix_for_test("foo"), "src.foo");
+        assert_eq!(r.apply_local_prefix_for_test("src.foo"), "src.foo");
+    }
+
+    #[test]
+    fn set_local_prefixes_multi_no_wrap_does_not_prepend() {
+        let mut r = ModuleResolver::new(std::path::Path::new("/repo"));
+        r.set_local_prefixes(&["app".to_string(), "lib".to_string()], false);
+        // No-wrap mode: apply_local_prefix is a pass-through.
+        assert_eq!(r.apply_local_prefix_for_test("foo"), "foo");
+        assert_eq!(r.apply_local_prefix_for_test("lib.bar"), "lib.bar");
+    }
+
+    #[test]
+    fn legacy_set_local_prefix_still_works() {
+        let mut r = ModuleResolver::new(std::path::Path::new("/repo"));
+        r.set_local_prefix("src");
+        assert_eq!(r.apply_local_prefix_for_test("foo"), "src.foo");
+    }
+}
+
+#[cfg(test)]
+impl ModuleResolver {
+    fn apply_local_prefix_for_test(&self, id: &str) -> String {
+        self.apply_local_prefix(id)
     }
 }
