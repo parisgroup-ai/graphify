@@ -199,7 +199,7 @@ For each [[project]]:
 - Louvain Phase 2 merges singleton communities: connected singletons → best neighbor, isolated singletons → grouped together
 - Walker warns via `eprintln!` when a project discovers ≤1 file (misconfigured `local_prefix`)
 - MCP server uses `rmcp` v0.1 with `#[tool(tool_box)]` macro (not `#[tool_router]` — API differs from docs)
-- MCP server config is duplicated from CLI (small, stable structs — extract if a third consumer appears)
+- MCP server config is duplicated from CLI (small, stable structs — extract if a third consumer appears). `validate_local_prefix` was hoisted out of the duplication via CHORE-012 (v0.14.1) and now lives in `graphify-extract::local_prefix` (re-exported from crate root); both `load_config` paths invoke it with the same shape (Err → exit 1, Ok(Some) → eprintln, Ok(None) → no-op) plus the DOC-002 PHP+string warning
 - MCP extraction is eager on startup; all diagnostic output on stderr (stdout reserved for JSON-RPC)
 - MCP server wraps `QueryEngine` in `Arc` (ServerHandler requires Clone)
 - Edge confidence: `confidence: f64` (0.0–1.0) + `confidence_kind: ConfidenceKind` (Extracted/Inferred/Ambiguous)

@@ -1,41 +1,46 @@
-# Session Brief — 2026-05-02 (FEAT-050 shipped: multi-root local_prefix v0.14.0)
+# Session Brief — 2026-05-02 (CHORE-012 shipped: v0.14.1 CLI/MCP validation parity)
 
 ## Last Session Summary
 
-Sessão longa de feature inteira. Brainstormei + spec + plan + executei via `superpowers:subagent-driven-development` 11 tasks com revisão entre cada uma. Releasei como v0.14.0 (tag local). 14 commits `dcefa79..7d85e10`, +1500 LOC, 942 tests, dogfood byte-identical vs baseline.
+Sessão curta (~30min) tirando a CHORE-012 do follow-up de FEAT-050. Hoist mecânico de `validate_local_prefix` de `graphify-cli` pra `graphify-extract::local_prefix`, MCP `load_config` agora chama o validator com a mesma forma do CLI. Releasei como v0.14.1 (patch). Em paralelo: pushei a tag v0.14.0 que tinha ficado local na sessão anterior, então release.yml disparou pra v0.14.0 + v0.14.1 ao mesmo tempo.
 
 ## Current State
 
-- Branch: `main`, 14 commits à frente do origin (não pushei)
+- Branch: `main`, em sincronia com origin (ahead 0 / behind 0)
 - Working tree: limpo
-- Tag local: `v0.14.0` (não pushada)
-- Workspace: `0.13.7` → `0.14.0`
-- TaskNotes: 78 done + FEAT-050 done + CHORE-012 open (sprint 0/1/79)
+- Tags: `v0.14.0` + `v0.14.1` ambas pushadas; release.yml in_progress no GitHub Actions (~3min in no fim da sessão, ETA mais 2-3min)
+- Workspace: `0.14.0` → `0.14.1`
+- Binários locais: `graphify 0.14.1` + `graphify-mcp 0.14.1` reinstalados
+- TaskNotes: 79 done · 0 open · 0 in-progress (backlog zerado)
+- GH issues: 0 open (#16 fechada com refs pra v0.14.0 + v0.14.1)
 
-## Open Items (tasks created)
+## Open Items
 
-- **FEAT-050** (done) — multi-root local_prefix; entry retroativa pra mapear o trabalho que o tn não rastreou em tempo real
-- **CHORE-012** (open, low) — hoist `validate_local_prefix` de `graphify-cli` pra `graphify-extract::local_prefix` pra MCP herdar a validação. ~30min, mecânico.
+Nenhum. Backlog `tn` zerado, fila GH zerada, working tree limpo.
 
 ## Decisions Made (don't re-debate)
 
-- **Label drift FEAT-049 → FEAT-050**: spec/plan/14 commits dizem "FEAT-049" mas o slot já estava ocupado (Rust pub-type-alias done 2026-04-27). Não vou renomear — 14 commits é noise demais. tn task real é FEAT-050; cross-ref documentada no body da task e em activeContext.md.
-- **Forma string mantém wrapping, array no-wrap** (Q1+Q2 do brainstorm): zero breaking change pra config existente; array é opt-in semântico distinto.
-- **Walker discovery não muda em modo array** (Q3): array é puro naming/hint downstream; walker continua descobrindo tudo no `repo` filtrado por excludes.
-- **Auto-detect single-prefix + warning advisory** (Q4): nenhuma magia; usuário Expo precisa declarar explicitamente. Warning quando ≥2 dirs com ≥10 files cada e top1 < 3× top2.
-- **`#[allow(dead_code)]` removido na cleanup commit `b7e1437`**: `ProjectConfig::effective_local_prefix` era bridge transicional, foi removido após Tasks 6+8 migrarem todos os call sites. Reviewer da Task 8 puxou explicitamente.
-- **MCP `validate_local_prefix` gap aceito como debt documentado**: Task 7 não estende escopo pra deduplicar config layer; fix correto é hoist via CHORE-012.
+- **Hoist cirúrgico vs deduplicar `load_config` inteiro**: movi só o validator (~30min) em vez de extrair toda a config layer. CLAUDE.md já dizia "extract if a third consumer appears" — ainda só temos 2 consumers. CLAUDE.md atualizado pra registrar que o validator saiu da duplicação.
+- **Replicar warning DOC-002 (PHP+string) no MCP também**: a task pedia "parity"; o warning fazia parte do `load_config` do CLI, então copiei. MCP agora emite os 5 sinais que o CLI emite: single-element-array warn, dupes warn, empty-array fail-fast, PHP+array fail-fast, PHP+string warn (DOC-002).
+- **Bumpar pra 0.14.1 patch**: CHORE-012 fecha "Known Limitations" da v0.14.0 sem mudar API ou comportamento — patch é o nível certo.
+- **Pushar v0.14.0 + v0.14.1 juntos**: release.yml roda em paralelo pra cada tag, sem conflito. v0.14.0 era debt da sessão anterior (tag local-only); o `--tags` do push resolveu os dois ao mesmo tempo.
+- **`tn done CHORE-012 --check-subtasks`**: marquei as 6 subtasks do body junto com o status; sem isso `tn done` emite hint mas fecha mesmo assim.
+
+## Architecture / Health
+
+- `graphify check`: 5/5 PASS, 0 cycles, top hotspot `src.server` @ 0.600 (graphify-mcp, sob threshold 0.85). Zero policy violations.
+- 942 tests pass, fmt + clippy limpos.
 
 ## Suggested Next Steps
 
-1. **`git push origin main --tags`** — dispara `release.yml`, publica os 4 binários (macOS Intel/ARM, Linux x86/ARM) da v0.14.0. Pode rodar `cargo install --path crates/graphify-cli --force` depois pra atualizar o binário local (já está em 0.14.0; reinstall garante).
-2. **Fechar GH issue #16** — depois do push + release, comentar no #16 que v0.14.0 inclui o fix e fechar.
-3. **CHORE-012 (low priority, ~30min)** — hoist `validate_local_prefix` pra `graphify-extract::local_prefix`. Mecânico, fecha a Known Limitation do CHANGELOG.
+1. **Verificar release.yml finalizou OK pras duas tags** (`gh run list --workflow=release.yml --limit 2`). Se algum falhou, re-tag ou abrir issue.
+2. **Próxima sessão é greenfield** — backlog zerado. Candidatos pra brainstorm: (a) FEAT-048 cross-crate `pub use` workspace fan-out (parked via ADR-0002, gate 1/5 — só re-abrir se evidência mudar); (b) ADR-0001 `workspace_reexport_graph` opt-out gate default ainda é `true` — ver se flipa; (c) novos GH issues a partir do feedback da v0.14.0/0.14.1.
 
 ## Quick reference
 
-- Spec: `docs/superpowers/specs/2026-05-02-feat-049-multi-root-local-prefix-design.md`
-- Plan: `docs/superpowers/plans/2026-05-02-feat-049-multi-root-local-prefix.md`
-- Integration test: `crates/graphify-cli/tests/feat_049_multi_root.rs`
-- Tag: `v0.14.0` (local, awaiting push)
-- GH issue: https://github.com/parisgroup-ai/graphify/issues/16
+- v0.14.1 release notes: `CHANGELOG.md` `## [0.14.1] - 2026-05-02`
+- Implementação: `crates/graphify-extract/src/local_prefix.rs::validate_local_prefix` + re-export em `crates/graphify-extract/src/lib.rs`
+- MCP wiring: `crates/graphify-mcp/src/main.rs::load_config` (mesma forma do CLI)
+- Smoke pattern: `timeout 2 graphify-mcp --config <toml>` valida stderr sem esperar lifecycle MCP
+- Commits: `2297962` (impl) + `eee0fa6` (bump 0.14.1)
+- Tags pushadas: `v0.14.0`, `v0.14.1`
