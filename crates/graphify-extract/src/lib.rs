@@ -2,6 +2,7 @@ pub mod cache;
 pub mod drizzle;
 pub mod go;
 pub mod lang;
+pub mod local_prefix;
 pub mod php;
 pub mod python;
 pub mod reexport_graph;
@@ -17,6 +18,7 @@ pub use go::GoExtractor;
 pub use lang::{
     ExtractionResult, LanguageExtractor, NamedImportEntry, ReExportEntry, ReExportSpec,
 };
+pub use local_prefix::{EffectiveLocalPrefix, LocalPrefix};
 pub use php::PhpExtractor;
 pub use python::PythonExtractor;
 pub use reexport_graph::{
