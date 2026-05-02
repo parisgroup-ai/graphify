@@ -309,6 +309,12 @@ pub fn discover_files_eff_with_psr4(
     )
 }
 
+/// Minimum file count per root directory for the multi-root advisory to fire.
+const MULTI_ROOT_WARNING_MIN_FILES: usize = 10;
+/// Top1/top2 ratio cap for the multi-root advisory: warning fires only when
+/// `top1 < top2 * MULTI_ROOT_WARNING_RATIO` (i.e. the leader does not dominate).
+const MULTI_ROOT_WARNING_RATIO: f64 = 3.0;
+
 /// Detect the effective `local_prefix` for a project when the config omits it.
 ///
 /// Heuristic:
@@ -317,6 +323,24 @@ pub fn discover_files_eff_with_psr4(
 /// - otherwise `app` wins if it contains >60% of all eligible files
 /// - otherwise return an empty prefix (root-relative)
 pub fn detect_local_prefix(root: &Path, languages: &[Language], extra_excludes: &[&str]) -> String {
+    detect_local_prefix_with_warning_sink(root, languages, extra_excludes, &mut std::io::stderr())
+}
+
+/// Variant of [`detect_local_prefix`] that writes the multi-root advisory
+/// warning to a caller-provided sink instead of stderr.
+///
+/// Multi-root heuristic: when ≥2 root directories each carry
+/// ≥`MULTI_ROOT_WARNING_MIN_FILES` files **and** the leader does not dominate
+/// (`top1 < top2 * MULTI_ROOT_WARNING_RATIO`), the codebase likely uses a
+/// multi-root layout (e.g. Expo `app/` + `lib/`). The function still returns
+/// a single prefix (legacy behavior) but advises the user to switch to the
+/// new `local_prefix = ["app", "lib"]` array form via the warning sink.
+pub fn detect_local_prefix_with_warning_sink<W: std::io::Write>(
+    root: &Path,
+    languages: &[Language],
+    extra_excludes: &[&str],
+    warning_sink: &mut W,
+) -> String {
     let mut excludes: Vec<&str> = DEFAULT_EXCLUDES.to_vec();
     excludes.extend_from_slice(extra_excludes);
 
@@ -338,14 +362,46 @@ pub fn detect_local_prefix(root: &Path, languages: &[Language], extra_excludes: 
 
     let threshold = |count: usize| (count as f64) / (total_files as f64) > 0.6;
 
-    if threshold(*root_counts.get("src").unwrap_or(&0)) {
-        return "src".to_owned();
-    }
-    if threshold(*root_counts.get("app").unwrap_or(&0)) {
-        return "app".to_owned();
+    let prefix = if threshold(*root_counts.get("src").unwrap_or(&0)) {
+        "src".to_owned()
+    } else if threshold(*root_counts.get("app").unwrap_or(&0)) {
+        "app".to_owned()
+    } else {
+        String::new()
+    };
+
+    // Multi-root advisory: collect roots above the min-files threshold (sorted
+    // by descending count, then by name for determinism), then check the
+    // top1/top2 ratio.
+    let mut qualifying: Vec<(&String, &usize)> = root_counts
+        .iter()
+        .filter(|(_, count)| **count >= MULTI_ROOT_WARNING_MIN_FILES)
+        .collect();
+    qualifying.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+
+    if qualifying.len() >= 2 {
+        let top1 = *qualifying[0].1 as f64;
+        let top2 = *qualifying[1].1 as f64;
+        if top1 < top2 * MULTI_ROOT_WARNING_RATIO {
+            let candidates_list = qualifying
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let suggestion = qualifying
+                .iter()
+                .map(|(name, _)| format!("\"{}\"", name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let _ = writeln!(
+                warning_sink,
+                "Multi-root pattern detected: candidates [{}]. Consider local_prefix = [{}] in graphify.toml. Auto-detected single prefix '{}' for now.",
+                candidates_list, suggestion, prefix
+            );
+        }
     }
 
-    String::new()
+    prefix
 }
 
 fn count_source_roots(
@@ -939,6 +995,160 @@ mod tests {
 
         let detected = detect_local_prefix(tmp.path(), &[Language::TypeScript], &[]);
         assert_eq!(detected, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // Multi-root advisory warning — FEAT-049 Task 9
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn detect_local_prefix_warns_on_balanced_multi_root_pattern() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        for i in 0..12 {
+            std::fs::write(
+                app.join(format!("a{i}.ts")),
+                format!("export const a{i} = 1;").as_bytes(),
+            )
+            .unwrap();
+            std::fs::write(
+                lib.join(format!("l{i}.ts")),
+                format!("export const l{i} = 1;").as_bytes(),
+            )
+            .unwrap();
+        }
+
+        let mut sink: Vec<u8> = Vec::new();
+        let _detected = detect_local_prefix_with_warning_sink(
+            tmp.path(),
+            &[Language::TypeScript],
+            &[],
+            &mut sink,
+        );
+
+        let captured = String::from_utf8(sink).unwrap();
+        assert!(
+            captured.contains("Multi-root pattern detected"),
+            "expected multi-root advisory in sink, got: {:?}",
+            captured
+        );
+        assert!(
+            captured.contains("app"),
+            "expected `app` candidate in sink, got: {:?}",
+            captured
+        );
+        assert!(
+            captured.contains("lib"),
+            "expected `lib` candidate in sink, got: {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn detect_local_prefix_no_warning_when_top1_dominates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let scripts = tmp.path().join("scripts");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&scripts).unwrap();
+        for i in 0..30 {
+            std::fs::write(
+                src.join(format!("s{i}.ts")),
+                format!("export const s{i} = 1;").as_bytes(),
+            )
+            .unwrap();
+        }
+        for i in 0..3 {
+            std::fs::write(
+                scripts.join(format!("seed{i}.ts")),
+                format!("export const seed{i} = 1;").as_bytes(),
+            )
+            .unwrap();
+        }
+
+        let mut sink: Vec<u8> = Vec::new();
+        let detected = detect_local_prefix_with_warning_sink(
+            tmp.path(),
+            &[Language::TypeScript],
+            &[],
+            &mut sink,
+        );
+
+        assert_eq!(detected, "src");
+        let captured = String::from_utf8(sink).unwrap();
+        assert!(
+            !captured.contains("Multi-root pattern detected"),
+            "did not expect multi-root advisory, got: {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn detect_local_prefix_no_warning_when_only_one_dir_has_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        for i in 0..15 {
+            std::fs::write(
+                src.join(format!("f{i}.ts")),
+                format!("export const f{i} = 1;").as_bytes(),
+            )
+            .unwrap();
+        }
+
+        let mut sink: Vec<u8> = Vec::new();
+        let _detected = detect_local_prefix_with_warning_sink(
+            tmp.path(),
+            &[Language::TypeScript],
+            &[],
+            &mut sink,
+        );
+
+        let captured = String::from_utf8(sink).unwrap();
+        assert!(
+            !captured.contains("Multi-root pattern detected"),
+            "did not expect multi-root advisory, got: {:?}",
+            captured
+        );
+    }
+
+    #[test]
+    fn detect_local_prefix_no_warning_below_min_files_threshold() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let lib = tmp.path().join("lib");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::create_dir_all(&lib).unwrap();
+        for i in 0..5 {
+            std::fs::write(
+                app.join(format!("a{i}.ts")),
+                format!("export const a{i} = 1;").as_bytes(),
+            )
+            .unwrap();
+            std::fs::write(
+                lib.join(format!("l{i}.ts")),
+                format!("export const l{i} = 1;").as_bytes(),
+            )
+            .unwrap();
+        }
+
+        let mut sink: Vec<u8> = Vec::new();
+        let _detected = detect_local_prefix_with_warning_sink(
+            tmp.path(),
+            &[Language::TypeScript],
+            &[],
+            &mut sink,
+        );
+
+        let captured = String::from_utf8(sink).unwrap();
+        assert!(
+            !captured.contains("Multi-root pattern detected"),
+            "did not expect multi-root advisory, got: {:?}",
+            captured
+        );
     }
 
     // -----------------------------------------------------------------------
