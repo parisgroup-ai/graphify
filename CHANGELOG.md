@@ -4,6 +4,25 @@ All notable changes to Graphify will be documented in this file.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-05-02
+
+### Added
+- **FEAT-049**: `[[project]].local_prefix` now accepts an array of root
+  directories in addition to the existing string form. Designed for Expo
+  Router and similar layouts where source spans parallel top-level dirs
+  (`app/`, `lib/`, `components/`) without a common parent. Array form is
+  no-wrap (file IDs stay as natural paths); string form keeps current
+  wrapping behavior, zero breaking change. Auto-detect emits an advisory
+  warning when a multi-root pattern is suspected. See
+  `docs/superpowers/specs/2026-05-02-feat-049-multi-root-local-prefix-design.md`.
+
+### Known Limitations
+- MCP server config (`crates/graphify-mcp/src/main.rs`) does not call
+  `validate_local_prefix` — single-element-array warning fires from the
+  `graphify` CLI but not from MCP. Tracked as follow-up; right fix is
+  hoisting the validator into `graphify-extract::local_prefix` for shared
+  consumption.
+
 ## [0.13.7] - 2026-04-30
 
 ### Fixed

@@ -1438,8 +1438,11 @@ output = "./report"
 name = "my-project"
 repo = "./src"
 lang = ["python"]           # Options: python, typescript, go, rust, php
-local_prefix = "app"        # Leave unset for PHP — PSR-4 from composer.json
-                            # provides the namespace prefix structure.
+local_prefix = "app"        # String form: prefix wraps file paths (e.g. "lib/foo.ts" → "app.lib.foo").
+                            # Array form for multi-root projects (Expo Router and similar):
+                            #   local_prefix = ["app", "lib", "components"]
+                            # Array form does NOT wrap — file paths stay as-is.
+                            # Leave unset for PHP — PSR-4 from composer.json provides the prefix structure.
 
 # Optional: declare packages that are intentionally external. Edges to these
 # are tagged `ExpectedExternal` instead of `Ambiguous`, so the ambiguity
